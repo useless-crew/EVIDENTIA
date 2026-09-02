@@ -1,0 +1,5 @@
+-- Evidentia — Compliance Certificate Queries (sqlc source)
+--
+-- TODO: Define CreateCertificate query.
+-- TODO: Define GetCertificateByDocumentID query.
+-- TODO: Define ListCertificates query.

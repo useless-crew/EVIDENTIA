@@ -1,0 +1,7 @@
+-- Evidentia — Document Queries (sqlc source)
+--
+-- TODO: Define CreateDocument query.
+-- TODO: Define GetDocumentByID query.
+-- TODO: Define ListDocumentsForCase query.
+-- TODO: Define CreateRedaction query.
+-- TODO: Define GetDocumentLineage query (parent/derivative documents).

@@ -1,0 +1,7 @@
+-- Evidentia — User Queries (sqlc source)
+--
+-- TODO: Define GetUserByID query.
+-- TODO: Define GetUserByEmail query.
+-- TODO: Define CreateUser query.
+-- TODO: Define UpdateUser query.
+-- TODO: Define ListUsers query.

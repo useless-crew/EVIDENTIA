@@ -1,0 +1,15 @@
+-- Evidentia — Initial Schema (Up)
+--
+-- TODO: Define `users` table.
+-- TODO: Define `roles` table.
+-- TODO: Define `permissions` table.
+-- TODO: Define `cases` table.
+-- TODO: Define `case_users` table (case <-> user membership).
+-- TODO: Define `documents` table (case, parent document, SHA-256 hash,
+--       MinIO object reference).
+-- TODO: Define `redactions` table (source document, derivative document).
+-- TODO: Define `audit_log` table (user, resource, entry hash, previous hash).
+-- TODO: Define `compliance_certificates` table.
+-- TODO: Define `refresh_tokens` table.
+-- TODO: Add required constraints, foreign keys, and indexes.
+-- TODO: Add Row-Level Security policies once tables are defined.

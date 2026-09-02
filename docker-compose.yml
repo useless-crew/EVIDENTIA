@@ -1,0 +1,72 @@
+# Evidentia — Docker Compose Scaffold
+#
+# This is a STRUCTURAL SKELETON ONLY. It documents the intended service
+# topology (frontend, backend, postgres, minio, redis) but does not implement
+# a working deployment. No health checks requiring application logic, no
+# production secrets, and no startup logic have been added.
+#
+# TODO: Flesh out build contexts, health checks, and volumes once the
+# corresponding application code exists.
+
+version: "3.9"
+
+services:
+  # TODO: Build from backend/Dockerfile once the backend has a runnable entrypoint.
+  backend:
+    build:
+      context: ./backend
+    env_file:
+      - ./backend/.env.example
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    depends_on:
+      - postgres
+      - minio
+      - redis
+    # TODO: healthcheck once /health endpoint exists.
+
+  # TODO: Placeholder only — frontend is not implemented in this phase.
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      - backend
+    # TODO: implement once frontend project exists.
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-evidentia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_example}
+      POSTGRES_DB: ${POSTGRES_DB:-evidentia}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # TODO: mount migrations once golang-migrate workflow is finalized.
+
+  minio:
+    image: minio/minio:latest
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-evidentia_minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-changeme_example}
+    command: server /data --console-address ":9001"
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+
+  redis:
+    image: redis:7
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+  minio_data:
+  redis_data:

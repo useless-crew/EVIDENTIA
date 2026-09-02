@@ -1,0 +1,6 @@
+-- Evidentia — Role/Permission Queries (sqlc source)
+--
+-- TODO: Define ListRoles query.
+-- TODO: Define GetRoleByID query.
+-- TODO: Define ListPermissionsForRole query.
+-- TODO: Define AssignRoleToUser query.

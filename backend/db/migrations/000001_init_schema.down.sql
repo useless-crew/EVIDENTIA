@@ -1,0 +1,12 @@
+-- Evidentia — Initial Schema (Down)
+--
+-- TODO: Drop `refresh_tokens` table.
+-- TODO: Drop `compliance_certificates` table.
+-- TODO: Drop `audit_log` table.
+-- TODO: Drop `redactions` table.
+-- TODO: Drop `documents` table.
+-- TODO: Drop `case_users` table.
+-- TODO: Drop `cases` table.
+-- TODO: Drop `permissions` table.
+-- TODO: Drop `roles` table.
+-- TODO: Drop `users` table.

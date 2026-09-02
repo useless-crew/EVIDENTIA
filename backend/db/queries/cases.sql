@@ -1,0 +1,7 @@
+-- Evidentia — Case Queries (sqlc source)
+--
+-- TODO: Define CreateCase query.
+-- TODO: Define GetCaseByID query.
+-- TODO: Define ListCases query.
+-- TODO: Define UpdateCase query.
+-- TODO: Define AddUserToCase / RemoveUserFromCase queries.

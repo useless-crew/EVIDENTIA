@@ -1,0 +1,6 @@
+-- Evidentia — Audit Log Queries (sqlc source)
+--
+-- TODO: Define AppendAuditEntry query (transactional, chain-aware).
+-- TODO: Define ListAuditEntries query.
+-- TODO: Define GetLatestAuditEntry query (for chain-hash lookup).
+-- TODO: Define GetAuditEntriesForResource query.
