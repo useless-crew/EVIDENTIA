@@ -33,8 +33,26 @@
   padding: 0;
 }
 
-html {
-  scroll-behavior: smooth;
+/* Lenis Smooth Scroll resets */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+
+.lenis.lenis-scrolling iframe {
+  pointer-events: none;
 }
 
 body {
@@ -66,7 +84,7 @@ p {
 a {
   color: var(--color-accent-blue);
   text-decoration: none;
-  transition: color 0.15s ease;
+  transition: color 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 a:hover {
@@ -80,28 +98,38 @@ button {
   border: none;
   outline: none;
   transition:
-    background-color 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease;
+    transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+    color 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Button styles following Indian gov restrained design */
+/* Button styles with modern lift & hover micro-interactions */
 .btn-primary {
   background: var(--color-navy-primary);
   border: 1px solid var(--color-navy-primary);
   color: #ffffff;
   font: 600 14.5px/1 var(--font-sans);
   padding: 13px 26px;
-  border-radius: 5px;
+  border-radius: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  box-shadow: 0 2px 4px rgba(19, 42, 73, 0.1);
 }
 
 .btn-primary:hover {
   background: var(--color-navy-dark);
   border-color: var(--color-navy-dark);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(19, 42, 73, 0.22);
+}
+
+.btn-primary:active {
+  transform: translateY(0) scale(0.98);
+  box-shadow: 0 2px 4px rgba(19, 42, 73, 0.1);
 }
 
 .btn-secondary {
@@ -110,15 +138,25 @@ button {
   color: var(--color-navy-primary);
   font: 600 14.5px/1 var(--font-sans);
   padding: 13px 26px;
-  border-radius: 5px;
+  border-radius: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
 }
 
 .btn-secondary:hover {
   background: var(--color-section-alt);
+  border-color: var(--color-navy-dark);
+  color: var(--color-navy-dark);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(19, 42, 73, 0.12);
+}
+
+.btn-secondary:active {
+  transform: translateY(0) scale(0.98);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
 }
 
 .btn-outline-white {
@@ -127,7 +165,7 @@ button {
   color: #ffffff;
   font: 500 13.5px/1 var(--font-sans);
   padding: 8px 16px;
-  border-radius: 5px;
+  border-radius: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -135,7 +173,15 @@ button {
 }
 
 .btn-outline-white:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.8);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(255, 255, 255, 0.15);
+}
+
+.btn-outline-white:active {
+  transform: translateY(0) scale(0.98);
+  box-shadow: none;
 }
 
 .btn-white {
@@ -144,15 +190,23 @@ button {
   color: var(--color-navy-primary);
   font: 600 13.5px/1 var(--font-sans);
   padding: 9px 18px;
-  border-radius: 5px;
+  border-radius: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
 }
 
 .btn-white:hover {
-  background: var(--color-bg-light);
+  background: #f8fafc;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(255, 255, 255, 0.25);
+}
+
+.btn-white:active {
+  transform: translateY(0) scale(0.98);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
 }
 
 /* Layout Utilities */
@@ -161,3 +215,4 @@ button {
   margin: 0 auto;
   padding: 0 24px;
 }
+

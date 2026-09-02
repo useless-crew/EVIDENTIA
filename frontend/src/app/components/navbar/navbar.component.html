@@ -1,7 +1,7 @@
-<header class="header">
+<header class="header" [class.scrolled]="isScrolled">
   <nav aria-label="Primary navigation" class="nav-container">
     <!-- Brand Logo & Title -->
-    <div class="brand">
+    <div class="brand" (click)="scrollToSection('#hero', $event)" role="button" tabindex="0" title="Scroll to Top">
       <div class="seal-badge" aria-hidden="true">
         <span class="seal-text">SEAL</span>
       </div>
@@ -13,10 +13,12 @@
 
     <!-- Navigation links & CTAs -->
     <div class="nav-actions" [class.open]="mobileMenuOpen">
-      <a href="#how-it-works" (click)="mobileMenuOpen = false" class="nav-link">How It Works</a>
-      <a href="#faq" (click)="mobileMenuOpen = false" class="nav-link">FAQ</a>
-      <button type="button" class="btn-outline-white">Login</button>
-      <button type="button" class="btn-white">Request Access</button>
+      <a href="#problems" (click)="scrollToSection('#problems', $event)" class="nav-link">Problems</a>
+      <a href="#solution" (click)="scrollToSection('#solution', $event)" class="nav-link">Features</a>
+      <a href="#how-it-works" (click)="scrollToSection('#how-it-works', $event)" class="nav-link">How It Works</a>
+      <a href="#faq" (click)="scrollToSection('#faq', $event)" class="nav-link">FAQ</a>
+      <button type="button" class="btn-outline-white" (click)="scrollToSection('#cta', $event)">Login</button>
+      <button type="button" class="btn-white" (click)="scrollToSection('#cta', $event)">Request Access</button>
     </div>
 
     <!-- Mobile Hamburger Toggle -->

@@ -1,6 +1,6 @@
 <main class="landing-main">
   <!-- 1. Hero Section -->
-  <section class="hero-section container">
+  <section id="hero" class="hero-section container">
     <div class="hero-content">
       <span class="hero-eyebrow">Secure Evidence &amp; Case Management</span>
       <h1 class="hero-title">A Single, Verifiable Record for Every Case File</h1>
@@ -9,8 +9,8 @@
       </p>
       
       <div class="hero-cta-group">
-        <button type="button" class="btn-primary">Request Access</button>
-        <button type="button" class="btn-secondary">See How It Works</button>
+        <button type="button" class="btn-primary" (click)="scrollToSection('#cta')">Request Access</button>
+        <button type="button" class="btn-secondary" (click)="scrollToSection('#how-it-works')">See How It Works</button>
       </div>
 
       <p class="hero-compliance-note">
@@ -21,7 +21,7 @@
     <div class="hero-preview-col">
       <div class="fingerprint-card">
         <div class="card-header">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A7AFB7" stroke-width="1.5">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A7AFB7" stroke-width="1.5" class="card-header-icon">
             <rect x="5" y="3" width="14" height="18" rx="1.5"></rect>
             <line x1="8.5" y1="8" x2="15.5" y2="8"></line>
             <line x1="8.5" y1="12" x2="15.5" y2="12"></line>
@@ -46,7 +46,7 @@
   </section>
 
   <!-- 2. Problem Statement Section -->
-  <section class="problem-section container">
+  <section id="problems" class="problem-section container">
     <div class="section-intro">
       <h2 class="section-title">India's Investigative Records Are Fragmented — and Hard to Trust</h2>
       <p class="section-description">
@@ -56,7 +56,7 @@
 
     <div class="cards-grid">
       <div *ngFor="let card of problemCards" class="problem-card">
-        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#A7AFB7" stroke-width="1.5">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#A7AFB7" stroke-width="1.5" class="card-icon">
           <path [attr.d]="card.iconSvgPath"></path>
         </svg>
         <h3 class="card-title">{{ card.title }}</h3>
@@ -66,7 +66,7 @@
   </section>
 
   <!-- 3. Solution / Value Section -->
-  <section class="solution-section">
+  <section id="solution" class="solution-section">
     <div class="container">
       <div class="section-intro">
         <h2 class="section-title">One System, Built for Evidentiary Integrity</h2>
@@ -77,7 +77,7 @@
 
       <div class="pillars-grid">
         <div *ngFor="let pillar of featurePillars" class="pillar-card">
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#132A49" stroke-width="1.5">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#132A49" stroke-width="1.5" class="card-icon">
             <path [attr.d]="pillar.iconSvgPath"></path>
           </svg>
           <h3 class="card-title">{{ pillar.title }}</h3>
@@ -113,7 +113,7 @@
   </section>
 
   <!-- 6. Call to Action Section -->
-  <section class="cta-section">
+  <section id="cta" class="cta-section">
     <div class="cta-content container">
       <h2 class="cta-title">Bring Your Case Records Onto One Verified System</h2>
       <p class="cta-subtitle">
@@ -121,11 +121,12 @@
       </p>
 
       <div class="cta-button-group">
-        <button type="button" class="btn-white">Request Access</button>
-        <button type="button" class="btn-outline-white">Contact the Implementation Team</button>
+        <button type="button" class="btn-white" (click)="scrollToSection('#cta')">Request Access</button>
+        <button type="button" class="btn-outline-white" (click)="scrollToSection('#cta')">Contact the Implementation Team</button>
       </div>
 
       <p class="cta-footnote">Authorized personnel only. All access to this system is logged.</p>
     </div>
   </section>
 </main>
+

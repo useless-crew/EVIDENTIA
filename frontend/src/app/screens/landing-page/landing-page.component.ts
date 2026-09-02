@@ -1,8 +1,9 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { LandingDataService } from '../../core/services/landing-data.service';
 import { ProblemCard, FeaturePillar, ProcessStep, FaqItem } from '../../core/models/landing.model';
 import { FaqAccordionComponent } from '../../components/faq-accordion/faq-accordion.component';
+import { LenisService } from '../../core/services/lenis.service';
 
 @Component({
   selector: 'app-landing-page',
@@ -17,7 +18,8 @@ export class LandingPageComponent implements OnInit {
   processSteps: ProcessStep[] = [];
   faqList: FaqItem[] = [];
 
-  constructor(private landingDataService: LandingDataService) {}
+  private lenisService = inject(LenisService);
+  private landingDataService = inject(LandingDataService);
 
   ngOnInit(): void {
     this.problemCards = this.landingDataService.getProblemCards();
@@ -25,4 +27,12 @@ export class LandingPageComponent implements OnInit {
     this.processSteps = this.landingDataService.getProcessSteps();
     this.faqList = this.landingDataService.getFaqList();
   }
+
+  scrollToSection(targetId: string, event?: Event): void {
+    if (event) {
+      event.preventDefault();
+    }
+    this.lenisService.scrollTo(targetId);
+  }
 }
+

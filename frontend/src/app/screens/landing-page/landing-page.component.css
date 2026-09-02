@@ -60,13 +60,22 @@
   justify-content: center;
 }
 
+
 .fingerprint-card {
   background: var(--color-card-bg);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 28px;
   width: 100%;
   max-width: 420px;
+  box-shadow: 0 4px 12px rgba(19, 42, 73, 0.04);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s ease;
+}
+
+.fingerprint-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 16px 32px -8px rgba(19, 42, 73, 0.14);
+  border-color: var(--color-accent-blue);
 }
 
 .card-header {
@@ -75,6 +84,15 @@
   gap: 10px;
   padding-bottom: 14px;
   border-bottom: 1px solid var(--color-border);
+}
+
+.card-header-icon {
+  transition: transform 0.3s ease;
+}
+
+.fingerprint-card:hover .card-header-icon {
+  transform: scale(1.1);
+  stroke: var(--color-navy-primary);
 }
 
 .file-name {
@@ -104,6 +122,12 @@
   border: 1px solid var(--color-border);
   border-radius: 4px;
   padding: 8px 10px;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.fingerprint-card:hover .hash-value {
+  background: #ffffff;
+  border-color: rgba(66, 109, 155, 0.3);
 }
 
 .status-indicator {
@@ -154,11 +178,28 @@
 .problem-card {
   background: var(--color-card-bg);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
-  padding: 22px;
+  border-radius: 8px;
+  padding: 24px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s ease;
+}
+
+.problem-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 28px -6px rgba(19, 42, 73, 0.09);
+  border-color: rgba(66, 109, 155, 0.4);
+}
+
+.card-icon {
+  transition: transform 0.3s ease, stroke 0.3s ease;
+}
+
+.problem-card:hover .card-icon,
+.pillar-card:hover .card-icon {
+  transform: scale(1.14);
+  stroke: var(--color-accent-blue);
 }
 
 .card-title {
@@ -188,11 +229,19 @@
 .pillar-card {
   background: var(--color-section-alt);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
-  padding: 22px;
+  border-radius: 8px;
+  padding: 24px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s ease, background-color 0.3s ease;
+}
+
+.pillar-card:hover {
+  background: #ffffff;
+  transform: translateY(-4px);
+  box-shadow: 0 12px 28px -6px rgba(19, 42, 73, 0.09);
+  border-color: rgba(66, 109, 155, 0.4);
 }
 
 /* 4. How It Works Section */
@@ -230,6 +279,13 @@
   justify-content: center;
   font: 600 13px var(--font-sans);
   flex: none;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.timeline-item:hover .step-badge {
+  transform: scale(1.12);
+  background: var(--color-accent-blue);
+  box-shadow: 0 4px 12px rgba(66, 109, 155, 0.3);
 }
 
 .timeline-line {
@@ -241,7 +297,13 @@
 
 .timeline-content {
   padding-bottom: 32px;
+  transition: transform 0.25s ease;
 }
+
+.timeline-item:hover .timeline-content {
+  transform: translateX(4px);
+}
+
 
 .step-title {
   font: 600 15.5px var(--font-sans);
