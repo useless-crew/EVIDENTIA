@@ -1,9 +1,9 @@
 # Evidentia — High-Level Architecture
 
-> This document describes the **intended** architecture. System 1 —
-> Foundation & Infrastructure — and System 2 — Database & Data Layer — are
-> implemented (see below); everything under Request Flow and Core Domains
-> past them is still a design reference.
+> This document describes the **intended** architecture. Systems 1-3 —
+> Foundation & Infrastructure, Database & Data Layer, and Authentication &
+> Session Security — are implemented (see below); everything under Request
+> Flow and Core Domains past them is still a design reference.
 
 ## System 1 — Foundation & Infrastructure (Implemented)
 
@@ -84,9 +84,51 @@ immutability guarantee verified in
 `backend/tests/db_audit_privileges_test.go`.
 
 `internal/database.Database` (System 1) still owns the connection pool
-itself; System 2 adds the transaction/RLS-identity layer on top of it, and
-`cmd/server` does not yet use either — no HTTP handler queries these
-tables yet (that begins with the systems in Request Flow below).
+itself; System 2 adds the transaction/RLS-identity layer on top of it.
+System 3's `AuthService` is the first code to actually query `users` and
+(via its own migration) `auth_sessions` through this layer — see below.
+
+## System 3 — Authentication & Session Security (Implemented)
+
+```text
+POST /api/v1/auth/{login,refresh,logout}
+    |
+    v
+internal/handlers/auth   — bind/validate request, shape response
+    |
+    v
+internal/service.AuthService
+    |
+    +--> internal/auth
+    |      HashPassword/VerifyPassword (bcrypt)
+    |      JWTManager.CreateAccessToken/Validate (HS256, golang-jwt/v5)
+    |      GenerateRefreshToken/HashRefreshToken (crypto/rand + SHA-256)
+    |      AuthenticatedUser + SetAuthenticatedUser/CurrentUser (gin context)
+    |
+    +--> internal/repository (System 2's WithTx + UserRepo/AuthSessionRepo)
+    |      users, auth_sessions — via db/migrations/000002_auth_sessions
+    |
+    +--> internal/audit.Recorder (SlogRecorder — logs, does not persist
+           to audit_log; System 8 provides the durable implementation)
+
+internal/middleware.Auth (guards POST /auth/logout; later systems' routes
+will use it too)
+    |
+    +--> JWTManager.Validate     — signature/algorithm/issuer/audience/exp
+    +--> AuthService.ResolveIdentity — fresh status+role lookup, never
+           trusting the JWT's role claim
+    +--> auth.SetAuthenticatedUser  — attaches AuthenticatedUser to the
+           gin.Context for downstream handlers (and, later, System 4)
+```
+
+`app.App` gained `JWTManager` and `AuthService` fields (constructed in
+`app.New`, alongside the System 1 infrastructure clients) — `NewRouter`
+wires them into the `/api/v1/auth` group and into `middleware.Auth`.
+`middleware.Auth` depends on an `IdentityResolver` *interface* (satisfied
+structurally by `*service.AuthService`), not the concrete service type —
+the same testability pattern System 1 used for `app.DBConn`/`CacheConn`,
+letting the middleware be unit-tested with a fake and no database. Full
+design/security rationale: [docs/SECURITY.md](./docs/SECURITY.md).
 
 ## Request Flow (Intended, Later Systems)
 
@@ -185,9 +227,11 @@ Realtime / SSE
 
 ## Core Domains
 
-- **Auth** — JWT issuance/validation, refresh tokens, password hashing.
-- **RBAC/ABAC** — Role- and attribute-based authorization, enforced above the
-  database and reinforced by PostgreSQL RLS.
+- **Auth** (implemented — System 3) — JWT issuance/validation, refresh
+  tokens, password hashing.
+- **RBAC/ABAC** (not implemented — System 4) — Role- and attribute-based
+  authorization, enforced above the database and reinforced by PostgreSQL
+  RLS.
 - **Cases** — Case lifecycle and case-user membership.
 - **Documents** — Evidence documents, integrity hashing, redaction lineage,
   compliance certificates.
@@ -225,12 +269,15 @@ The eventual system will enforce:
 11. Secure refresh-token handling
 12. Audit logging of all security-sensitive actions
 
-Partially implemented as of System 2 — PostgreSQL RLS (4) is enforced with
-policies and fail-closed behavior verified by integration tests; audit
-entries have their hash/prev_hash storage and uniqueness invariants (7, 8)
-in place, but *computing* those hashes and verifying the chain (9) is
-System 8's job; SHA-256 (5), AES-256 (6), TLS (10), JWT (1), RBAC (2),
-ABAC (3), and refresh tokens (11) remain entirely unimplemented. See
+As of System 3: **1** (JWT) and **11** (refresh-token rotation/revocation)
+are implemented; **4** (RLS) was implemented in System 2, enforced with
+policies and fail-closed behavior verified by integration tests. Audit
+entries have their hash/prev_hash storage and uniqueness invariants
+(**7**, **8**) in place, and failed/successful auth actions are already
+recorded operationally (**12**, partial — see SECURITY.md), but
+*computing* the actual hash chain and verifying it (**9**) is System 8's
+job. SHA-256 document hashing (**5**), AES-256 (**6**), TLS (**10**),
+RBAC (**2**), and ABAC (**3**) remain entirely unimplemented. See
 [docs/SECURITY.md](./docs/SECURITY.md) and
 [docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md) for what each
 currently covers.

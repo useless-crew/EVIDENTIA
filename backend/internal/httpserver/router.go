@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"evidentia/backend/internal/app"
+	authhandlers "evidentia/backend/internal/handlers/auth"
 	"evidentia/backend/internal/handlers/health"
 	"evidentia/backend/internal/middleware"
 	"evidentia/backend/internal/utils"
@@ -16,10 +17,9 @@ import (
 )
 
 // NewRouter builds the application's Gin engine: middleware stack, 404/405
-// handlers, and health/readiness routes. Domain routes (auth, cases,
-// documents, ...) are added by later systems under router.Group("/api/v1"),
-// which is intentionally not created here since nothing is registered under
-// it yet — see master prompt §39.
+// handlers, health/readiness routes, and the /api/v1/auth routes (System 3).
+// Case/document/... routes are added by later systems under the same
+// /api/v1 group — see master prompt §39.
 func NewRouter(a *app.App) *gin.Engine {
 	if a.Config.App.IsProduction() {
 		gin.SetMode(gin.ReleaseMode)
@@ -45,6 +45,17 @@ func NewRouter(a *app.App) *gin.Engine {
 
 	r.GET("/health", health.Liveness(a.Config.App.Name, a.Config.App.Version))
 	r.GET("/ready", health.Readiness(a.DB, a.Cache, a.Storage))
+
+	// POST /auth/login and /auth/refresh are deliberately public (master
+	// prompt §56) — the credential/token presented in the request body IS
+	// the authentication, so no Authorization header is required to reach
+	// them. /auth/logout, by contrast, requires a valid access token (see
+	// master prompt §56 and internal/handlers/auth/logout.go's doc
+	// comment for why that specific choice was made).
+	authGroup := r.Group("/api/v1/auth")
+	authGroup.POST("/login", authhandlers.Login(a.AuthService))
+	authGroup.POST("/refresh", authhandlers.Refresh(a.AuthService))
+	authGroup.POST("/logout", middleware.Auth(a.JWTManager, a.AuthService, a.Logger), authhandlers.Logout(a.AuthService))
 
 	return r
 }

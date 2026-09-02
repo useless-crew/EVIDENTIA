@@ -11,10 +11,13 @@ import (
 	"fmt"
 	"log/slog"
 
+	"evidentia/backend/internal/audit"
+	"evidentia/backend/internal/auth"
 	"evidentia/backend/internal/cache"
 	"evidentia/backend/internal/config"
 	"evidentia/backend/internal/database"
 	"evidentia/backend/internal/logger"
+	"evidentia/backend/internal/service"
 	"evidentia/backend/internal/storage"
 )
 
@@ -22,11 +25,13 @@ import (
 // handlers/services/repositories need. It has exactly one owner (main),
 // which is responsible for calling Close during shutdown.
 type App struct {
-	Config  *config.Config
-	Logger  *slog.Logger
-	DB      DBConn
-	Cache   CacheConn
-	Storage storage.Storage
+	Config      *config.Config
+	Logger      *slog.Logger
+	DB          DBConn
+	Cache       CacheConn
+	Storage     storage.Storage
+	JWTManager  *auth.JWTManager
+	AuthService *service.AuthService
 }
 
 // New loads configuration and connects every infrastructure dependency in
@@ -62,12 +67,17 @@ func New(ctx context.Context) (*App, error) {
 		return nil, fmt.Errorf("app: connect storage: %w", err)
 	}
 
+	jwtManager := auth.NewJWTManager(cfg.JWT.SigningKey, cfg.JWT.Issuer, cfg.JWT.Audience, cfg.JWT.AccessTTL)
+	authService := service.NewAuthService(db.Pool(), jwtManager, cfg.JWT.BcryptCost, cfg.JWT.RefreshTTL, audit.NewSlogRecorder(log))
+
 	return &App{
-		Config:  cfg,
-		Logger:  log,
-		DB:      db,
-		Cache:   redisCache,
-		Storage: objectStorage,
+		Config:      cfg,
+		Logger:      log,
+		DB:          db,
+		Cache:       redisCache,
+		Storage:     objectStorage,
+		JWTManager:  jwtManager,
+		AuthService: authService,
 	}, nil
 }
 

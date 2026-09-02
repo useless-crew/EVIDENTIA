@@ -30,6 +30,22 @@ type AuditLog struct {
 	Hash     []byte `json:"hash"`
 }
 
+// Refresh-token sessions. token_hash is SHA-256(raw token) — the raw token itself is never persisted. family_id groups a chain of rotated tokens descending from one login: on rotation the new row keeps the same family_id as its parent, so reuse of a already-rotated (revoked) token can invalidate the whole family, not just the one token presented (see internal/service/auth_service.go). Sessions are ended via UPDATE (revoked_at), never DELETE — consistent with this schema's soft-lifecycle convention elsewhere. ON DELETE CASCADE from users is deliberate here (unlike the RESTRICT used for evidence tables in System 2): a session has no independent evidentiary value, so removing a user's sessions when the user itself is removed is correct, not a data-loss risk.
+type AuthSession struct {
+	ID     uuid.UUID `json:"id"`
+	UserID uuid.UUID `json:"user_id"`
+	// Groups a chain of rotated refresh tokens. Set to a fresh UUID at login; carried forward unchanged on every rotation descending from that login.
+	FamilyID   uuid.UUID          `json:"family_id"`
+	TokenHash  []byte             `json:"token_hash"`
+	ExpiresAt  time.Time          `json:"expires_at"`
+	CreatedAt  time.Time          `json:"created_at"`
+	LastUsedAt pgtype.Timestamptz `json:"last_used_at"`
+	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
+	ReplacedBy *uuid.UUID         `json:"replaced_by"`
+	IpAddress  *string            `json:"ip_address"`
+	UserAgent  *string            `json:"user_agent"`
+}
+
 // A case is never hard-deleted (created_by uses ON DELETE RESTRICT, and no DELETE privilege is granted to the runtime role below) — lifecycle is expressed entirely through status. No agencies table: agency-scoped isolation, if needed, can key off case_id directly; see docs/DATABASE_SCHEMA.md for why this was not added speculatively.
 type Case struct {
 	ID          uuid.UUID       `json:"id"`

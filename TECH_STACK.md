@@ -87,10 +87,15 @@ Testify.
 `golang-migrate` (as a Go library, `cmd/migrate`), `google/uuid` (sqlc's
 Go-side UUID representation).
 
-Not yet added, pending the systems that need them: `golang-jwt/jwt`,
-bcrypt, RBAC/ABAC middleware, SHA-256/AES-256/RSA/ECDSA,
-Asynq, `go-playground/validator`, `swaggo/swag`, SSE. Adding any of these
-before their owning system is implemented is scope creep — don't.
+**System 3 (Authentication & Session Security):** `golang-jwt/jwt/v5`,
+`golang.org/x/crypto/bcrypt`, `swaggo/swag` (both the CLI generator and
+its small runtime registration package, `github.com/swaggo/swag`, which
+generated `docs.go` files import).
+
+Not yet added, pending the systems that need them: RBAC/ABAC middleware,
+SHA-256/AES-256/RSA/ECDSA, Asynq, `go-playground/validator`, SSE. Adding
+any of these before their owning system is implemented is scope creep —
+don't.
 
 ## Explicitly Out of Scope
 

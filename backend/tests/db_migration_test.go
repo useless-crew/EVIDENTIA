@@ -65,9 +65,12 @@ func TestMigration_UpDownUpIsReproducible(t *testing.T) {
 		require.Equal(t, want, count)
 	}
 
-	// +1 for schema_migrations, golang-migrate's own bookkeeping table —
-	// created on the first Up() and never touched by our down migration.
-	withBookkeeping := len(expectedTables) + 1
+	// +1 for auth_sessions (System 3's 000002_auth_sessions migration —
+	// not in expectedTables, which enumerates System 2's own core domain
+	// tables specifically) and +1 for schema_migrations, golang-migrate's
+	// own bookkeeping table — created on the first Up() and never touched
+	// by either migration's down.
+	withBookkeeping := len(expectedTables) + 2
 
 	m := newMigrator(t)
 	require.NoError(t, m.Up())

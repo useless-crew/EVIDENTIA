@@ -1,16 +1,13 @@
 # Evidentia Backend — Developer Commands
 #
-# Every target here is functional today. Targets for tooling this system
-# doesn't use yet (e.g. swagger) are intentionally omitted rather than
-# stubbed out — they'll be added, working, alongside the system that needs
-# them (API annotations), instead of echoing "TODO" in the meantime.
+# Every target here is functional today.
 #
 # migrate-up/migrate-down require DATABASE_MIGRATOR_USER/PASSWORD (a
 # privileged, schema-owning role — never the app's own DATABASE_USER/
 # PASSWORD, which is the least-privilege evidentia_app role). seed requires
 # the same. See docs/DATABASE_SCHEMA.md.
 
-.PHONY: dev run build test test-race vet fmt lint migrate-up migrate-down sqlc seed docker-up docker-down docker-logs clean
+.PHONY: dev run build test test-race vet fmt lint migrate-up migrate-down sqlc seed swagger docker-up docker-down docker-logs clean
 
 dev: run
 
@@ -50,6 +47,17 @@ sqlc:
 
 seed:
 	./scripts/seed_db.sh
+
+# Requires the swag CLI (https://github.com/swaggo/swag#getting-started)
+# — a code generator, not part of the imported dependency stack (the
+# runtime github.com/swaggo/swag registration package it generates code
+# against IS a real go.mod dependency; the CLI itself is not).
+swagger:
+	@command -v swag >/dev/null 2>&1 || { \
+		echo "swag is not installed. See https://github.com/swaggo/swag#getting-started"; \
+		exit 1; \
+	}
+	swag init -g cmd/server/main.go -o docs/swagger --parseDependency --parseInternal
 
 # Requires golangci-lint (https://golangci-lint.run/welcome/install/) —
 # not part of this project's approved dependency stack, so it is not

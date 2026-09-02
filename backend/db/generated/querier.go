@@ -25,6 +25,12 @@ type Querier interface {
 	CountCases(ctx context.Context) (int64, error)
 	CountDocumentsByCase(ctx context.Context, caseID uuid.UUID) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
+	// Evidentia — Auth Session (Refresh Token) Queries
+	//
+	// token_hash is always SHA-256(raw refresh token) — the raw token itself
+	// is never a column here and never passed to these queries. See
+	// internal/auth/refresh.go and internal/service/auth_service.go.
+	CreateAuthSession(ctx context.Context, arg CreateAuthSessionParams) (AuthSession, error)
 	// Evidentia — Case Queries
 	//
 	// Every query here runs through the RLS-bound application role
@@ -68,6 +74,7 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error)
 	GetActiveCaseMembership(ctx context.Context, arg GetActiveCaseMembershipParams) (CaseMember, error)
 	GetAuditEntryByID(ctx context.Context, id uuid.UUID) (AuditLog, error)
+	GetAuthSessionByTokenHash(ctx context.Context, tokenHash []byte) (AuthSession, error)
 	GetCaseByCaseNumber(ctx context.Context, caseNumber string) (Case, error)
 	GetCaseByID(ctx context.Context, id uuid.UUID) (Case, error)
 	GetCertificateByID(ctx context.Context, id uuid.UUID) (ComplianceCertificate, error)
@@ -120,6 +127,15 @@ type Querier interface {
 	RemoveCaseMember(ctx context.Context, arg RemoveCaseMemberParams) error
 	RemovePermissionFromRole(ctx context.Context, arg RemovePermissionFromRoleParams) error
 	RemoveRoleFromUser(ctx context.Context, arg RemoveRoleFromUserParams) error
+	// Plain revocation with no replacement — used by logout.
+	RevokeAuthSession(ctx context.Context, id uuid.UUID) error
+	// Marks a session used and revoked in the same step, recording which new
+	// session replaced it — the "rotation" half of refresh-token rotation.
+	RevokeAuthSessionAndReplace(ctx context.Context, arg RevokeAuthSessionAndReplaceParams) error
+	// Invalidates every still-active session descending from the same login
+	// as sessionID's family — used when a revoked/rotated token is presented
+	// again (reuse detection: see master prompt §25).
+	RevokeAuthSessionFamily(ctx context.Context, familyID uuid.UUID) error
 	UpdateCase(ctx context.Context, arg UpdateCaseParams) (Case, error)
 	UpdateDocumentStatus(ctx context.Context, arg UpdateDocumentStatusParams) error
 	UpdateUserLastLogin(ctx context.Context, id uuid.UUID) error

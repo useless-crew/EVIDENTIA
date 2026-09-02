@@ -22,6 +22,13 @@ coverage.html
 # sqlc CLI to be installed. Regenerate with `make sqlc` after changing
 # backend/db/queries/*.sql or backend/db/migrations/*.sql; never hand-edit.
 
+# swag-generated Swagger/OpenAPI output — unlike db/generated, nothing
+# imports this, so an empty directory is harmless to `go build ./...` on a
+# fresh clone. Regenerate with `make swagger`; never hand-edit.
+backend/docs/swagger/docs.go
+backend/docs/swagger/swagger.json
+backend/docs/swagger/swagger.yaml
+
 # Secrets (never commit)
 *.pem
 *.key

@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,6 +18,7 @@ func setRequired(t *testing.T) {
 	t.Setenv("MINIO_ACCESS_KEY", "access-key")
 	t.Setenv("MINIO_SECRET_KEY", "secret-key")
 	t.Setenv("MINIO_BUCKET", "evidentia-documents")
+	t.Setenv("JWT_SIGNING_KEY", "test-signing-key-at-least-32-characters-long")
 }
 
 func TestLoad_ValidConfiguration(t *testing.T) {
@@ -58,6 +60,48 @@ func TestLoad_DefaultsAppliedWhenUnset(t *testing.T) {
 	assert.Equal(t, []string{"http://localhost:4200"}, cfg.CORS.AllowedOrigins)
 	assert.False(t, cfg.CORS.AllowCredentials)
 	assert.Equal(t, int64(1<<20), cfg.Server.MaxBodyBytes)
+	assert.Equal(t, "evidentia-api", cfg.JWT.Issuer)
+	assert.Equal(t, "evidentia-client", cfg.JWT.Audience)
+	assert.Equal(t, 15*time.Minute, cfg.JWT.AccessTTL)
+	assert.Equal(t, 168*time.Hour, cfg.JWT.RefreshTTL)
+	assert.Equal(t, 12, cfg.JWT.BcryptCost)
+}
+
+func TestLoad_RejectsShortJWTSigningKey(t *testing.T) {
+	setRequired(t)
+	t.Setenv("JWT_SIGNING_KEY", "too-short")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "JWT_SIGNING_KEY")
+}
+
+func TestLoad_RejectsExcessiveAccessTTL(t *testing.T) {
+	setRequired(t)
+	t.Setenv("JWT_ACCESS_TTL", "48h")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "JWT_ACCESS_TTL")
+}
+
+func TestLoad_RejectsRefreshTTLNotLongerThanAccessTTL(t *testing.T) {
+	setRequired(t)
+	t.Setenv("JWT_ACCESS_TTL", "1h")
+	t.Setenv("JWT_REFRESH_TTL", "30m")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "JWT_REFRESH_TTL")
+}
+
+func TestLoad_RejectsWeakBcryptCost(t *testing.T) {
+	setRequired(t)
+	t.Setenv("BCRYPT_COST", "4")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "BCRYPT_COST")
 }
 
 func TestLoad_RejectsWildcardCORSInProduction(t *testing.T) {
@@ -97,7 +141,7 @@ func TestLoad_NeverDefaultsCredentials(t *testing.T) {
 	// invoking shell having none set — this test must hold regardless of
 	// what the ambient environment (e.g. a CI job, or another test run
 	// with -tags=integration) happens to export.
-	keys := []string{"DATABASE_USER", "DATABASE_PASSWORD", "DATABASE_NAME", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY", "MINIO_BUCKET"}
+	keys := []string{"DATABASE_USER", "DATABASE_PASSWORD", "DATABASE_NAME", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY", "MINIO_BUCKET", "JWT_SIGNING_KEY"}
 	for _, key := range keys {
 		t.Setenv(key, "")
 	}

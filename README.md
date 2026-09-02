@@ -3,13 +3,11 @@
 Evidentia is a secure digital evidence and case-management platform designed for
 investigative and judicial workflows.
 
-> **Status:** Backend System 1 (Foundation & Infrastructure) and System 2
-> (Database & Data Layer) are implemented: configuration, structured
-> logging, PostgreSQL/Redis/MinIO connectivity, the HTTP server (Gin), the
-> full database schema with Row-Level Security, and a least-privilege,
-> append-only-enforced audit log. Authentication, authorization
-> middleware, case/document HTTP handlers, and the audit-chain writer are
-> not implemented yet — those are later systems; see
+> **Status:** Backend Systems 1-3 are implemented: foundation/
+> infrastructure, the full database schema with Row-Level Security, and
+> JWT + refresh-token authentication with rotation/reuse detection.
+> RBAC/ABAC authorization, case/document HTTP handlers, and the audit-chain
+> writer are not implemented yet — those are later systems; see
 > [ARCHITECTURE.md](./ARCHITECTURE.md). The `frontend/` directory contains
 > an Angular application (generated via Angular CLI) plus design reference
 > material.
@@ -80,6 +78,7 @@ make migrate-up      # needs DATABASE_MIGRATOR_USER/PASSWORD — see docs/DATABA
 make migrate-down
 make seed            # roles/permissions reference data
 make sqlc            # regenerate backend/db/generated (requires the sqlc CLI)
+make swagger         # regenerate backend/docs/swagger (requires the swag CLI)
 make docker-up       # docker compose up -d --build
 make docker-down
 ```
@@ -126,12 +125,30 @@ commands.
 - Idempotent reference-data seeding (roles/permissions —
   `backend/scripts/seed_db.sh`)
 
-Not yet implemented (later systems): authentication, RBAC/ABAC middleware,
+**System 3 — Authentication & Session Security** is implemented:
+
+- `POST /api/v1/auth/{login,refresh,logout}` — bcrypt password hashing,
+  HS256 JWT access tokens (15 min default), opaque high-entropy refresh
+  tokens (7 day default) stored only as a SHA-256 hash
+- Refresh-token rotation with reuse detection: an already-rotated token
+  presented again revokes its entire session family, verified by the
+  exact replay scenario as an integration test
+- Every authenticated request re-resolves current account status/roles
+  from the database (`internal/middleware.Auth`) — a deactivated user's
+  still-unexpired access token is rejected on the next request
+- Generic, enumeration-resistant failures: unknown email, wrong password,
+  and inactive account all return an identical error
+- Failed/successful authentication recorded via an `audit.Recorder`
+  interface (operational logging today; System 8 provides the durable,
+  hash-chained implementation later with no change to auth code)
+
+Not yet implemented (later systems): RBAC/ABAC authorization,
 case/document HTTP handlers, document upload/hashing/redaction, the
 audit-chain writer/verifier, compliance certificate generation, and
 background jobs. See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full
-intended design and [docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md)
-for the full schema.
+intended design, [docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md) for
+the full schema, and [docs/SECURITY.md](./docs/SECURITY.md) for the full
+security model implemented so far.
 
 ### Frontend
 

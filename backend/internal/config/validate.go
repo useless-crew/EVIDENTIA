@@ -73,6 +73,29 @@ func validate(c *errCollector, cfg *Config) {
 	if err := logger.ValidateFormat(cfg.Logging.Format); err != nil {
 		c.add("%s", err)
 	}
+
+	if cfg.JWT.Issuer == "" {
+		c.add("JWT_ISSUER must not be empty")
+	}
+	if cfg.JWT.Audience == "" {
+		c.add("JWT_AUDIENCE must not be empty")
+	}
+	if cfg.JWT.AccessTTL <= 0 {
+		c.add("JWT_ACCESS_TTL must be greater than 0")
+	} else if cfg.JWT.AccessTTL > 24*time.Hour {
+		c.add("JWT_ACCESS_TTL=%s is too long for a short-lived access token (max 24h)", cfg.JWT.AccessTTL)
+	}
+	if cfg.JWT.RefreshTTL <= 0 {
+		c.add("JWT_REFRESH_TTL must be greater than 0")
+	} else if cfg.JWT.AccessTTL > 0 && cfg.JWT.RefreshTTL <= cfg.JWT.AccessTTL {
+		c.add("JWT_REFRESH_TTL (%s) must be greater than JWT_ACCESS_TTL (%s)", cfg.JWT.RefreshTTL, cfg.JWT.AccessTTL)
+	}
+	if len(cfg.JWT.SigningKey) < 32 {
+		c.add("JWT_SIGNING_KEY must be at least 32 characters (got %d) — it is an HMAC secret, not a password", len(cfg.JWT.SigningKey))
+	}
+	if cfg.JWT.BcryptCost < 10 || cfg.JWT.BcryptCost > 31 {
+		c.add("BCRYPT_COST must be between 10 and 31 (got %d) — below 10 is considered too weak for production use", cfg.JWT.BcryptCost)
+	}
 }
 
 func validatePort(c *errCollector, key string, port int) {

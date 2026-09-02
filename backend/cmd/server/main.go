@@ -3,6 +3,15 @@
 // infrastructure, build the router, serve, and shut down gracefully on
 // SIGINT/SIGTERM. No business logic belongs here — see internal/app for the
 // dependency container and internal/httpserver for the router.
+//
+// @title                       Evidentia API
+// @version                     0.3.0
+// @description                 Secure digital evidence and case-management platform. This spec currently documents only System 3's authentication endpoints — see docs/API_ENDPOINTS.md for the full intended surface, most of which is not implemented yet.
+// @BasePath                    /
+// @securityDefinitions.apikey  BearerAuth
+// @in                          header
+// @name                        Authorization
+// @description                 Type "Bearer" followed by a space and the access token returned by POST /api/v1/auth/login or /api/v1/auth/refresh.
 package main
 
 import (

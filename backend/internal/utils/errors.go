@@ -19,6 +19,7 @@ const (
 	CodeServiceUnavailable    = "SERVICE_UNAVAILABLE"
 	CodeMethodNotAllowed      = "METHOD_NOT_ALLOWED"
 	CodeRequestEntityTooLarge = "REQUEST_ENTITY_TOO_LARGE"
+	CodeUnauthorized          = "UNAUTHORIZED"
 )
 
 // AppError is the application-wide error type. Status and Code/Message are
@@ -62,6 +63,16 @@ func ErrNotFound(message string) *AppError {
 
 func ErrServiceUnavailable(message string) *AppError {
 	return NewAppError(http.StatusServiceUnavailable, CodeServiceUnavailable, message, nil)
+}
+
+// ErrUnauthorized builds a 401 response. message must always be a single
+// generic string (e.g. "Invalid email or password", "Authentication
+// required") — never a specific reason like "user not found" or "token
+// expired", which would leak account existence or validation internals to
+// the client (master prompt §8/§30/§46). Log the specific reason
+// server-side instead.
+func ErrUnauthorized(message string) *AppError {
+	return NewAppError(http.StatusUnauthorized, CodeUnauthorized, message, nil)
 }
 
 // AsAppError unwraps err looking for an *AppError, so callers that receive a

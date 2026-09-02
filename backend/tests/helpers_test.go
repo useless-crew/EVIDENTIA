@@ -5,13 +5,25 @@
 //
 //	go test -tags=integration ./tests/...
 //
-// Requires the docker-compose postgres service up, with the migration
-// already applied (go run ./cmd/migrate up) and evidentia_app's password
-// left at the migration's default ('changeme_example' — see
+// Requires the docker-compose postgres service up, with migrations already
+// applied (go run ./cmd/migrate up) and evidentia_app's password left at
+// the migration's default ('changeme_example' — see
 // 000001_init_schema.up.sql). Existing placeholder files in this
 // directory (auth_test.go, hash_test.go, rbac_test.go, abac_test.go,
 // document_test.go) belong to later systems and are deliberately left
 // untouched — nothing here duplicates or implements their scope.
+//
+// When running integration tests across MULTIPLE packages in one
+// invocation (go test -tags=integration ./...), add -p 1: this package,
+// internal/service, and internal/httpserver's auth-flow test all truncate
+// and repopulate shared tables (users, auth_sessions, ...) in the same
+// live "evidentia" database, and Go runs different packages' tests
+// concurrently by default — without -p 1 they can (and, confirmed while
+// developing System 3, reliably do) truncate each other's fixtures
+// mid-test. This is not a race within a single package's tests (those
+// still run sequentially unless they call t.Parallel(), which none here
+// do) — it is Go's normal cross-package test-binary parallelism colliding
+// with a shared external resource.
 package tests
 
 import (

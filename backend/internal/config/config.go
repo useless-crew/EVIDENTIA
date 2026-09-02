@@ -20,6 +20,7 @@ type Config struct {
 	Redis    RedisConfig
 	MinIO    MinIOConfig
 	Logging  LoggingConfig
+	JWT      JWTConfig
 }
 
 // AppConfig describes general application identity.
@@ -117,6 +118,24 @@ type LoggingConfig struct {
 	Format string
 }
 
+// JWTConfig configures access-token signing/validation and password
+// hashing cost. Access tokens are signed HS256 (a shared secret) rather
+// than RS256: this project has no separate service that needs to verify
+// tokens without the signing secret, so asymmetric keys would add key-
+// management complexity (distributing/rotating a public key) without a
+// corresponding benefit here. The claims/validation logic is otherwise
+// signing-method-agnostic — switching to RS256 later would mean changing
+// the key type and jwt.SigningMethod used, not the surrounding
+// architecture. See docs/SECURITY.md.
+type JWTConfig struct {
+	Issuer     string
+	Audience   string
+	AccessTTL  time.Duration
+	RefreshTTL time.Duration
+	SigningKey string
+	BcryptCost int
+}
+
 var validSSLModes = map[string]bool{
 	"disable":     true,
 	"allow":       true,
@@ -188,6 +207,14 @@ func Load() (*Config, error) {
 		Logging: LoggingConfig{
 			Level:  getString("LOG_LEVEL", "info"),
 			Format: getString("LOG_FORMAT", "json"),
+		},
+		JWT: JWTConfig{
+			Issuer:     getString("JWT_ISSUER", "evidentia-api"),
+			Audience:   getString("JWT_AUDIENCE", "evidentia-client"),
+			AccessTTL:  getDuration(c, "JWT_ACCESS_TTL", 15*time.Minute),
+			RefreshTTL: getDuration(c, "JWT_REFRESH_TTL", 168*time.Hour),
+			SigningKey: requireString(c, "JWT_SIGNING_KEY"),
+			BcryptCost: getInt(c, "BCRYPT_COST", 12),
 		},
 	}
 
