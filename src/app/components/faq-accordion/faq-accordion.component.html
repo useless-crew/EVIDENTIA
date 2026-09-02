@@ -1,0 +1,17 @@
+<div class="faq-list">
+  <div *ngFor="let item of faqs; let i = index" class="faq-item">
+    <button 
+      type="button"
+      class="faq-header" 
+      [attr.aria-expanded]="item.open" 
+      (click)="toggleFaq(i)"
+    >
+      <span class="faq-question">{{ item.q }}</span>
+      <span class="faq-icon" aria-hidden="true">{{ item.open ? '−' : '+' }}</span>
+    </button>
+    
+    <div *ngIf="item.open" class="faq-answer-container">
+      <p class="faq-answer">{{ item.a }}</p>
+    </div>
+  </div>
+</div>

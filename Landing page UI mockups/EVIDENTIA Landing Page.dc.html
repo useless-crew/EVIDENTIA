@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  body{margin:0;background:#E6EAED;font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  h1,h2,h3,p{margin:0}
+  a{color:#426D9B;text-decoration:none}
+  a:hover{color:#2f527a;text-decoration:underline}
+  button{font-family:inherit;cursor:pointer}
+  *{box-sizing:border-box}
+</style>
+</helmet>
+
+<div style="width:4px;height:auto"></div>
+<div style="display:flex;width:100%;height:4px">
+  <div style="flex:1;background:#FF9933"></div>
+  <div style="flex:1;background:#FFFFFF"></div>
+  <div style="flex:1;background:#138808"></div>
+</div>
+
+<header style="position:sticky;top:0;z-index:50;background:#132A49;box-shadow:0 1px 0 rgba(0,0,0,.08)">
+  <nav aria-label="Primary" style="max-width:1240px;margin:0 auto;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="position:relative;width:42px;height:42px;border-radius:50%;flex:none;border:1.5px dashed rgba(255,255,255,.45);background:repeating-conic-gradient(rgba(255,255,255,.10) 0deg 10deg,transparent 10deg 20deg);display:flex;align-items:center;justify-content:center">
+        <span style="font:600 6.5px 'JetBrains Mono',monospace;letter-spacing:.04em;color:rgba(255,255,255,.75)">SEAL</span>
+      </div>
+      <div style="display:flex;flex-direction:column;line-height:1.15">
+        <span style="font:700 18px 'Inter',sans-serif;color:#fff;letter-spacing:.01em">EVIDENTIA</span>
+        <span style="font:400 10.5px 'Inter',sans-serif;color:rgba(255,255,255,.55)">Digital Document Management System</span>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:28px;flex-wrap:wrap">
+      <a href="#how-it-works" style="font:500 13.5px 'Inter',sans-serif;color:rgba(255,255,255,.85)" style-hover="color:#fff;text-decoration:underline">How It Works</a>
+      <a href="#faq" style="font:500 13.5px 'Inter',sans-serif;color:rgba(255,255,255,.85)" style-hover="color:#fff;text-decoration:underline">FAQ</a>
+      <button style="background:transparent;border:1px solid rgba(255,255,255,.4);color:#fff;font:500 13.5px 'Inter',sans-serif;padding:8px 16px;border-radius:5px" style-hover="background:rgba(255,255,255,.08)">Login</button>
+      <button style="background:#fff;border:1px solid #fff;color:#132A49;font:600 13.5px 'Inter',sans-serif;padding:9px 18px;border-radius:5px" style-hover="background:#E6EAED">Request Access</button>
+    </div>
+  </nav>
+</header>
+
+<main>
+  <section style="max-width:1240px;margin:0 auto;padding:88px 24px 80px;display:flex;gap:56px;flex-wrap:wrap;align-items:center">
+    <div style="flex:1 1 480px;display:flex;flex-direction:column;gap:22px;min-width:0">
+      <span style="font:600 12.5px 'Inter',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#426D9B">Secure Evidence &amp; Case Management</span>
+      <h1 style="font:700 44px/1.15 'Inter',sans-serif;color:#172536;letter-spacing:-.01em">A Single, Verifiable Record for Every Case File</h1>
+      <p style="font:400 17px/1.6 'Inter',sans-serif;color:#68717C;max-width:560px">From FIR to final hearing — police, forensic labs, prosecutors, and courts work off one cryptographically verified document trail. Every file is fingerprinted on upload. Every action is logged. Nothing can be quietly altered.</p>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px">
+        <button style="background:#132A49;border:1px solid #132A49;color:#fff;font:600 14.5px 'Inter',sans-serif;padding:13px 26px;border-radius:5px" style-hover="background:#0e2038">Request Access</button>
+        <button style="background:#fff;border:1px solid #132A49;color:#132A49;font:600 14.5px 'Inter',sans-serif;padding:13px 26px;border-radius:5px" style-hover="background:#F5F6F8">See How It Works</button>
+      </div>
+      <p style="font:400 12.5px/1.5 'Inter',sans-serif;color:#68717C;border-top:1px solid #E2E6EA;padding-top:16px;margin-top:8px">Built in alignment with the IT Act, 2000 (§65A/§65B) and the Bharatiya Sakshya Adhiniyam, 2023</p>
+    </div>
+    <div style="flex:1 1 380px;min-width:320px;display:flex;justify-content:center">
+      <div style="background:#fff;border:1px solid #E2E6EA;border-radius:6px;padding:28px;width:100%;max-width:420px">
+        <div style="display:flex;align-items:center;gap:10px;padding-bottom:14px;border-bottom:1px solid #E2E6EA">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A7AFB7" stroke-width="1.5"><rect x="5" y="3" width="14" height="18" rx="1.5"></rect><line x1="8.5" y1="8" x2="15.5" y2="8"></line><line x1="8.5" y1="12" x2="15.5" y2="12"></line><line x1="8.5" y1="16" x2="12.5" y2="16"></line></svg>
+          <span style="font:500 13px 'Inter',sans-serif;color:#172536">FIR_0442_2026.pdf</span>
+        </div>
+        <div style="padding-top:16px;display:flex;flex-direction:column;gap:10px">
+          <span style="font:500 11px 'Inter',sans-serif;color:#68717C;text-transform:uppercase;letter-spacing:.06em">SHA-256 Fingerprint</span>
+          <span style="font:400 12px 'JetBrains Mono',monospace;color:#172536;word-break:break-all;background:#F5F6F8;border:1px solid #E2E6EA;border-radius:4px;padding:8px 10px">9f2a1e6c...b7d40c53</span>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2E7D4F" stroke-width="2"><path d="M4 12l5 5L20 6"></path></svg>
+            <span style="font:500 12px 'Inter',sans-serif;color:#2E7D4F">Chain intact — verified</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section style="max-width:1240px;margin:0 auto;padding:0 24px 80px">
+    <div style="max-width:700px;display:flex;flex-direction:column;gap:14px;margin-bottom:36px">
+      <h2 style="font:700 26px/1.3 'Inter',sans-serif;color:#172536">India's Investigative Records Are Fragmented — and Hard to Trust</h2>
+      <p style="font:400 15px/1.6 'Inter',sans-serif;color:#68717C">Case files move across police stations, forensic laboratories, legal counsel, and courts — but rarely through a shared, verifiable system. The result is lost time, disputed authenticity, and evidence that's difficult to defend in court.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:18px">
+      <div style="background:#fff;border:1px solid #E2E6EA;border-radius:6px;padding:22px;display:flex;flex-direction:column;gap:12px">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#A7AFB7" stroke-width="1.5"><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="12" r="3"></circle><line x1="9" y1="12" x2="11" y2="12" stroke-dasharray="1.5 2"></line><line x1="13" y1="12" x2="15" y2="12" stroke-dasharray="1.5 2"></line></svg>
+        <h3 style="font:600 15px 'Inter',sans-serif;color:#172536">Disconnected Systems</h3>
+        <p style="font:400 13.5px/1.55 'Inter',sans-serif;color:#68717C">Police stations, the CBI, forensic labs, and courts each maintain separate, non-communicating records — with no shared source of truth for a case.</p>
+      </div>
+      <div style="background:#fff;border:1px solid #E2E6EA;border-radius:6px;padding:22px;display:flex;flex-direction:column;gap:12px">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#A7AFB7" stroke-width="1.5"><rect x="5" y="3" width="14" height="18" rx="1.5" stroke-dasharray="2 2"></rect><path d="M10.5 10a1.5 1.5 0 1 1 2.3 1.3c-.5.35-.8.75-.8 1.3"></path><line x1="12" y1="15.2" x2="12" y2="15.4"></line></svg>
+        <h3 style="font:600 15px 'Inter',sans-serif;color:#172536">Unverifiable Documents</h3>
+        <p style="font:400 13.5px/1.55 'Inter',sans-serif;color:#68717C">Physical files degrade or go missing. Digital copies circulate without confirmation of which version is authoritative or whether it has been altered.</p>
+      </div>
+      <div style="background:#fff;border:1px solid #E2E6EA;border-radius:6px;padding:22px;display:flex;flex-direction:column;gap:12px">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#A7AFB7" stroke-width="1.5"><rect x="6" y="11" width="12" height="9" rx="1.5"></rect><path d="M8.5 11V8a3.5 3.5 0 0 1 6.2-2.2"></path></svg>
+        <h3 style="font:600 15px 'Inter',sans-serif;color:#172536">Weak Access Control</h3>
+        <p style="font:400 13.5px/1.55 'Inter',sans-serif;color:#68717C">Sensitive information — witness identities, juvenile records — is often visible to more people than it should be, with no reliable record of who accessed what.</p>
+      </div>
+      <div style="background:#fff;border:1px solid #E2E6EA;border-radius:6px;padding:22px;display:flex;flex-direction:column;gap:12px">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#A7AFB7" stroke-width="1.5"><line x1="5" y1="6" x2="19" y2="6"></line><line x1="5" y1="12" x2="19" y2="12"></line><line x1="5" y1="18" x2="13" y2="18"></line><path d="M16 16l3.5 3.5M19.5 16L16 19.5" stroke="#B23B3B"></path></svg>
+        <h3 style="font:600 15px 'Inter',sans-serif;color:#172536">No Audit Trail</h3>
+        <p style="font:400 13.5px/1.55 'Inter',sans-serif;color:#68717C">When a document's history is questioned in court, most existing systems can't produce a tamper-evident record of who touched it, and when.</p>
+      </div>
+    </div>
+  </section>
+
+  <section style="background:#fff;border-top:1px solid #E2E6EA;border-bottom:1px solid #E2E6EA;padding:72px 24px">
+    <div style="max-width:1240px;margin:0 auto">
+      <div style="max-width:700px;display:flex;flex-direction:column;gap:14px;margin-bottom:36px">
+        <h2 style="font:700 26px/1.3 'Inter',sans-serif;color:#172536">One System, Built for Evidentiary Integrity</h2>
+        <p style="font:400 15px/1.6 'Inter',sans-serif;color:#68717C">Every document uploaded to the system is hashed, access-controlled, and logged from the moment it enters — so integrity isn't something you have to take on faith.</p>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:18px">
+        <div style="background:#F5F6F8;border:1px solid #E2E6EA;border-radius:6px;padding:22px;display:flex;flex-direction:column;gap:12px">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#132A49" stroke-width="1.5"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"></path><path d="M9 12l2 2 4-4"></path></svg>
+          <h3 style="font:600 15px 'Inter',sans-serif;color:#172536">Cryptographic Integrity</h3>
+          <p style="font:400 13.5px/1.55 'Inter',sans-serif;color:#68717C">Every document is fingerprinted with SHA-256 on upload. Any later change — even a single character — is immediately detectable.</p>
+        </div>
+        <div style="background:#F5F6F8;border:1px solid #E2E6EA;border-radius:6px;padding:22px;display:flex;flex-direction:column;gap:12px">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#132A49" stroke-width="1.5"><circle cx="12" cy="8" r="3.2"></circle><path d="M5.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"></path></svg>
+          <h3 style="font:600 15px 'Inter',sans-serif;color:#172536">Role-Based Access</h3>
+          <p style="font:400 13.5px/1.55 'Inter',sans-serif;color:#68717C">Judges, lawyers, police, and forensic experts each see only what their role permits — enforced at both the application and database level.</p>
+        </div>
+        <div style="background:#F5F6F8;border:1px solid #E2E6EA;border-radius:6px;padding:22px;display:flex;flex-direction:column;gap:12px">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#132A49" stroke-width="1.5"><circle cx="7" cy="7" r="2.4"></circle><circle cx="17" cy="7" r="2.4"></circle><circle cx="12" cy="17" r="2.4"></circle><line x1="8.7" y1="8.5" x2="10.6" y2="15"></line><line x1="15.3" y1="8.5" x2="13.4" y2="15"></line></svg>
+          <h3 style="font:600 15px 'Inter',sans-serif;color:#172536">Tamper-Evident Audit Trail</h3>
+          <p style="font:400 13.5px/1.55 'Inter',sans-serif;color:#68717C">Every view, upload, and share is recorded in an append-only, chain-linked log. Attempting to alter history breaks the chain visibly.</p>
+        </div>
+        <div style="background:#F5F6F8;border:1px solid #E2E6EA;border-radius:6px;padding:22px;display:flex;flex-direction:column;gap:12px">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#132A49" stroke-width="1.5"><rect x="5" y="3" width="14" height="18" rx="1.5"></rect><path d="M8.5 8.5h7M8.5 12h5" stroke="#A7AFB7"></path><path d="M8 16.5l1.8 1.8L13.5 14.5"></path></svg>
+          <h3 style="font:600 15px 'Inter',sans-serif;color:#172536">Built-In Legal Compliance</h3>
+          <p style="font:400 13.5px/1.55 'Inter',sans-serif;color:#68717C">Section 65B certificates are generated automatically, aligning digital evidence with Indian evidentiary standards from the moment it's created.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="how-it-works" style="max-width:1240px;margin:0 auto;padding:80px 24px">
+    <h2 style="font:700 26px/1.3 'Inter',sans-serif;color:#172536;margin-bottom:40px">From Upload to Verified Record</h2>
+    <div style="display:flex;flex-direction:column;gap:0;max-width:760px">
+      <div style="display:flex;gap:20px">
+        <div style="display:flex;flex-direction:column;align-items:center;flex:none">
+          <div style="width:34px;height:34px;border-radius:50%;background:#132A49;color:#fff;display:flex;align-items:center;justify-content:center;font:600 13px 'Inter',sans-serif;flex:none">1</div>
+          <div style="width:1.5px;flex:1;background:#E2E6EA;min-height:34px"></div>
+        </div>
+        <div style="padding-bottom:32px">
+          <h3 style="font:600 15.5px 'Inter',sans-serif;color:#172536;margin-bottom:6px">Sign in by role</h3>
+          <p style="font:400 13.5px/1.55 'Inter',sans-serif;color:#68717C">Officers, forensic experts, lawyers, and judges log in and see only the cases and documents relevant to their role.</p>
+        </div>
+      </div>
+      <div style="display:flex;gap:20px">
+        <div style="display:flex;flex-direction:column;align-items:center;flex:none">
+          <div style="width:34px;height:34px;border-radius:50%;background:#132A49;color:#fff;display:flex;align-items:center;justify-content:center;font:600 13px 'Inter',sans-serif;flex:none">2</div>
+          <div style="width:1.5px;flex:1;background:#E2E6EA;min-height:34px"></div>
+        </div>
+        <div style="padding-bottom:32px">
+          <h3 style="font:600 15.5px 'Inter',sans-serif;color:#172536;margin-bottom:6px">Open or create a case</h3>
+          <p style="font:400 13.5px/1.55 'Inter',sans-serif;color:#68717C">Case files bring together documents, involved parties, and a full timeline in one place.</p>
+        </div>
+      </div>
+      <div style="display:flex;gap:20px">
+        <div style="display:flex;flex-direction:column;align-items:center;flex:none">
+          <div style="width:34px;height:34px;border-radius:50%;background:#132A49;color:#fff;display:flex;align-items:center;justify-content:center;font:600 13px 'Inter',sans-serif;flex:none">3</div>
+          <div style="width:1.5px;flex:1;background:#E2E6EA;min-height:34px"></div>
+        </div>
+        <div style="padding-bottom:32px">
+          <h3 style="font:600 15.5px 'Inter',sans-serif;color:#172536;margin-bottom:6px">Upload evidence</h3>
+          <p style="font:400 13.5px/1.55 'Inter',sans-serif;color:#68717C">A document is uploaded — a forensic report, an FIR, a photograph — and the system immediately generates its cryptographic fingerprint.</p>
+        </div>
+      </div>
+      <div style="display:flex;gap:20px">
+        <div style="display:flex;flex-direction:column;align-items:center;flex:none">
+          <div style="width:34px;height:34px;border-radius:50%;background:#132A49;color:#fff;display:flex;align-items:center;justify-content:center;font:600 13px 'Inter',sans-serif;flex:none">4</div>
+          <div style="width:1.5px;flex:1;background:#E2E6EA;min-height:34px"></div>
+        </div>
+        <div style="padding-bottom:32px">
+          <h3 style="font:600 15.5px 'Inter',sans-serif;color:#172536;margin-bottom:6px">Verify anytime</h3>
+          <p style="font:400 13.5px/1.55 'Inter',sans-serif;color:#68717C">Any authorized user can re-check a document's integrity on demand and see instantly whether it matches its original fingerprint.</p>
+        </div>
+      </div>
+      <div style="display:flex;gap:20px">
+        <div style="display:flex;flex-direction:column;align-items:center;flex:none">
+          <div style="width:34px;height:34px;border-radius:50%;background:#132A49;color:#fff;display:flex;align-items:center;justify-content:center;font:600 13px 'Inter',sans-serif;flex:none">5</div>
+          <div style="width:1.5px;flex:1;background:#E2E6EA;min-height:34px"></div>
+        </div>
+        <div style="padding-bottom:32px">
+          <h3 style="font:600 15.5px 'Inter',sans-serif;color:#172536;margin-bottom:6px">Redact when needed</h3>
+          <p style="font:400 13.5px/1.55 'Inter',sans-serif;color:#68717C">Sensitive details can be redacted before sharing, creating a separate, independently verified copy — the original stays untouched.</p>
+        </div>
+      </div>
+      <div style="display:flex;gap:20px">
+        <div style="display:flex;flex-direction:column;align-items:center;flex:none">
+          <div style="width:34px;height:34px;border-radius:50%;background:#132A49;color:#fff;display:flex;align-items:center;justify-content:center;font:600 13px 'Inter',sans-serif;flex:none">6</div>
+        </div>
+        <div>
+          <h3 style="font:600 15.5px 'Inter',sans-serif;color:#172536;margin-bottom:6px">Every action is logged</h3>
+          <p style="font:400 13.5px/1.55 'Inter',sans-serif;color:#68717C">Uploads, views, shares, and redactions are written to a permanent, tamper-evident audit trail — provable, not just claimed.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="faq" style="background:#fff;border-top:1px solid #E2E6EA;border-bottom:1px solid #E2E6EA;padding:80px 24px">
+    <div style="max-width:820px;margin:0 auto">
+      <h2 style="font:700 26px/1.3 'Inter',sans-serif;color:#172536;margin-bottom:32px">Frequently Asked Questions</h2>
+      <div style="display:flex;flex-direction:column;gap:0;border-top:1px solid #E2E6EA">
+        <sc-for list="{{ faqs }}" as="item" hint-placeholder-count="6">
+          <div style="border-bottom:1px solid #E2E6EA">
+            <button aria-expanded="{{ item.open }}" onclick="{{ item.toggle }}" style="width:100%;background:none;border:none;padding:18px 4px;display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left" style-hover="background:#F5F6F8">
+              <span style="font:600 15px 'Inter',sans-serif;color:#172536">{{ item.q }}</span>
+              <span style="flex:none;font:400 20px 'Inter',sans-serif;color:#68717C;width:18px;text-align:center">{{ item.icon }}</span>
+            </button>
+            <sc-if value="{{ item.open }}" hint-placeholder-val="{{ false }}">
+              <p style="padding:0 4px 20px;font:400 14px/1.6 'Inter',sans-serif;color:#68717C;max-width:700px">{{ item.a }}</p>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <section style="background:#132A49;padding:76px 24px">
+    <div style="max-width:720px;margin:0 auto;text-align:center;display:flex;flex-direction:column;align-items:center;gap:18px">
+      <h2 style="font:700 28px/1.3 'Inter',sans-serif;color:#fff">Bring Your Case Records Onto One Verified System</h2>
+      <p style="font:400 15.5px/1.6 'Inter',sans-serif;color:rgba(255,255,255,.75);max-width:560px">Request access for your department, agency, or chambers and see how document integrity, access control, and audit logging work together in practice.</p>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;justify-content:center;margin-top:8px">
+        <button style="background:#fff;border:1px solid #fff;color:#132A49;font:600 14.5px 'Inter',sans-serif;padding:13px 26px;border-radius:5px" style-hover="background:#E6EAED">Request Access</button>
+        <button style="background:transparent;border:1px solid rgba(255,255,255,.5);color:#fff;font:600 14.5px 'Inter',sans-serif;padding:13px 26px;border-radius:5px" style-hover="background:rgba(255,255,255,.08)">Contact the Implementation Team</button>
+      </div>
+      <p style="font:400 12.5px 'Inter',sans-serif;color:rgba(255,255,255,.5);margin-top:6px">Authorized personnel only. All access to this system is logged.</p>
+    </div>
+  </section>
+
+  <footer style="background:#0e2038;padding:56px 24px 28px">
+    <div style="max-width:1240px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:32px;padding-bottom:32px;border-bottom:1px solid rgba(255,255,255,.12)">
+      <div style="display:flex;flex-direction:column;gap:10px;max-width:280px">
+        <span style="font:700 16px 'Inter',sans-serif;color:#fff">EVIDENTIA</span>
+        <p style="font:400 13px/1.6 'Inter',sans-serif;color:rgba(255,255,255,.55)">A secure, cryptographically verifiable document management system for India's criminal justice ecosystem.</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <span style="font:600 12px 'Inter',sans-serif;color:rgba(255,255,255,.85);text-transform:uppercase;letter-spacing:.05em">Resources</span>
+        <a href="#how-it-works" style="font:400 13.5px 'Inter',sans-serif;color:rgba(255,255,255,.55)">How It Works</a>
+        <a href="#faq" style="font:400 13.5px 'Inter',sans-serif;color:rgba(255,255,255,.55)">FAQ</a>
+        <a href="#" style="font:400 13.5px 'Inter',sans-serif;color:rgba(255,255,255,.55)">Documentation</a>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <span style="font:600 12px 'Inter',sans-serif;color:rgba(255,255,255,.85);text-transform:uppercase;letter-spacing:.05em">Legal</span>
+        <a href="#" style="font:400 13.5px 'Inter',sans-serif;color:rgba(255,255,255,.55)">Privacy Policy</a>
+        <a href="#" style="font:400 13.5px 'Inter',sans-serif;color:rgba(255,255,255,.55)">Terms of Access</a>
+        <a href="#" style="font:400 13.5px 'Inter',sans-serif;color:rgba(255,255,255,.55)">Compliance &amp; Standards</a>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <span style="font:600 12px 'Inter',sans-serif;color:rgba(255,255,255,.85);text-transform:uppercase;letter-spacing:.05em">Contact</span>
+        <a href="#" style="font:400 13.5px 'Inter',sans-serif;color:rgba(255,255,255,.55)">Implementation Team</a>
+        <a href="#" style="font:400 13.5px 'Inter',sans-serif;color:rgba(255,255,255,.55)">Support</a>
+      </div>
+    </div>
+    <div style="max-width:1240px;margin:0 auto;padding-top:20px;display:flex;flex-direction:column;gap:6px">
+      <p style="font:400 12px 'Inter',sans-serif;color:rgba(255,255,255,.45)">© {{ year }} EVIDENTIA. All access to this system is logged.</p>
+      <p style="font:400 12px 'Inter',sans-serif;color:rgba(255,255,255,.4)">Built in alignment with the IT Act, 2000 and the Bharatiya Sakshya Adhiniyam, 2023.</p>
+    </div>
+  </footer>
+</main>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { openFaq: 0 };
+
+  faqData = [
+    { q: "Who can use this system?", a: "Access is limited to authorized personnel — investigating officers, forensic experts, legal counsel, judges, and system administrators — each provisioned with a specific role that determines what they can see and do." },
+    { q: "How is document integrity guaranteed?", a: "Every document is assigned a SHA-256 cryptographic hash the moment it's uploaded. Any subsequent modification changes the hash, so tampering is mathematically detectable rather than dependent on manual review." },
+    { q: "Is this legally admissible as evidence?", a: "The system is built to align with the Information Technology Act, 2000 (Sections 65A/65B) and the Bharatiya Sakshya Adhiniyam, 2023, including automated generation of the certification required for electronic records to be considered for admissibility." },
+    { q: "What happens when a document is redacted?", a: "Redaction never modifies the original file. It produces a new, separately hashed copy with the sensitive regions removed, while the original remains securely preserved and unaltered." },
+    { q: "Can access or activity be traced later?", a: "Yes. Every view, upload, share, and modification is written to an append-only, cryptographically chained audit log. The full chain can be independently re-verified at any time to confirm no entry has been altered or removed." },
+    { q: "How do I get access for my department or agency?", a: "Access is provisioned by request. Use the \"Request Access\" button above, or contact your department's assigned administrator to be added to the system." }
+  ];
+
+  toggleFaq(i) {
+    this.setState(s => ({ openFaq: s.openFaq === i ? null : i }));
+  }
+
+  renderVals() {
+    const faqs = this.faqData.map((f, i) => ({
+      q: f.q,
+      a: f.a,
+      open: this.state.openFaq === i,
+      icon: this.state.openFaq === i ? "\u2212" : "+",
+      toggle: () => this.toggleFaq(i)
+    }));
+    return { faqs, year: new Date().getFullYear() };
+  }
+}
+</script>
+</body>
+</html>
