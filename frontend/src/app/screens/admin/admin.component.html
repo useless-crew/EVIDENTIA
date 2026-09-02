@@ -1,0 +1,32 @@
+<div class="admin-view animate-fade-in">
+  <div class="admin-header">
+    <h1 class="admin-title">Authorized Personnel Management</h1>
+    <p class="admin-subtitle">
+      Manage security roles, cryptographic key attachments, and statutory agency clearances.
+    </p>
+  </div>
+
+  <div class="admin-card">
+    <div class="admin-table-header">
+      <span class="col-name">PERSONNEL NAME</span>
+      <span class="col-email">OFFICIAL EMAIL</span>
+      <span class="col-role">SYSTEM ROLE</span>
+      <span class="col-agency">ATTACHED AGENCY / COURT</span>
+      <span class="col-action">ACTION</span>
+    </div>
+
+    <div class="admin-table-body">
+      <div *ngFor="let u of dms.adminUsers" class="admin-row">
+        <span class="col-name">{{ u.name }}</span>
+        <span class="col-email font-mono">{{ u.email }}</span>
+        <span class="col-role">
+          <span class="role-pill">{{ u.role }}</span>
+        </span>
+        <span class="col-agency">{{ u.agency }}</span>
+        <span class="col-action">
+          <a href="#" class="edit-link" (click)="$event.preventDefault()">Configure</a>
+        </span>
+      </div>
+    </div>
+  </div>
+</div>

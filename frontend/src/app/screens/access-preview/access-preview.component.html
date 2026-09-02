@@ -1,0 +1,62 @@
+<div class="access-view animate-fade-in">
+  <!-- Header -->
+  <div class="access-header">
+    <h1 class="access-title">Role-Based Access Policy Preview</h1>
+    <p class="access-subtitle">
+      The identical case file record rendered under two distinct clearance policies. Restricted evidentiary fields are filtered before client serialization.
+    </p>
+  </div>
+
+  <!-- Dual Split Column Comparison -->
+  <div class="access-grid">
+    <!-- View 1: Police Clearance -->
+    <div class="policy-card police-policy">
+      <div class="policy-header">
+        <div>
+          <h2 class="policy-title">Police Clearance View</h2>
+          <span class="policy-subtitle">Investigating Officer (IO) &amp; Station House</span>
+        </div>
+        <span class="clearance-pill police-clearance">Full Evidentiary Record</span>
+      </div>
+
+      <div class="policy-body">
+        <div *ngFor="let f of dms.accessFields" class="field-row">
+          <div class="field-meta">
+            <span class="field-name">{{ f.label }}</span>
+          </div>
+          <div class="field-content font-mono">
+            {{ f.value }}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- View 2: Defence Counsel Clearance -->
+    <div class="policy-card counsel-policy">
+      <div class="policy-header">
+        <div>
+          <h2 class="policy-title">Defence Counsel View</h2>
+          <span class="policy-subtitle">Statutory Pre-Trial Disclosure (§207 CrPC / §230 BNSS)</span>
+        </div>
+        <span class="clearance-pill counsel-clearance">Disclosure Set</span>
+      </div>
+
+      <div class="policy-body">
+        <div *ngFor="let f of dms.accessFields" class="field-row">
+          <div class="field-meta">
+            <span class="field-name">{{ f.label }}</span>
+            <span *ngIf="f.restricted" class="restricted-tag font-mono">
+              Restricted — Police Only (§228A)
+            </span>
+          </div>
+          <div
+            class="field-content font-mono"
+            [class.blurred]="f.restricted"
+          >
+            {{ f.restricted ? 'Withheld under statutory access policy' : f.value }}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

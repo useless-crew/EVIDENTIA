@@ -1,0 +1,158 @@
+<div class="case-detail-view animate-fade-in">
+  <!-- Case Header -->
+  <div class="case-header">
+    <div class="case-header-left">
+      <div class="case-badge-no font-mono">FIR/2026/4521</div>
+      <h1 class="case-main-title">Cyber fraud — unauthorised UPI transfers, Sector 62</h1>
+    </div>
+
+    <div class="case-header-actions">
+      <button type="button" class="btn-secondary" (click)="goToAccess()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+          <circle cx="12" cy="12" r="3"></circle>
+        </svg>
+        Access Preview
+      </button>
+
+      <button
+        *ngIf="dms.role() === 'Police' || dms.role() === 'Forensics' || dms.role() === 'Admin'"
+        type="button"
+        class="btn-primary"
+        (click)="openUpload()"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="17 8 12 3 7 8"></polyline>
+          <line x1="12" y1="3" x2="12" y2="15"></line>
+        </svg>
+        Upload Document
+      </button>
+    </div>
+  </div>
+
+  <!-- Main Grid 2-Column Split -->
+  <div class="case-layout-grid">
+    <!-- Left Column: Metadata & Documents -->
+    <div class="case-main-col">
+      <!-- Metadata Summary Card -->
+      <div class="detail-card">
+        <div class="meta-grid">
+          <div class="meta-item">
+            <span class="meta-label">STATUS</span>
+            <span class="badge-status badge-investigation">Under investigation</span>
+          </div>
+          <div class="meta-item">
+            <span class="meta-label">FILED</span>
+            <span class="meta-value">11 Feb 2026</span>
+          </div>
+          <div class="meta-item">
+            <span class="meta-label">JURISDICTION</span>
+            <span class="meta-value">Noida Sector 58 PS</span>
+          </div>
+          <div class="meta-item">
+            <span class="meta-label">LEGAL SECTIONS</span>
+            <span class="meta-value font-mono">BNS 318(4), IT 66D</span>
+          </div>
+        </div>
+
+        <div class="meta-desc-wrap">
+          <span class="meta-label">INCIDENT SUMMARY</span>
+          <p class="meta-desc">
+            Complainant reports 14 unauthorised UPI debits totalling ₹4,82,300 across three consecutive days following an impersonation phishing call. Primary mobile device seized for forensic imaging; bank transaction logs requisitioned under §94 of the Bharatiya Nagarik Suraksha Sanhita (BNSS).
+          </p>
+        </div>
+      </div>
+
+      <!-- Case Documents Card -->
+      <div class="detail-card">
+        <div class="panel-header">
+          <h2 class="panel-title">
+            Evidentiary Documents <span class="doc-count font-mono">· 6</span>
+          </h2>
+          <div class="view-toggle">
+            <button
+              type="button"
+              class="toggle-btn"
+              [class.active]="viewMode === 'grid'"
+              (click)="viewMode = 'grid'"
+            >
+              Grid
+            </button>
+            <button
+              type="button"
+              class="toggle-btn"
+              [class.active]="viewMode === 'list'"
+              (click)="viewMode = 'list'"
+            >
+              List
+            </button>
+          </div>
+        </div>
+
+        <!-- Documents Grid -->
+        <div class="docs-grid" [class.list-view]="viewMode === 'list'">
+          <div
+            *ngFor="let doc of dms.caseDocuments"
+            class="doc-card"
+            (click)="openDoc(doc)"
+          >
+            <div class="doc-preview-canvas doc-canvas-bg">
+              <span class="doc-kind-badge font-mono">{{ doc.kind }}</span>
+            </div>
+            <div class="doc-info">
+              <div class="doc-name" [title]="doc.name">{{ doc.name }}</div>
+              <div class="doc-status-row">
+                <span class="doc-status-dot" [style.background-color]="getDotColor(doc.badgeType)"></span>
+                <span class="doc-status-label" [ngClass]="getDocBadgeClass(doc.badgeType)">
+                  {{ doc.badge }}
+                </span>
+              </div>
+              <div class="doc-by-label">{{ doc.by }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Column: Case Timeline & Involved Parties -->
+    <div class="case-side-col">
+      <!-- Case Timeline Card -->
+      <div class="detail-card">
+        <div class="panel-header">
+          <h2 class="panel-title">Case Timeline</h2>
+        </div>
+        <div class="timeline-container">
+          <div *ngFor="let t of dms.caseTimeline; let last = last" class="timeline-step">
+            <div class="step-axis">
+              <span class="step-dot" [class.latest]="t.isLatest"></span>
+              <span *ngIf="!last" class="step-line"></span>
+            </div>
+            <div class="step-body">
+              <div class="step-text">{{ t.text }}</div>
+              <div class="step-time font-mono">{{ t.time }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Involved Parties Card -->
+      <div class="detail-card">
+        <div class="panel-header">
+          <h2 class="panel-title">Involved Personnel</h2>
+        </div>
+        <div class="parties-list">
+          <div *ngFor="let p of dms.caseParties" class="party-row">
+            <div class="party-avatar" [style.border-left-color]="p.accent">
+              {{ p.initials }}
+            </div>
+            <div class="party-info">
+              <div class="party-name">{{ p.name }}</div>
+              <div class="party-role">{{ p.role }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,45 @@
+<aside class="sidebar">
+  <div class="nav-section-title">NAVIGATION</div>
+
+  <nav class="nav-menu">
+    <button
+      *ngFor="let item of dms.navItems()"
+      type="button"
+      class="nav-btn"
+      [class.active]="isItemActive(item.target)"
+      (click)="onNavClick(item.target)"
+    >
+      <!-- Navigation Icon -->
+      <span class="nav-icon-indicator" [class.active]="isItemActive(item.target)">
+        <span *ngIf="item.label === 'Dashboard'" class="icon-shape square"></span>
+        <span *ngIf="item.label === 'Cases'" class="icon-shape rect"></span>
+        <span *ngIf="item.label === 'Upload Document'" class="icon-shape up-arrow"></span>
+        <span *ngIf="item.label === 'Audit Log'" class="icon-shape shield"></span>
+        <span *ngIf="item.label === 'User Management'" class="icon-shape user"></span>
+      </span>
+      <span class="nav-label">{{ item.label }}</span>
+    </button>
+  </nav>
+
+  <div class="sidebar-spacer"></div>
+
+  <!-- Bottom Cryptographic Chain Status -->
+  <div class="chain-status-widget">
+    <div class="status-header">
+      <span class="status-title">Cryptographic Chain</span>
+      <span class="status-version">v2.4</span>
+    </div>
+
+    <div class="status-state" [class.tampered]="dms.simulateTamper()">
+      <span class="status-pulse-dot" [class.tampered]="dms.simulateTamper()"></span>
+      <span class="status-text">
+        {{ dms.simulateTamper() ? 'Tamper Detected · Entry #1198' : 'Intact · 1,204 entries' }}
+      </span>
+    </div>
+
+    <div class="status-meta">
+      <span>Verified 14:02 IST</span>
+      <span class="font-mono">ED25519-01</span>
+    </div>
+  </div>
+</aside>

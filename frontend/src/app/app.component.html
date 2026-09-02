@@ -1,4 +1,47 @@
-<app-tricolor-bar></app-tricolor-bar>
-<app-navbar></app-navbar>
-<router-outlet></router-outlet>
-<app-footer></app-footer>
+<!-- Login Screen View -->
+<app-login *ngIf="dms.screen() === 'login'"></app-login>
+
+<!-- In-App Workspace View -->
+<div *ngIf="dms.screen() !== 'login'" class="app-workspace">
+  <!-- Top Navigation Bar -->
+  <app-header></app-header>
+
+  <div class="workspace-body">
+    <!-- Left Navigation Sidebar -->
+    <app-sidebar></app-sidebar>
+
+    <!-- Main Dynamic Content Workspace -->
+    <main class="workspace-content" #contentArea>
+      <!-- Breadcrumb Bar -->
+      <div class="workspace-breadcrumb">
+        <span class="crumb-icon font-mono">▸</span>
+        <span class="crumb-path font-mono">{{ dms.breadcrumb() }}</span>
+      </div>
+
+      <!-- Active Screen View Container -->
+      <div class="screen-container">
+        <app-dashboard *ngIf="dms.screen() === 'dash'"></app-dashboard>
+        <app-cases *ngIf="dms.screen() === 'cases'"></app-cases>
+        <app-case-detail *ngIf="dms.screen() === 'case'"></app-case-detail>
+        <app-document-viewer *ngIf="dms.screen() === 'doc'"></app-document-viewer>
+        <app-redact-studio *ngIf="dms.screen() === 'redact'"></app-redact-studio>
+        <app-audit-log *ngIf="dms.screen() === 'audit'"></app-audit-log>
+        <app-access-preview *ngIf="dms.screen() === 'access'"></app-access-preview>
+        <app-admin *ngIf="dms.screen() === 'admin'"></app-admin>
+      </div>
+
+      <!-- Official Trust & Regulatory Footer -->
+      <footer class="workspace-footer">
+        <div class="footer-trust-left">
+          <span>Official Document Management System · Government of India Evidence Infrastructure</span>
+        </div>
+        <div class="footer-trust-right font-mono">
+          <span>Node: NCRB-DMS-02 · IST · All activity is hash-sealed under §65B IT Act</span>
+        </div>
+      </footer>
+    </main>
+  </div>
+
+  <!-- Document Upload & Fingerprinting Modal -->
+  <app-upload-modal *ngIf="dms.uploadOpen()"></app-upload-modal>
+</div>

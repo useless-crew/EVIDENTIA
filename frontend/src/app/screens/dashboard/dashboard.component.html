@@ -1,0 +1,141 @@
+<div class="dash-view animate-fade-in">
+  <!-- Title & Action Bar -->
+  <div class="dash-header">
+    <div class="dash-title-group">
+      <h1 class="dash-title">{{ dms.dashboardInfo().title }}</h1>
+      <p class="dash-subtitle">{{ dms.dashboardInfo().sub }}</p>
+    </div>
+
+    <div class="dash-header-actions">
+      <button
+        *ngIf="dms.role() === 'Police' || dms.role() === 'Admin'"
+        type="button"
+        class="btn-secondary"
+        (click)="goToCases()"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+        New Case File
+      </button>
+
+      <button
+        *ngIf="dms.role() === 'Police' || dms.role() === 'Forensics' || dms.role() === 'Admin'"
+        type="button"
+        class="btn-primary"
+        (click)="openUpload()"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="17 8 12 3 7 8"></polyline>
+          <line x1="12" y1="3" x2="12" y2="15"></line>
+        </svg>
+        Upload Document
+      </button>
+
+      <button
+        *ngIf="dms.role() === 'Judge' || dms.role() === 'Lawyer'"
+        type="button"
+        class="btn-primary"
+        (click)="goToCases()"
+      >
+        {{ dms.role() === 'Judge' ? 'Open Court Docket' : 'Review Disclosures' }}
+      </button>
+    </div>
+  </div>
+
+  <!-- 4 Metrics Cards Grid -->
+  <div class="stats-grid">
+    <div *ngFor="let s of dms.dashboardInfo().stats" class="stat-card">
+      <div class="stat-card-header">
+        <span class="stat-label">{{ s.label }}</span>
+        <span class="stat-icon-bullet" [style.border-color]="s.deltaColor"></span>
+      </div>
+      <div class="stat-value font-mono">{{ s.value }}</div>
+      <div class="stat-delta" [style.color]="s.deltaColor">
+        {{ s.delta }}
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content 2-Column Split -->
+  <div class="dash-content-grid">
+    <!-- Left Column: Recent Activity Feed -->
+    <div class="content-panel">
+      <div class="panel-header">
+        <h2 class="panel-title">Recent Cryptographic Activity</h2>
+        <a href="#" class="panel-link" (click)="$event.preventDefault(); goToAudit()">
+          View Full Audit Log →
+        </a>
+      </div>
+
+      <div class="activity-list">
+        <div *ngFor="let a of dms.activityFeed" class="activity-row">
+          <span class="activity-dot" [style.background-color]="a.dotColor"></span>
+          <div class="activity-body">
+            <div class="activity-text">{{ a.text }}</div>
+            <div class="activity-meta font-mono">{{ a.meta }}</div>
+          </div>
+          <span class="activity-time font-mono">{{ a.time }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Column: Shortcuts & Integrity -->
+    <div class="dash-sidebar-col">
+      <!-- Shortcuts Card -->
+      <div class="content-panel">
+        <div class="panel-header">
+          <h2 class="panel-title">Quick Actions</h2>
+        </div>
+        <div class="shortcuts-list">
+          <button type="button" class="shortcut-btn" (click)="goToCase()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span>Open Case FIR/2026/4521</span>
+          </button>
+
+          <button type="button" class="shortcut-btn" (click)="goToAudit()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            </svg>
+            <span>Verify Audit Chain (1,204 Entries)</span>
+          </button>
+
+          <button type="button" class="shortcut-btn" (click)="goToAccess()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+            <span>Role-Based Access Policy Preview</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Integrity Status Card -->
+      <div class="content-panel">
+        <div class="panel-header">
+          <h2 class="panel-title">Chain Integrity Guarantee</h2>
+        </div>
+        <div class="panel-inner-pad">
+          <p class="integrity-desc">
+            Every evidentiary document is hashed on client upload and appended to the immutable system chain signed by key ED25519-01.
+          </p>
+
+          <div
+            class="integrity-pill"
+            [class.tampered]="dms.simulateTamper()"
+          >
+            <span class="integrity-pill-dot" [class.tampered]="dms.simulateTamper()"></span>
+            <span class="integrity-pill-text">
+              {{ dms.simulateTamper() ? '⚠ Tampering detected on chain entry #1198' : '✓ No integrity issues · Chain intact' }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

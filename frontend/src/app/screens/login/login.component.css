@@ -1,0 +1,183 @@
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-page);
+}
+
+.tricolor-ribbon {
+  display: flex;
+  height: 4px;
+  width: 100%;
+}
+
+.stripe-saffron {
+  flex: 1;
+  background-color: var(--tricolor-saffron);
+}
+
+.stripe-white {
+  flex: 1;
+  background-color: var(--tricolor-white);
+}
+
+.stripe-green {
+  flex: 1;
+  background-color: var(--tricolor-green);
+}
+
+.login-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 40px 20px;
+}
+
+/* Brand Emblem */
+.brand-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.seal-badge {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1.5px dashed var(--color-accent-blue);
+  background: repeating-conic-gradient(rgba(19, 42, 73, 0.08) 0deg 10deg, transparent 10deg 20deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.seal-text {
+  font-family: var(--font-mono);
+  font-size: 7px;
+  font-weight: 700;
+  color: var(--color-navy-primary);
+}
+
+.brand-titles {
+  display: flex;
+  flex-direction: column;
+}
+
+.brand-main {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-navy-primary);
+  letter-spacing: 0.02em;
+}
+
+.brand-sub {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+/* Login Card */
+.login-card {
+  width: 420px;
+  max-width: 100%;
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+  padding: 34px 32px;
+}
+
+.card-title {
+  font-size: 21px;
+  font-weight: 700;
+  color: var(--color-navy-primary);
+  margin-bottom: 6px;
+}
+
+.card-description {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin-bottom: 24px;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+
+.field-input {
+  height: 40px;
+  background: var(--color-section-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  padding: 0 12px;
+  font-size: 13.5px;
+  color: var(--color-text-primary);
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.field-input:focus {
+  background: #ffffff;
+  border-color: var(--color-accent-blue);
+  box-shadow: 0 0 0 3px rgba(66, 109, 155, 0.15);
+}
+
+.btn-signin {
+  height: 42px;
+  width: 100%;
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border-subtle);
+  font-size: 12px;
+}
+
+.forgot-link {
+  color: var(--color-accent-blue);
+}
+
+.version-tag {
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.compliance-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+  max-width: 440px;
+  text-align: center;
+}
+
+.compliance-note svg {
+  flex: none;
+  color: var(--color-accent-blue);
+}
