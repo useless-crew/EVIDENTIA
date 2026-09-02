@@ -1,7 +1,7 @@
 import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { DmsStateService } from '../../core/services/dms-state.service';
+import { DmsStateService, DUMMY_ACCOUNTS, UserAccount } from '../../core/services/dms-state.service';
 
 @Component({
   selector: 'app-login',
@@ -12,11 +12,36 @@ import { DmsStateService } from '../../core/services/dms-state.service';
 })
 export class LoginComponent {
   dms = inject(DmsStateService);
+  dummyAccounts = DUMMY_ACCOUNTS;
 
-  email = 'r.mehra@delhipolice.gov.in';
-  password = '••••••••••••';
+  email = DUMMY_ACCOUNTS[0].email;
+  password = DUMMY_ACCOUNTS[0].password;
+  selectedAccount: UserAccount = DUMMY_ACCOUNTS[0];
+
+  selectAccount(acc: UserAccount) {
+    this.selectedAccount = acc;
+    this.email = acc.email;
+    this.password = acc.password;
+  }
+
+  quickSignIn(acc: UserAccount, event?: Event) {
+    if (event) {
+      event.preventDefault();
+    }
+    this.selectAccount(acc);
+    this.dms.loginWithAccount(acc);
+  }
 
   signIn() {
-    this.dms.screen.set('dash');
+    this.dms.loginWithCredentials(this.email, this.password);
+  }
+
+  goToLanding(event?: Event) {
+    if (event) {
+      event.preventDefault();
+    }
+    this.dms.screen.set('landing');
   }
 }
+
+

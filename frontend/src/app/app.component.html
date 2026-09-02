@@ -1,8 +1,11 @@
+<!-- Landing Page View -->
+<app-landing-page *ngIf="dms.screen() === 'landing'"></app-landing-page>
+
 <!-- Login Screen View -->
 <app-login *ngIf="dms.screen() === 'login'"></app-login>
 
 <!-- In-App Workspace View -->
-<div *ngIf="dms.screen() !== 'login'" class="app-workspace">
+<div *ngIf="dms.screen() !== 'landing' && dms.screen() !== 'login'" class="app-workspace">
   <!-- Top Navigation Bar -->
   <app-header></app-header>
 

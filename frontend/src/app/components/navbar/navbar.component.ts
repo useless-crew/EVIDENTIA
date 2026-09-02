@@ -1,6 +1,7 @@
 import { Component, HostListener, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { LenisService } from '../../core/services/lenis.service';
+import { DmsStateService } from '../../core/services/dms-state.service';
 
 @Component({
   selector: 'app-navbar',
@@ -14,6 +15,7 @@ export class NavbarComponent {
   isScrolled = false;
 
   private lenisService = inject(LenisService);
+  private dms = inject(DmsStateService);
 
   @HostListener('window:scroll', [])
   onWindowScroll() {
@@ -31,5 +33,22 @@ export class NavbarComponent {
     this.mobileMenuOpen = false;
     this.lenisService.scrollTo(targetId);
   }
+
+  goToLogin(event?: Event) {
+    if (event) {
+      event.preventDefault();
+    }
+    this.mobileMenuOpen = false;
+    this.dms.screen.set('login');
+  }
+
+  goToLanding(event?: Event) {
+    if (event) {
+      event.preventDefault();
+    }
+    this.mobileMenuOpen = false;
+    this.dms.screen.set('landing');
+  }
 }
+
 

@@ -167,6 +167,130 @@
   font-size: 11px;
 }
 
+/* Quick Demo Role Accounts Card */
+.demo-accounts-card {
+  width: 440px;
+  max-width: 100%;
+  background: var(--color-section-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 4px;
+}
+
+.demo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.demo-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+
+.demo-badge {
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--color-navy-primary);
+  color: #ffffff;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.demo-chips-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.demo-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.demo-chip:hover {
+  transform: translateX(3px);
+  border-color: var(--color-accent-blue);
+  box-shadow: 0 4px 12px rgba(19, 42, 73, 0.08);
+}
+
+.demo-chip.active {
+  border-color: var(--color-navy-primary);
+  background: rgba(19, 42, 73, 0.04);
+  box-shadow: 0 2px 8px rgba(19, 42, 73, 0.1);
+}
+
+.chip-role-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 4px;
+  min-width: 70px;
+  text-align: center;
+  background: var(--color-navy-primary);
+  color: #ffffff;
+}
+
+.chip-role-badge[data-role="Police"] { background: #132a49; }
+.chip-role-badge[data-role="Judge"] { background: #b26a00; }
+.chip-role-badge[data-role="Lawyer"] { background: #426d9b; }
+.chip-role-badge[data-role="Forensics"] { background: #2e7d4f; }
+.chip-role-badge[data-role="Admin"] { background: #6b21a8; }
+
+.chip-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.chip-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.chip-email {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.chip-action {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-accent-blue);
+}
+
+.card-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.selected-role-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-accent-blue);
+  background: rgba(66, 109, 155, 0.1);
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+/* Compliance Note */
 .compliance-note {
   display: flex;
   align-items: center;
@@ -181,3 +305,4 @@
   flex: none;
   color: var(--color-accent-blue);
 }
+

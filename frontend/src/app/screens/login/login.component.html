@@ -8,7 +8,7 @@
 
   <div class="login-container">
     <!-- Brand Emblem -->
-    <div class="brand-header">
+    <div class="brand-header" (click)="goToLanding($event)" style="cursor: pointer;" title="Back to Landing Page">
       <div class="seal-badge" aria-hidden="true">
         <span class="seal-text">SEAL</span>
       </div>
@@ -18,9 +18,37 @@
       </div>
     </div>
 
+    <!-- Quick Role Accounts Demo Selector -->
+    <div class="demo-accounts-card">
+      <div class="demo-header">
+        <span class="demo-title">SELECT DUMMY ROLE &amp; CREDENTIALS</span>
+        <span class="demo-badge font-mono">JWT AUTH DEMO</span>
+      </div>
+      <div class="demo-chips-grid">
+        <button
+          type="button"
+          *ngFor="let acc of dummyAccounts"
+          class="demo-chip"
+          [class.active]="selectedAccount.email === acc.email"
+          (click)="quickSignIn(acc, $event)"
+          [title]="'Click to auto-fill & login as ' + acc.name + ' (' + acc.role + ')'"
+        >
+          <span class="chip-role-badge" [attr.data-role]="acc.role">{{ acc.role }}</span>
+          <div class="chip-info">
+            <span class="chip-name">{{ acc.name }}</span>
+            <span class="chip-email font-mono">{{ acc.email }}</span>
+          </div>
+          <span class="chip-action">Sign In ›</span>
+        </button>
+      </div>
+    </div>
+
     <!-- Login Card -->
     <div class="login-card">
-      <h1 class="card-title">Authorized Sign In</h1>
+      <div class="card-header-row">
+        <h1 class="card-title">Authorized Sign In</h1>
+        <span class="selected-role-tag">{{ selectedAccount.role }} Clearance</span>
+      </div>
       <p class="card-description">
         Cryptographic evidence and case file management for India's justice system.
       </p>
@@ -49,12 +77,12 @@
         </div>
 
         <button type="submit" class="btn-primary btn-signin">
-          Sign In to Portal
+          Sign In as {{ selectedAccount.role }} (Generate JWT)
         </button>
       </form>
 
       <div class="card-footer">
-        <a href="#" class="forgot-link" (click)="$event.preventDefault()">Forgot password / credentials</a>
+        <a href="#" class="forgot-link" (click)="goToLanding($event)">← Back to Landing Page</a>
         <span class="version-tag font-mono">v2.4.1 (BSA-65B)</span>
       </div>
     </div>
@@ -70,3 +98,4 @@
     </div>
   </div>
 </div>
+

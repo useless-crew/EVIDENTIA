@@ -1,7 +1,7 @@
 import { Injectable, signal, computed } from '@angular/core';
 
 export type Role = 'Police' | 'Judge' | 'Lawyer' | 'Forensics' | 'Admin';
-export type Screen = 'login' | 'dash' | 'cases' | 'case' | 'doc' | 'audit' | 'redact' | 'access' | 'admin';
+export type Screen = 'landing' | 'login' | 'dash' | 'cases' | 'case' | 'doc' | 'audit' | 'redact' | 'access' | 'admin';
 
 export interface NavItem {
   label: string;
@@ -9,6 +9,7 @@ export interface NavItem {
   icon: string;
   weight: number;
 }
+
 
 export interface StatItem {
   label: string;
@@ -83,6 +84,58 @@ export interface RedactionRegion {
   reason: string;
 }
 
+export interface UserAccount {
+  name: string;
+  email: string;
+  password: string;
+  role: Role;
+  agency: string;
+  initials: string;
+}
+
+export const DUMMY_ACCOUNTS: UserAccount[] = [
+  {
+    name: 'SI Rajat Mehra',
+    email: 'police@delhipolice.gov.in',
+    password: 'police123',
+    role: 'Police',
+    agency: 'Noida Sec 58 Police Station',
+    initials: 'RM'
+  },
+  {
+    name: 'Hon. K. Mahadevan',
+    email: 'judge@ecourts.gov.in',
+    password: 'judge123',
+    role: 'Judge',
+    agency: 'Sessions Court 04',
+    initials: 'KM'
+  },
+  {
+    name: 'Shalini Bhat',
+    email: 'lawyer@prosecution.gov.in',
+    password: 'lawyer123',
+    role: 'Lawyer',
+    agency: 'District Prosecution Branch',
+    initials: 'SB'
+  },
+  {
+    name: 'Dr. Anjali Iyer',
+    email: 'forensics@cyberlab.gov.in',
+    password: 'forensic123',
+    role: 'Forensics',
+    agency: 'State Cyber Forensics Lab',
+    initials: 'AI'
+  },
+  {
+    name: 'Nikhil Rao',
+    email: 'admin@ncrb.gov.in',
+    password: 'admin123',
+    role: 'Admin',
+    agency: 'National Crime Records Bureau',
+    initials: 'NR'
+  }
+];
+
 const HEX_CHARS = '0123456789abcdef';
 export const H_DOC = 'd41f9a3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58';
 export const H_UP  = '7b2e4c91a08df365c4a17e0b92d5f83a6c1e074bd39f52a8e6c0b74132fd9e05';
@@ -93,10 +146,106 @@ export const H_RED = 'a09c73e51bd82f460a7e3c19d54b06f2837ea1c9b0d64f5382e17ca09b
 })
 export class DmsStateService {
   // Navigation & Role State
-  readonly screen = signal<Screen>('login');
+  readonly screen = signal<Screen>('landing');
   readonly role = signal<Role>('Police');
   readonly roles: Role[] = ['Police', 'Judge', 'Lawyer', 'Forensics', 'Admin'];
   readonly simulateTamper = signal<boolean>(false);
+
+  // Authenticated User & JWT Session State
+  readonly currentUser = signal<UserAccount | null>(DUMMY_ACCOUNTS[0]);
+  readonly jwtToken = signal<string | null>(null);
+
+  constructor() {
+    this.restoreSession();
+  }
+
+  restoreSession() {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const saved = localStorage.getItem('evidentia_session');
+        if (saved) {
+          const data = JSON.parse(saved);
+          if (data && data.user && data.token) {
+            this.currentUser.set(data.user);
+            this.jwtToken.set(data.token);
+            this.role.set(data.user.role);
+          }
+        }
+      }
+    } catch {}
+  }
+
+  generateJwtToken(account: UserAccount): string {
+    const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+    const payload = btoa(JSON.stringify({
+      sub: account.email,
+      name: account.name,
+      role: account.role,
+      agency: account.agency,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 86400
+    }));
+    const sig = 'c3VwZXJzZWNyZXRqd3RzaWduYXR1cmU';
+    return `${header}.${payload}.${sig}`;
+  }
+
+  loginWithAccount(account: UserAccount): boolean {
+    const token = this.generateJwtToken(account);
+    this.currentUser.set(account);
+    this.jwtToken.set(token);
+    this.role.set(account.role);
+    this.screen.set('dash');
+
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.setItem('evidentia_session', JSON.stringify({ token, user: account }));
+      }
+    } catch {}
+
+    return true;
+  }
+
+  loginWithCredentials(emailInput: string, passwordInput: string): { success: boolean; message?: string } {
+    const normalizedEmail = emailInput.trim().toLowerCase();
+
+    // Check exact dummy account match
+    let found = DUMMY_ACCOUNTS.find(
+      a => a.email.toLowerCase() === normalizedEmail && (a.password === passwordInput || passwordInput.length >= 3)
+    );
+
+    // Fallback: match by role keyword or domain prefix
+    if (!found) {
+      if (normalizedEmail.includes('judge') || normalizedEmail.includes('ecourts')) {
+        found = DUMMY_ACCOUNTS.find(a => a.role === 'Judge');
+      } else if (normalizedEmail.includes('lawyer') || normalizedEmail.includes('prosecution')) {
+        found = DUMMY_ACCOUNTS.find(a => a.role === 'Lawyer');
+      } else if (normalizedEmail.includes('forensic') || normalizedEmail.includes('lab')) {
+        found = DUMMY_ACCOUNTS.find(a => a.role === 'Forensics');
+      } else if (normalizedEmail.includes('admin') || normalizedEmail.includes('ncrb')) {
+        found = DUMMY_ACCOUNTS.find(a => a.role === 'Admin');
+      } else {
+        found = DUMMY_ACCOUNTS.find(a => a.role === 'Police');
+      }
+    }
+
+    if (found) {
+      this.loginWithAccount(found);
+      return { success: true };
+    }
+
+    return { success: false, message: 'Invalid government credentials.' };
+  }
+
+  signOut() {
+    this.currentUser.set(null);
+    this.jwtToken.set(null);
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.removeItem('evidentia_session');
+      }
+    } catch {}
+    this.screen.set('login');
+  }
 
   // Upload Modal State
   readonly uploadOpen = signal<boolean>(false);
@@ -127,6 +276,7 @@ export class DmsStateService {
   readonly breadcrumb = computed(() => {
     const s = this.screen();
     const map: Record<Screen, string> = {
+      landing: 'Welcome / Home',
       login: 'Sign In',
       dash: 'Home / Dashboard',
       cases: 'Home / Cases',
