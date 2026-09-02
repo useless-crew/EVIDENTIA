@@ -1,0 +1,30 @@
+<header class="header">
+  <nav aria-label="Primary navigation" class="nav-container">
+    <!-- Brand Logo & Title -->
+    <div class="brand">
+      <div class="seal-badge" aria-hidden="true">
+        <span class="seal-text">SEAL</span>
+      </div>
+      <div class="brand-text">
+        <span class="brand-name">EVIDENTIA</span>
+        <span class="brand-tagline">Digital Document Management System</span>
+      </div>
+    </div>
+
+    <!-- Navigation links & CTAs -->
+    <div class="nav-actions" [class.open]="mobileMenuOpen">
+      <a href="#how-it-works" (click)="mobileMenuOpen = false" class="nav-link">How It Works</a>
+      <a href="#faq" (click)="mobileMenuOpen = false" class="nav-link">FAQ</a>
+      <button type="button" class="btn-outline-white">Login</button>
+      <button type="button" class="btn-white">Request Access</button>
+    </div>
+
+    <!-- Mobile Hamburger Toggle -->
+    <button type="button" class="mobile-toggle" (click)="toggleMobileMenu()" aria-label="Toggle navigation menu">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2">
+        <path d="M4 6h16M4 12h16M4 18h16" *ngIf="!mobileMenuOpen"></path>
+        <path d="M6 18L18 6M6 6l12 12" *ngIf="mobileMenuOpen"></path>
+      </svg>
+    </button>
+  </nav>
+</header>

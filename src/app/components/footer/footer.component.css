@@ -1,0 +1,66 @@
+.footer {
+  background: var(--color-navy-dark);
+  padding: 56px 24px 28px;
+}
+
+.footer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 32px;
+  padding-bottom: 32px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.footer-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.brand-col {
+  max-width: 280px;
+}
+
+.footer-brand {
+  font: 700 16px var(--font-sans);
+  color: #ffffff;
+}
+
+.footer-description {
+  font: 400 13px/1.6 var(--font-sans);
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.footer-col-title {
+  font: 600 12px var(--font-sans);
+  color: rgba(255, 255, 255, 0.85);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.footer-link {
+  font: 400 13.5px var(--font-sans);
+  color: rgba(255, 255, 255, 0.55);
+  transition: color 0.15s ease;
+}
+
+.footer-link:hover {
+  color: #ffffff;
+}
+
+.footer-bottom {
+  padding-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.copyright {
+  font: 400 12px var(--font-sans);
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.statutory-note {
+  font: 400 12px var(--font-sans);
+  color: rgba(255, 255, 255, 0.4);
+}

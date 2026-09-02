@@ -1,0 +1,131 @@
+<main class="landing-main">
+  <!-- 1. Hero Section -->
+  <section class="hero-section container">
+    <div class="hero-content">
+      <span class="hero-eyebrow">Secure Evidence &amp; Case Management</span>
+      <h1 class="hero-title">A Single, Verifiable Record for Every Case File</h1>
+      <p class="hero-subtitle">
+        From FIR to final hearing — police, forensic labs, prosecutors, and courts work off one cryptographically verified document trail. Every file is fingerprinted on upload. Every action is logged. Nothing can be quietly altered.
+      </p>
+      
+      <div class="hero-cta-group">
+        <button type="button" class="btn-primary">Request Access</button>
+        <button type="button" class="btn-secondary">See How It Works</button>
+      </div>
+
+      <p class="hero-compliance-note">
+        Built in alignment with the IT Act, 2000 (§65A/§65B) and the Bharatiya Sakshya Adhiniyam, 2023
+      </p>
+    </div>
+
+    <div class="hero-preview-col">
+      <div class="fingerprint-card">
+        <div class="card-header">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A7AFB7" stroke-width="1.5">
+            <rect x="5" y="3" width="14" height="18" rx="1.5"></rect>
+            <line x1="8.5" y1="8" x2="15.5" y2="8"></line>
+            <line x1="8.5" y1="12" x2="15.5" y2="12"></line>
+            <line x1="8.5" y1="16" x2="12.5" y2="16"></line>
+          </svg>
+          <span class="file-name">FIR_0442_2026.pdf</span>
+        </div>
+
+        <div class="card-body">
+          <span class="hash-label">SHA-256 Fingerprint</span>
+          <code class="hash-value">9f2a1e6c...b7d40c53</code>
+          
+          <div class="status-indicator">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2E7D4F" stroke-width="2">
+              <path d="M4 12l5 5L20 6"></path>
+            </svg>
+            <span class="status-text">Chain intact — verified</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. Problem Statement Section -->
+  <section class="problem-section container">
+    <div class="section-intro">
+      <h2 class="section-title">India's Investigative Records Are Fragmented — and Hard to Trust</h2>
+      <p class="section-description">
+        Case files move across police stations, forensic laboratories, legal counsel, and courts — but rarely through a shared, verifiable system. The result is lost time, disputed authenticity, and evidence that's difficult to defend in court.
+      </p>
+    </div>
+
+    <div class="cards-grid">
+      <div *ngFor="let card of problemCards" class="problem-card">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#A7AFB7" stroke-width="1.5">
+          <path [attr.d]="card.iconSvgPath"></path>
+        </svg>
+        <h3 class="card-title">{{ card.title }}</h3>
+        <p class="card-body-text">{{ card.body }}</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Solution / Value Section -->
+  <section class="solution-section">
+    <div class="container">
+      <div class="section-intro">
+        <h2 class="section-title">One System, Built for Evidentiary Integrity</h2>
+        <p class="section-description">
+          Every document uploaded to the system is hashed, access-controlled, and logged from the moment it enters — so integrity isn't something you have to take on faith.
+        </p>
+      </div>
+
+      <div class="pillars-grid">
+        <div *ngFor="let pillar of featurePillars" class="pillar-card">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#132A49" stroke-width="1.5">
+            <path [attr.d]="pillar.iconSvgPath"></path>
+          </svg>
+          <h3 class="card-title">{{ pillar.title }}</h3>
+          <p class="card-body-text">{{ pillar.body }}</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. How It Works Section -->
+  <section id="how-it-works" class="how-it-works-section container">
+    <h2 class="section-title margin-bottom">From Upload to Verified Record</h2>
+    <div class="steps-timeline">
+      <div *ngFor="let step of processSteps; let isLast = last" class="timeline-item">
+        <div class="timeline-left">
+          <div class="step-badge">{{ step.stepNumber }}</div>
+          <div *ngIf="!isLast" class="timeline-line"></div>
+        </div>
+        <div class="timeline-content">
+          <h3 class="step-title">{{ step.title }}</h3>
+          <p class="step-desc">{{ step.description }}</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. FAQ Section -->
+  <section id="faq" class="faq-section">
+    <div class="container faq-container">
+      <h2 class="section-title margin-bottom">Frequently Asked Questions</h2>
+      <app-faq-accordion [faqs]="faqList"></app-faq-accordion>
+    </div>
+  </section>
+
+  <!-- 6. Call to Action Section -->
+  <section class="cta-section">
+    <div class="cta-content container">
+      <h2 class="cta-title">Bring Your Case Records Onto One Verified System</h2>
+      <p class="cta-subtitle">
+        Request access for your department, agency, or chambers and see how document integrity, access control, and audit logging work together in practice.
+      </p>
+
+      <div class="cta-button-group">
+        <button type="button" class="btn-white">Request Access</button>
+        <button type="button" class="btn-outline-white">Contact the Implementation Team</button>
+      </div>
+
+      <p class="cta-footnote">Authorized personnel only. All access to this system is logged.</p>
+    </div>
+  </section>
+</main>
