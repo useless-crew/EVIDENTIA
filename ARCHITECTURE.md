@@ -1,10 +1,50 @@
 # Evidentia — High-Level Architecture
 
-> This document describes the **intended** architecture. It is a design
-> reference for the scaffolding created in this repository. No part of it is
-> implemented yet.
+> This document describes the **intended** architecture. System 1 —
+> Foundation & Infrastructure — is implemented (see below); everything
+> under Request Flow and Core Domains past it is still a design reference.
 
-## Request Flow
+## System 1 — Foundation & Infrastructure (Implemented)
+
+```text
+cmd/server/main.go
+    |
+    v
+internal/app.New(ctx)
+    |
+    +--> internal/config.Load()     — typed, validated env config
+    +--> internal/logger.New()      — structured slog logger
+    +--> internal/database.New()    — pgx pool + Ping
+    +--> internal/cache.New()       — go-redis client + Ping
+    +--> internal/storage.NewMinIO()— MinIO client + bucket ensure
+    |
+    v
+*app.App  (DI container: Config, Logger, DB, Cache, Storage)
+    |
+    v
+internal/httpserver.NewRouter(app)
+    |
+    +--> middleware.Recovery       — panic -> safe JSON, logs stack server-side
+    +--> middleware.RequestID      — validates/generates X-Request-ID
+    +--> middleware.RequestLogger  — structured per-request log line
+    +--> middleware.CORS           — configured origins/methods/headers
+    +--> middleware.BodyLimit      — caps request body size
+    |
+    +--> GET /health   (handlers/health.Liveness)
+    +--> GET /ready    (handlers/health.Readiness — pings DB/Cache/Storage)
+    +--> NoRoute/NoMethod -> standard error envelope
+```
+
+`app.App` depends on `DBConn`/`CacheConn` interfaces (declared in
+`internal/app`), not the concrete `*database.Database`/`*cache.Cache`
+types — this is what lets tests substitute fakes for Postgres/Redis/MinIO
+without Docker (see `internal/httpserver/router_test.go`).
+
+Shutdown, triggered by SIGINT/SIGTERM: stop accepting new connections
+(`http.Server.Shutdown`, bounded by `SERVER_SHUTDOWN_TIMEOUT`) → close
+Redis → close the PostgreSQL pool → exit (`cmd/server/main.go`).
+
+## Request Flow (Intended, Later Systems)
 
 ```text
 Frontend
@@ -164,5 +204,5 @@ The eventual system will enforce:
 11. Secure refresh-token handling
 12. Audit logging of all security-sensitive actions
 
-None of the above is implemented in this scaffolding phase. See
-[docs/SECURITY.md](./docs/SECURITY.md).
+None of the above is implemented yet — System 1 covers infrastructure only
+(see [docs/SECURITY.md](./docs/SECURITY.md) for what that includes).

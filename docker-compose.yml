@@ -1,63 +1,110 @@
-# Evidentia — Docker Compose Scaffold
+# Evidentia — Local Development Infrastructure
 #
-# This is a STRUCTURAL SKELETON ONLY. It documents the intended service
-# topology (frontend, backend, postgres, minio, redis) but does not implement
-# a working deployment. No health checks requiring application logic, no
-# production secrets, and no startup logic have been added.
+# Brings up the backend and every infrastructure dependency it needs:
+# PostgreSQL, Redis, and MinIO. The frontend is included as a placeholder
+# only — see frontend/README.md; it is not built as part of this system.
 #
-# TODO: Flesh out build contexts, health checks, and volumes once the
-# corresponding application code exists.
-
-version: "3.9"
+# Quick start:
+#   cp .env.example .env      # then edit credentials
+#   docker compose up -d
+#   curl http://localhost:8080/health
+#   curl http://localhost:8080/ready
 
 services:
-  # TODO: Build from backend/Dockerfile once the backend has a runnable entrypoint.
   backend:
     build:
       context: ./backend
-    env_file:
-      - ./backend/.env.example
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      APP_NAME: evidentia-backend
+      APP_VERSION: ${APP_VERSION:-dev}
+
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 8080
+
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USER: ${POSTGRES_USER:-evidentia}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      DATABASE_NAME: ${POSTGRES_DB:-evidentia}
+      DATABASE_SSLMODE: disable
+
+      REDIS_ADDR: redis:6379
+
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-evidentia_minio}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      MINIO_USE_SSL: "false"
+      MINIO_BUCKET: ${MINIO_BUCKET:-evidentia-documents}
+
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:4200}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     depends_on:
-      - postgres
-      - minio
-      - redis
-    # TODO: healthcheck once /health endpoint exists.
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
 
-  # TODO: Placeholder only — frontend is not implemented in this phase.
+  # Placeholder only — the frontend is not built or wired up in this
+  # system. See frontend/README.md for the Angular app it will eventually
+  # serve.
   frontend:
     build:
       context: ./frontend
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
-    depends_on:
-      - backend
-    # TODO: implement once frontend project exists.
+      - "${FRONTEND_PORT:-4200}:4200"
+    profiles: ["frontend"]
+    # TODO: add a Dockerfile under frontend/ once the frontend is built.
 
   postgres:
     image: postgres:15
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-evidentia}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_example}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-evidentia}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    # TODO: mount migrations once golang-migrate workflow is finalized.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-evidentia} -d ${POSTGRES_DB:-evidentia}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
 
   minio:
     image: minio/minio:latest
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-evidentia_minio}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-changeme_example}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
     command: server /data --console-address ":9001"
     ports:
       - "${MINIO_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
 
   redis:
     image: redis:7
@@ -65,6 +112,13 @@ services:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
 
 volumes:
   postgres_data:
