@@ -1,4 +1,5 @@
 package models
 
-// TODO: Define Redaction model corresponding to the `redactions` table
-// (source document, derivative document).
+import "evidentia/backend/db/generated"
+
+type Redaction = generated.Redaction

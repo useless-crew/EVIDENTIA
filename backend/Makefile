@@ -1,12 +1,16 @@
 # Evidentia Backend — Developer Commands
 #
 # Every target here is functional today. Targets for tooling this system
-# doesn't use yet (migrations, sqlc, swagger) are intentionally omitted
-# rather than stubbed out — they'll be added, working, alongside the
-# systems that need them (schema/migrations, sqlc queries, API
-# annotations), instead of echoing "TODO" in the meantime.
+# doesn't use yet (e.g. swagger) are intentionally omitted rather than
+# stubbed out — they'll be added, working, alongside the system that needs
+# them (API annotations), instead of echoing "TODO" in the meantime.
+#
+# migrate-up/migrate-down require DATABASE_MIGRATOR_USER/PASSWORD (a
+# privileged, schema-owning role — never the app's own DATABASE_USER/
+# PASSWORD, which is the least-privilege evidentia_app role). seed requires
+# the same. See docs/DATABASE_SCHEMA.md.
 
-.PHONY: dev run build test test-race vet fmt lint docker-up docker-down docker-logs clean
+.PHONY: dev run build test test-race vet fmt lint migrate-up migrate-down sqlc seed docker-up docker-down docker-logs clean
 
 dev: run
 
@@ -27,6 +31,25 @@ vet:
 
 fmt:
 	gofmt -w .
+
+migrate-up:
+	go run ./cmd/migrate up
+
+migrate-down:
+	go run ./cmd/migrate down
+
+# Requires the sqlc CLI (https://docs.sqlc.dev/en/latest/overview/install.html)
+# — not part of this project's approved dependency stack (it's a code
+# generator, not an imported library), so it is not installed automatically.
+sqlc:
+	@command -v sqlc >/dev/null 2>&1 || { \
+		echo "sqlc is not installed. See https://docs.sqlc.dev/en/latest/overview/install.html"; \
+		exit 1; \
+	}
+	sqlc generate
+
+seed:
+	./scripts/seed_db.sh
 
 # Requires golangci-lint (https://golangci-lint.run/welcome/install/) —
 # not part of this project's approved dependency stack, so it is not

@@ -1,3 +1,6 @@
 package models
 
-// TODO: Define Permission model corresponding to the `permissions` table.
+import "evidentia/backend/db/generated"
+
+type Permission = generated.Permission
+type RolePermission = generated.RolePermission

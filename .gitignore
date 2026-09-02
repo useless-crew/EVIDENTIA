@@ -17,9 +17,10 @@ backend/tmp/
 coverage.out
 coverage.html
 
-# sqlc generated code (regenerated via `make sqlc`)
-backend/db/generated/*
-!backend/db/generated/.gitkeep
+# sqlc generated code IS committed (backend/db/generated/*.go) — go build
+# and go test must work right after a fresh clone without requiring the
+# sqlc CLI to be installed. Regenerate with `make sqlc` after changing
+# backend/db/queries/*.sql or backend/db/migrations/*.sql; never hand-edit.
 
 # Secrets (never commit)
 *.pem

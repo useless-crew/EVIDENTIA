@@ -13,9 +13,16 @@
 # sets its own .env (gitignored, never committed) to override these.
 #
 # Quick start:
-#   docker compose up -d
+#   docker compose up -d postgres redis minio
+#   cd backend && DATABASE_MIGRATOR_USER=evidentia DATABASE_MIGRATOR_PASSWORD=changeme_example \
+#     DATABASE_HOST=localhost DATABASE_NAME=evidentia go run ./cmd/migrate up
+#   cd .. && docker compose up -d
 #   curl http://localhost:8080/health
 #   curl http://localhost:8080/ready
+#
+# The migration step creates the evidentia_app role the backend container
+# connects as (see docs/DATABASE_SCHEMA.md) — the backend cannot start
+# without it. It only needs to be run once per postgres_data volume.
 #
 # To use real (non-placeholder) credentials instead:
 #   cp .env.example .env      # then edit POSTGRES_PASSWORD / MINIO_ROOT_PASSWORD
@@ -35,8 +42,13 @@ services:
 
       DATABASE_HOST: postgres
       DATABASE_PORT: 5432
-      DATABASE_USER: ${POSTGRES_USER:-evidentia}
-      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-changeme_example}
+      # evidentia_app — NOT ${POSTGRES_USER}, which is the migration-only
+      # superuser (see docs/DATABASE_SCHEMA.md). This role and its
+      # password are created by backend/db/migrations/000001_init_schema
+      # .up.sql, so migrations must be applied (`make migrate-up`) before
+      # this container can connect — see the Quick Start above.
+      DATABASE_USER: evidentia_app
+      DATABASE_PASSWORD: changeme_example
       DATABASE_NAME: ${POSTGRES_DB:-evidentia}
       DATABASE_SSLMODE: disable
 

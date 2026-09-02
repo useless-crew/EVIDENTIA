@@ -1,4 +1,15 @@
 package models
 
-// TODO: Define Case model corresponding to the `cases` (and `case_users`)
-// tables.
+import "evidentia/backend/db/generated"
+
+type Case = generated.Case
+
+// Case.Status values (cases_status_check in the schema).
+const (
+	CaseStatusOpen               = "OPEN"
+	CaseStatusUnderInvestigation = "UNDER_INVESTIGATION"
+	CaseStatusSubmitted          = "SUBMITTED"
+	CaseStatusUnderReview        = "UNDER_REVIEW"
+	CaseStatusClosed             = "CLOSED"
+	CaseStatusArchived           = "ARCHIVED"
+)

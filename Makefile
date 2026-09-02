@@ -11,9 +11,9 @@
 # delegates to backend/Makefile (the single source of truth for how each
 # command is actually invoked), rather than duplicating its recipes here.
 
-.PHONY: dev run build test test-race vet fmt lint clean docker-up docker-down docker-logs
+.PHONY: dev run build test test-race vet fmt lint migrate-up migrate-down sqlc seed clean docker-up docker-down docker-logs
 
-dev run build test test-race vet fmt lint clean:
+dev run build test test-race vet fmt lint migrate-up migrate-down sqlc seed clean:
 	$(MAKE) -C backend $@
 
 docker-up:

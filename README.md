@@ -3,14 +3,16 @@
 Evidentia is a secure digital evidence and case-management platform designed for
 investigative and judicial workflows.
 
-> **Status:** Backend System 1 — Foundation & Infrastructure — is
-> implemented: configuration, structured logging, PostgreSQL/Redis/MinIO
-> connectivity, the HTTP server (Gin) with its middleware stack, and
-> `/health` + `/ready`. Authentication, authorization, case management,
-> documents, and the audit chain are not implemented yet — those are later
-> systems; see [ARCHITECTURE.md](./ARCHITECTURE.md). The `frontend/`
-> directory contains an Angular application (generated via Angular CLI)
-> plus design reference material.
+> **Status:** Backend System 1 (Foundation & Infrastructure) and System 2
+> (Database & Data Layer) are implemented: configuration, structured
+> logging, PostgreSQL/Redis/MinIO connectivity, the HTTP server (Gin), the
+> full database schema with Row-Level Security, and a least-privilege,
+> append-only-enforced audit log. Authentication, authorization
+> middleware, case/document HTTP handlers, and the audit-chain writer are
+> not implemented yet — those are later systems; see
+> [ARCHITECTURE.md](./ARCHITECTURE.md). The `frontend/` directory contains
+> an Angular application (generated via Angular CLI) plus design reference
+> material.
 
 ## Repository Layout
 
@@ -74,6 +76,10 @@ make test
 make test-race
 make vet
 make fmt
+make migrate-up      # needs DATABASE_MIGRATOR_USER/PASSWORD — see docs/DATABASE_SCHEMA.md
+make migrate-down
+make seed            # roles/permissions reference data
+make sqlc            # regenerate backend/db/generated (requires the sqlc CLI)
 make docker-up       # docker compose up -d --build
 make docker-down
 ```
@@ -103,10 +109,29 @@ commands.
 - Multi-stage Dockerfile and Docker Compose with health-checked services
 - Unit, race-safe, and integration (`-tags=integration`) tests
 
-Not yet implemented (later systems): authentication, RBAC/ABAC, PostgreSQL
-RLS, case management, document upload/hashing/redaction, the audit chain,
-compliance certificates, and background jobs. See
-[ARCHITECTURE.md](./ARCHITECTURE.md) for the full intended design.
+**System 2 — Database & Data Layer** is implemented:
+
+- Full PostgreSQL schema (12 tables), versioned via `golang-migrate`
+  (`backend/db/migrations/`, run via `cmd/migrate`)
+- Row-Level Security on every case/document/audit-adjacent table —
+  transaction-local identity (`internal/repository.WithTx`), fail-closed,
+  verified by integration test, not just declared
+- Audit log enforced append-only at the database level: the runtime role
+  holds `SELECT`+`INSERT` only, no `UPDATE`/`DELETE`, verified by
+  integration test
+- Least-privilege role separation: a privileged migrator role vs. the
+  `evidentia_app` runtime role, which owns nothing
+- `sqlc`-generated, type-safe query code (`backend/db/generated/`) behind
+  a thin repository layer (`internal/repository`)
+- Idempotent reference-data seeding (roles/permissions —
+  `backend/scripts/seed_db.sh`)
+
+Not yet implemented (later systems): authentication, RBAC/ABAC middleware,
+case/document HTTP handlers, document upload/hashing/redaction, the
+audit-chain writer/verifier, compliance certificate generation, and
+background jobs. See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full
+intended design and [docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md)
+for the full schema.
 
 ### Frontend
 

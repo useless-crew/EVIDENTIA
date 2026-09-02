@@ -1,4 +1,5 @@
 package models
 
-// TODO: Define ComplianceCertificate model corresponding to the
-// `compliance_certificates` table.
+import "evidentia/backend/db/generated"
+
+type ComplianceCertificate = generated.ComplianceCertificate

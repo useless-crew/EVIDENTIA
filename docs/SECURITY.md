@@ -32,6 +32,37 @@ tracks what's implemented so far, distinct from the eventual full model.
 None of this is the full model below — it's the infrastructure layer later
 systems build the rest on top of.
 
+## Implemented in System 2 (Database & Data Layer)
+
+Full detail in [docs/DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md); summary
+here:
+
+- **PostgreSQL Row-Level Security**, enabled and `FORCE`d on every
+  case/document/audit-adjacent table, with fail-closed behavior verified
+  empirically (`backend/tests/db_rls_test.go`) — no application identity
+  set means zero visible rows, never unrestricted access.
+- **Transaction-local RLS identity**: `internal/repository.WithTx` sets
+  `app.user_id`/`app.role` via `set_config(..., true)`, scoped to a single
+  transaction — proven not to leak across transactions reusing the same
+  pooled connection (`TestRLS_TransactionLocalIdentityDoesNotLeak`).
+- **Audit-log append-only enforcement at the database level**: the
+  runtime role (`evidentia_app`) holds `SELECT`+`INSERT` only on
+  `audit_log` — no `UPDATE`, no `DELETE` — and does not own the table, is
+  not a superuser, and does not have `BYPASSRLS`. All four verified by
+  integration test (`backend/tests/db_audit_privileges_test.go`), not just
+  asserted in the migration.
+- **Least-privilege role separation**: migrations run as a privileged
+  `DATABASE_MIGRATOR_USER`, distinct from `evidentia_app`, which the
+  running server actually connects as and which owns nothing.
+- **Audit-chain storage invariants** (not yet the chain logic itself — see
+  Principles #7-#9 below): at most one genesis entry, at most one entry
+  per predecessor hash, both enforced by constraints and verified to
+  actually reject violations, not just declared.
+- **Hash representation**: SHA-256-shaped columns (`documents.sha256_hash`,
+  `audit_log.hash`/`prev_hash`, `compliance_certificates.document_hash`)
+  are `BYTEA` constrained to exactly 32 bytes — no computation happens yet
+  (System 7/8), but the storage can't represent a malformed hash.
+
 ## Principles
 
 The eventual system will enforce:

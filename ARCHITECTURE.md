@@ -1,8 +1,9 @@
 # Evidentia — High-Level Architecture
 
 > This document describes the **intended** architecture. System 1 —
-> Foundation & Infrastructure — is implemented (see below); everything
-> under Request Flow and Core Domains past it is still a design reference.
+> Foundation & Infrastructure — and System 2 — Database & Data Layer — are
+> implemented (see below); everything under Request Flow and Core Domains
+> past them is still a design reference.
 
 ## System 1 — Foundation & Infrastructure (Implemented)
 
@@ -43,6 +44,49 @@ without Docker (see `internal/httpserver/router_test.go`).
 Shutdown, triggered by SIGINT/SIGTERM: stop accepting new connections
 (`http.Server.Shutdown`, bounded by `SERVER_SHUTDOWN_TIMEOUT`) → close
 Redis → close the PostgreSQL pool → exit (`cmd/server/main.go`).
+
+## System 2 — Database & Data Layer (Implemented)
+
+```text
+backend/db/migrations/000001_init_schema.{up,down}.sql
+    |
+    v
+12 tables, RLS policies, current_app_user_id()/current_app_role(),
+the evidentia_app runtime role (least-privilege, NOSUPERUSER, NOBYPASSRLS)
+    |
+    v
+backend/db/queries/*.sql  --sqlc generate-->  backend/db/generated/
+    |
+    v
+internal/models   (type aliases + controlled-vocabulary constants)
+    |
+    v
+internal/repository
+    |
+    +--> UserRepo, CaseRepo, DocumentRepo, AuditRepo, CertificateRepo
+    |      (thin wrappers over *generated.Queries)
+    |
+    +--> WithTx(ctx, pool, AppIdentity{UserID, Role}, fn)
+           |
+           v
+         BEGIN -> set_config('app.user_id', ..., true)
+                  set_config('app.role', ..., true)
+               -> fn(ctx, q)
+               -> COMMIT / ROLLBACK
+```
+
+`cmd/migrate` (a separate binary from `cmd/server`) applies migrations
+using `DATABASE_MIGRATOR_USER`/`PASSWORD` — a privileged, schema-owning
+role distinct from `evidentia_app`, which is all `cmd/server` ever
+connects as. See [docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md) for
+the full schema, RLS design, and privilege model — including the audit-log
+immutability guarantee verified in
+`backend/tests/db_audit_privileges_test.go`.
+
+`internal/database.Database` (System 1) still owns the connection pool
+itself; System 2 adds the transaction/RLS-identity layer on top of it, and
+`cmd/server` does not yet use either — no HTTP handler queries these
+tables yet (that begins with the systems in Request Flow below).
 
 ## Request Flow (Intended, Later Systems)
 
@@ -158,34 +202,11 @@ Realtime / SSE
 
 ## Data Model Overview
 
-See [docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md) for full detail.
-
-```text
-User
- └── Role
-
-Case
- ├── Users
- ├── Documents
- └── Audit Events
-
-Document
- ├── Case
- ├── Parent Document
- ├── SHA-256 Hash
- ├── MinIO Object Reference
- └── Certificate
-
-Redaction
- ├── Source Document
- └── Derivative Document
-
-AuditLog
- ├── User
- ├── Resource
- ├── Entry Hash
- └── Previous Hash
-```
+Implemented — see [docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md) for
+the full ER diagram, every table's purpose, and the design decisions
+behind each (UUID/timestamp/hash representation, why there's no
+`agencies` table, why controlled-vocabulary columns use `CHECK` instead of
+native `ENUM`, and more).
 
 ## Security Principles (Architectural Intentions)
 
@@ -204,5 +225,12 @@ The eventual system will enforce:
 11. Secure refresh-token handling
 12. Audit logging of all security-sensitive actions
 
-None of the above is implemented yet — System 1 covers infrastructure only
-(see [docs/SECURITY.md](./docs/SECURITY.md) for what that includes).
+Partially implemented as of System 2 — PostgreSQL RLS (4) is enforced with
+policies and fail-closed behavior verified by integration tests; audit
+entries have their hash/prev_hash storage and uniqueness invariants (7, 8)
+in place, but *computing* those hashes and verifying the chain (9) is
+System 8's job; SHA-256 (5), AES-256 (6), TLS (10), JWT (1), RBAC (2),
+ABAC (3), and refresh tokens (11) remain entirely unimplemented. See
+[docs/SECURITY.md](./docs/SECURITY.md) and
+[docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md) for what each
+currently covers.

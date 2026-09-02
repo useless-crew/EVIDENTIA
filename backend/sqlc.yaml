@@ -1,7 +1,10 @@
-# Evidentia — sqlc Configuration Skeleton
+# Evidentia — sqlc Configuration
 #
-# TODO: Verify schema/query paths once migrations and queries are finalized.
-# This is a skeleton only — no code has been generated from it yet.
+# Generates type-safe Go data-access code from db/queries/*.sql against the
+# schema in db/migrations/*.sql. Run via `make sqlc` (backend/Makefile) or
+# `sqlc generate` directly (requires the sqlc CLI: go install
+# github.com/sqlc-dev/sqlc/cmd/sqlc@latest). Never hand-edit db/generated/ —
+# fix the SQL or this config and regenerate instead.
 
 version: "2"
 sql:
@@ -16,3 +19,34 @@ sql:
         emit_json_tags: true
         emit_interface: true
         emit_exact_table_names: false
+        emit_pointers_for_null_types: true
+        overrides:
+          # google/uuid is already pulled in transitively (gin's validator,
+          # minio-go); using it directly here keeps application code from
+          # having to deal with pgtype.UUID's clunkier API for a type this
+          # project uses as its primary-key strategy everywhere. Each
+          # overridden type needs a *separate* nullable:true entry — a
+          # single override only ever applies to one nullability case.
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"
+          - db_type: "uuid"
+            nullable: true
+            go_type: "*github.com/google/uuid.UUID"
+          # citext is used only for users.email; sqlc doesn't recognize it
+          # natively.
+          - db_type: "citext"
+            go_type: "string"
+          # Non-null timestamptz columns become time.Time. The two nullable
+          # timestamptz columns in this schema (case_members.removed_at,
+          # users.last_login_at) are deliberately NOT overridden here: sqlc
+          # (v1.31.1) double-wraps a custom nullable override for time.Time
+          # specifically (produces **time.Time, confirmed while writing
+          # this config) — a quirk not seen with the uuid override above.
+          # Those two columns are generated as pgtype.Timestamptz instead
+          # and converted to *time.Time explicitly in the repository layer.
+          - db_type: "timestamptz"
+            go_type: "time.Time"
+          # JSONB columns carry pre-serialized JSON; json.RawMessage lets
+          # callers unmarshal only when/if they need the structured form.
+          - db_type: "jsonb"
+            go_type: "encoding/json.RawMessage"
