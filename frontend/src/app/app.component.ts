@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, ElementRef, ViewChild } from '@angular/core';
+import { Component, OnInit, inject, ElementRef, ViewChild, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { DmsStateService } from './core/services/dms-state.service';
 import { SmoothScrollService } from './core/services/smooth-scroll.service';
@@ -50,8 +50,22 @@ export class AppComponent implements OnInit {
 
   @ViewChild('contentArea') contentArea!: ElementRef<HTMLElement>;
 
+  constructor() {
+    // Listen to screen changes and reset/resize Lenis smooth scroll
+    effect(() => {
+      const currentScreen = this.dms.screen();
+      if (currentScreen) {
+        this.scrollService.scrollTo(0, { immediate: true });
+        setTimeout(() => {
+          this.scrollService.resize();
+        }, 100);
+      }
+    });
+  }
+
   ngOnInit() {
-    // Initialize Lenis smooth scrolling
+    // Initialize Lenis smooth scrolling for whole website
     this.scrollService.init();
   }
 }
+

@@ -1,5 +1,5 @@
 <div class="modal-backdrop" (click)="close()">
-  <div class="modal-dialog" (click)="$event.stopPropagation()">
+  <div class="modal-dialog" data-lenis-prevent (click)="$event.stopPropagation()">
     <!-- Modal Header -->
     <div class="modal-header">
       <div class="modal-title-group">

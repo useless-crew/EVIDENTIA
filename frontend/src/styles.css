@@ -1,3 +1,5 @@
+@import "lenis/dist/lenis.css";
+
 /* ==========================================================================
    EVIDENTIA — Digital Document Management System Design Tokens & Global Styles
    Official Indian Government Restrained Palette & Modern Web Aesthetics
@@ -83,14 +85,30 @@
 
 html {
   font-size: 14px;
-  scroll-behavior: smooth;
-  height: 100%;
+  scroll-behavior: auto !important;
+}
+
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+
+.lenis.lenis-smooth iframe {
+  pointer-events: none;
 }
 
 body {
   margin: 0;
   padding: 0;
-  min-height: 100%;
+  min-height: 100vh;
   background-color: var(--color-bg-page);
   font-family: var(--font-sans);
   color: var(--color-text-primary);
