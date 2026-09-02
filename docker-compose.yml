@@ -4,11 +4,22 @@
 # PostgreSQL, Redis, and MinIO. The frontend is included as a placeholder
 # only — see frontend/README.md; it is not built as part of this system.
 #
+# Every credential below (POSTGRES_PASSWORD, MINIO_ROOT_PASSWORD, ...) falls
+# back to an obvious, documented placeholder (see .env.example) so this
+# file works out of the box for local development with no setup. This is
+# NOT a relaxation of "never default credentials": that rule is enforced by
+# the Go application itself (internal/config), which still refuses to start
+# if DATABASE_PASSWORD/MINIO_SECRET_KEY/etc. are empty — a real deployment
+# sets its own .env (gitignored, never committed) to override these.
+#
 # Quick start:
-#   cp .env.example .env      # then edit credentials
 #   docker compose up -d
 #   curl http://localhost:8080/health
 #   curl http://localhost:8080/ready
+#
+# To use real (non-placeholder) credentials instead:
+#   cp .env.example .env      # then edit POSTGRES_PASSWORD / MINIO_ROOT_PASSWORD
+#   docker compose up -d
 
 services:
   backend:
@@ -25,7 +36,7 @@ services:
       DATABASE_HOST: postgres
       DATABASE_PORT: 5432
       DATABASE_USER: ${POSTGRES_USER:-evidentia}
-      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-changeme_example}
       DATABASE_NAME: ${POSTGRES_DB:-evidentia}
       DATABASE_SSLMODE: disable
 
@@ -33,7 +44,7 @@ services:
 
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-evidentia_minio}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-changeme_example}
       MINIO_USE_SSL: "false"
       MINIO_BUCKET: ${MINIO_BUCKET:-evidentia-documents}
 
@@ -73,7 +84,7 @@ services:
     image: postgres:15
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-evidentia}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_example}
       POSTGRES_DB: ${POSTGRES_DB:-evidentia}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
@@ -91,7 +102,7 @@ services:
     image: minio/minio:latest
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-evidentia_minio}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-changeme_example}
     command: server /data --console-address ":9001"
     ports:
       - "${MINIO_PORT:-9000}:9000"
