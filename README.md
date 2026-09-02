@@ -41,11 +41,14 @@ commands (`ng serve`, `ng build`, `ng test`, etc.).
 ### Full stack via Docker Compose
 
 ```bash
-cp .env.example .env      # edit POSTGRES_PASSWORD / MINIO_ROOT_PASSWORD
 docker compose up -d
 curl http://localhost:8080/health
 curl http://localhost:8080/ready
 ```
+
+Works with no setup — every credential falls back to a documented
+placeholder (see `.env.example`). To use real credentials instead:
+`cp .env.example .env`, edit it, then `docker compose up -d` again.
 
 ### Backend directly on the host
 
@@ -56,6 +59,23 @@ cp .env.example .env      # edit DATABASE_*/MINIO_* credentials
 # docker-compose.yml, omitting the backend service)
 go mod download
 go run ./cmd/server
+```
+
+### Make targets (from the repository root)
+
+The Go module lives in `backend/`, so plain `go test ./...` etc. only work
+from inside it — but `make <target>` works from the repository root
+without `cd backend` first (see the root `Makefile`, which delegates to
+`backend/Makefile`):
+
+```bash
+make build          # -> backend/bin/evidentia
+make test
+make test-race
+make vet
+make fmt
+make docker-up       # docker compose up -d --build
+make docker-down
 ```
 
 See [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md) for full details, and

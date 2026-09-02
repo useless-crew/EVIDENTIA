@@ -9,9 +9,20 @@ management, backups, scaling) is out of scope until a later system.
 ## Local Development — Docker Compose
 
 ```bash
+docker compose up -d
+```
+
+No setup required — every credential (`POSTGRES_PASSWORD`,
+`MINIO_ROOT_PASSWORD`, ...) falls back to an obvious placeholder
+(`changeme_example`) documented in `.env.example`. This is a convenience
+for local orchestration only, not a relaxation of "never default
+credentials": `internal/config` still refuses to start the Go application
+itself if its own credential variables are empty (see Environment
+Configuration below). To use real credentials for the containers:
+
+```bash
 cp .env.example .env
-# edit POSTGRES_PASSWORD and MINIO_ROOT_PASSWORD at minimum — these have
-# no default and docker compose refuses to start without them
+# edit POSTGRES_PASSWORD and MINIO_ROOT_PASSWORD
 docker compose up -d
 ```
 
@@ -40,9 +51,13 @@ go mod download
 go run ./cmd/server
 ```
 
-Or with `make` (from `backend/`): `make run`, `make build`, `make test`,
-`make test-race`, `make vet`, `make fmt`, `make docker-up` / `docker-down`
-(wraps the root compose file), `make clean`. `make lint` requires
+Or with `make` (from `backend/`, or from the repository root — the root
+`Makefile` delegates each of these to `backend/Makefile`, since the Go
+module lives in `backend/` and plain `go test ./...` etc. only resolve
+from inside it): `make run`, `make build`, `make test`, `make test-race`,
+`make vet`, `make fmt`, `make docker-up` / `docker-down` (root Makefile
+runs `docker compose` directly; backend Makefile wraps `../docker-compose.yml`),
+`make clean`. `make lint` requires
 [golangci-lint](https://golangci-lint.run/welcome/install/) to be installed
 separately.
 
