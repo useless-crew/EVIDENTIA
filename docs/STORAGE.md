@@ -3,27 +3,37 @@
 ## Purpose
 
 TODO: Document the object storage architecture for evidence documents.
+The interface and its two implementations (below) are implemented; the
+document-integrity pipeline that will use them is not.
 
-## Storage Interface
+## Storage Interface (Implemented)
 
-TODO: Document the storage abstraction that allows swapping between MinIO
-and local disk — see `backend/internal/storage/storage.go`.
+`backend/internal/storage/storage.go` defines `Storage`: `Put`, `Get`,
+`Delete`, `Exists`, `HealthCheck`, each `context`-aware. `Get`/`Delete`
+report a shared `ErrNotFound` sentinel regardless of backend, so callers
+can use `errors.Is` without caring which implementation is active.
 
 ```text
 Storage Interface
       │
-      ├── MinIO
-      └── Local Disk
+      ├── MinIOStorage  (production — internal/storage/minio_client.go)
+      └── LocalStorage  (dev/tests  — internal/storage/local_storage.go)
 ```
 
-## MinIO
+## MinIO (Implemented)
 
-TODO: Document bucket layout, object naming, and access-key management —
-see `backend/internal/storage/minio_client.go`.
+`NewMinIO` connects using `MINIO_*` config, verifies the configured bucket
+exists (creating it if this is a fresh instance — idempotent), and fails
+startup if the endpoint is unreachable. See
+`backend/internal/storage/minio_client.go`. Bucket layout/object naming
+conventions are not yet defined — that's for the document system.
 
-## Local Disk (Development/Fallback)
+## Local Disk (Development/Fallback) (Implemented)
 
-TODO: Document local storage layout — see
+`NewLocal` roots a `Storage` implementation at a given directory, rejecting
+keys that would escape it (absolute paths, `..`). Used today as the fast,
+hermetic backend for `internal/storage`'s own tests — not selected by
+configuration for production. See
 `backend/internal/storage/local_storage.go`.
 
 ## Document Integrity Pipeline

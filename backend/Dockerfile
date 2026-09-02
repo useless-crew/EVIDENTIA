@@ -1,33 +1,32 @@
-# Evidentia Backend — Dockerfile Scaffold
+# Evidentia Backend — Production Dockerfile
 #
-# STRUCTURAL SKELETON ONLY. Does not implement a working build/runtime yet
-# because cmd/server/main.go has no runnable application logic.
-#
-# TODO: Finalize multi-stage build once the backend compiles and runs.
+# Multi-stage build: compile a static binary in a full Go toolchain image,
+# then run it in a minimal, non-root runtime image with no build tools.
 
 # ---- Build stage ----
-FROM golang:1.22 AS builder
+FROM golang:1.25-alpine AS builder
 
-WORKDIR /app
+WORKDIR /src
 
-# TODO: copy go.mod/go.sum and run `go mod download` once dependencies exist.
-# COPY go.mod go.sum ./
-# RUN go mod download
+# Cache module downloads separately from source changes.
+COPY go.mod go.sum ./
+RUN go mod download
 
 COPY . .
 
-# TODO: uncomment once main.go has a real entrypoint.
-# RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/evidentia ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/evidentia ./cmd/server
 
 # ---- Runtime stage ----
 FROM alpine:3.19 AS runtime
 
-WORKDIR /app
+RUN apk add --no-cache ca-certificates && \
+    addgroup -S evidentia && adduser -S evidentia -G evidentia
 
-# TODO: copy compiled binary once build stage produces one.
-# COPY --from=builder /bin/evidentia /app/evidentia
+WORKDIR /app
+COPY --from=builder /out/evidentia /app/evidentia
+
+USER evidentia
 
 EXPOSE 8080
 
-# TODO: define ENTRYPOINT/CMD once the binary exists.
-# ENTRYPOINT ["/app/evidentia"]
+ENTRYPOINT ["/app/evidentia"]

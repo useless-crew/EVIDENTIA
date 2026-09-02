@@ -4,6 +4,14 @@
   z-index: 50;
   background: var(--color-navy-primary);
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.08);
+  transition: background-color 0.3s ease, box-shadow 0.3s ease, backdrop-filter 0.3s ease;
+}
+
+.header.scrolled {
+  background: rgba(19, 42, 73, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2);
 }
 
 .nav-container {
@@ -20,6 +28,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
+  user-select: none;
 }
 
 .seal-badge {
@@ -33,6 +42,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s ease;
+}
+
+.brand:hover .seal-badge {
+  transform: rotate(180deg);
+  border-color: var(--tricolor-saffron);
 }
 
 .seal-text {
@@ -51,6 +66,11 @@
   font: 700 18px var(--font-sans);
   color: #ffffff;
   letter-spacing: 0.01em;
+  transition: opacity 0.2s ease;
+}
+
+.brand:hover .brand-name {
+  opacity: 0.9;
 }
 
 .brand-tagline {
@@ -61,24 +81,48 @@
 .nav-actions {
   display: flex;
   align-items: center;
-  gap: 28px;
+  gap: 24px;
 }
 
 .nav-link {
+  position: relative;
   font: 500 13.5px var(--font-sans);
   color: rgba(255, 255, 255, 0.85);
-  transition: color 0.15s ease;
+  padding: 4px 0;
+  transition: color 0.2s ease;
+}
+
+.nav-link::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  height: 2px;
+  background: var(--tricolor-saffron);
+  border-radius: 2px;
+  transition: width 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .nav-link:hover {
   color: #ffffff;
-  text-decoration: underline;
+  text-decoration: none;
+}
+
+.nav-link:hover::after {
+  width: 100%;
 }
 
 .mobile-toggle {
   display: none;
   background: transparent;
   padding: 4px;
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+.mobile-toggle:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 @media (max-width: 768px) {
@@ -97,9 +141,11 @@
     padding: 20px 24px;
     gap: 16px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.3);
   }
 
   .nav-actions.open {
     display: flex;
   }
 }
+

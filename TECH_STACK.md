@@ -76,6 +76,15 @@ Redis/Asynq are intended to eventually support:
 - Docker
 - Docker Compose
 
+## Implementation Status (System 1 — Foundation & Infrastructure)
+
+Wired in and in active use: Go, Gin, PostgreSQL (`pgx`/`pgxpool`), Redis
+(`go-redis`), MinIO (`minio-go`), `godotenv`, Testify. Not yet added,
+pending the systems that need them: `golang-jwt/jwt`, bcrypt, RBAC/ABAC,
+PostgreSQL RLS, `sqlc`, `golang-migrate`, SHA-256/AES-256/RSA/ECDSA, Asynq,
+`go-playground/validator`, `swaggo/swag`, SSE. Adding any of these before
+their owning system is implemented is scope creep — don't.
+
 ## Explicitly Out of Scope
 
 The following substitutions are **not** permitted without a formal

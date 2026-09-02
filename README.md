@@ -3,11 +3,14 @@
 Evidentia is a secure digital evidence and case-management platform designed for
 investigative and judicial workflows.
 
-> **Status:** Backend scaffolding phase. The `backend/` directory currently
-> contains project structure, placeholders, and documentation skeletons only
-> — no application logic has been implemented yet. The `frontend/` directory
-> contains an Angular application (generated via Angular CLI) plus design
-> reference material.
+> **Status:** Backend System 1 — Foundation & Infrastructure — is
+> implemented: configuration, structured logging, PostgreSQL/Redis/MinIO
+> connectivity, the HTTP server (Gin) with its middleware stack, and
+> `/health` + `/ready`. Authentication, authorization, case management,
+> documents, and the audit chain are not implemented yet — those are later
+> systems; see [ARCHITECTURE.md](./ARCHITECTURE.md). The `frontend/`
+> directory contains an Angular application (generated via Angular CLI)
+> plus design reference material.
 
 ## Repository Layout
 
@@ -35,23 +38,55 @@ commands (`ng serve`, `ng build`, `ng test`, etc.).
 
 ## Getting Started
 
-> TODO: Backend setup instructions will be added once implementation begins.
-> For the frontend, see [frontend/README.md](./frontend/README.md).
+### Full stack via Docker Compose
+
+```bash
+cp .env.example .env      # edit POSTGRES_PASSWORD / MINIO_ROOT_PASSWORD
+docker compose up -d
+curl http://localhost:8080/health
+curl http://localhost:8080/ready
+```
+
+### Backend directly on the host
+
+```bash
+cd backend
+cp .env.example .env      # edit DATABASE_*/MINIO_* credentials
+# start postgres, redis, minio however you prefer (or via the root
+# docker-compose.yml, omitting the backend service)
+go mod download
+go run ./cmd/server
+```
+
+See [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md) for full details, and
+[frontend/README.md](./frontend/README.md) for frontend development
+commands.
 
 ## Project Status
 
 ### Backend
 
-This phase covers **backend scaffolding only**:
+**System 1 — Foundation & Infrastructure** is implemented:
 
-- Directory structure
-- Placeholder files with TODO responsibilities
-- Configuration skeletons (`.env.example`, `sqlc.yaml`, Docker, Makefile)
-- Documentation scaffolding
+- Typed, validated configuration loaded from environment variables
+  (fails startup on missing/invalid values — see `internal/config`)
+- Structured JSON/text logging (`internal/logger`)
+- PostgreSQL (`internal/database`), Redis (`internal/cache`), and MinIO
+  (`internal/storage`) connectivity with health checks
+- Dependency-injected application container (`internal/app`) — no global
+  mutable connections
+- Gin HTTP server with request ID, CORS, structured request logging, panic
+  recovery, and body-size-limit middleware (`internal/httpserver`,
+  `internal/middleware`)
+- `GET /health` and `GET /ready` (`internal/handlers/health`)
+- Graceful shutdown on SIGINT/SIGTERM
+- Multi-stage Dockerfile and Docker Compose with health-checked services
+- Unit, race-safe, and integration (`-tags=integration`) tests
 
-No authentication, authorization, database, storage, cryptography, audit, or
-job-processing logic has been implemented. See [ARCHITECTURE.md](./ARCHITECTURE.md)
-for the intended design.
+Not yet implemented (later systems): authentication, RBAC/ABAC, PostgreSQL
+RLS, case management, document upload/hashing/redaction, the audit chain,
+compliance certificates, and background jobs. See
+[ARCHITECTURE.md](./ARCHITECTURE.md) for the full intended design.
 
 ### Frontend
 

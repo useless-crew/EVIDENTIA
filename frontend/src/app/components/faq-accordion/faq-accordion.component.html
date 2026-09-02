@@ -1,5 +1,5 @@
 <div class="faq-list">
-  <div *ngFor="let item of faqs; let i = index" class="faq-item">
+  <div *ngFor="let item of faqs; let i = index" class="faq-item" [class.open]="item.open">
     <button 
       type="button"
       class="faq-header" 
@@ -7,7 +7,9 @@
       (click)="toggleFaq(i)"
     >
       <span class="faq-question">{{ item.q }}</span>
-      <span class="faq-icon" aria-hidden="true">{{ item.open ? '−' : '+' }}</span>
+      <svg class="faq-icon-svg" [class.rotated]="item.open" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M6 9l6 6 6-6"></path>
+      </svg>
     </button>
     
     <div *ngIf="item.open" class="faq-answer-container">
@@ -15,3 +17,4 @@
     </div>
   </div>
 </div>
+

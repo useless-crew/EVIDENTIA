@@ -2,7 +2,35 @@
 
 ## Purpose
 
-TODO: Document the full security model for Evidentia.
+TODO: Document the full security model for Evidentia. This file also
+tracks what's implemented so far, distinct from the eventual full model.
+
+## Implemented in System 1 (Foundation & Infrastructure)
+
+- **Fail-closed configuration**: `internal/config` requires
+  `DATABASE_USER`/`PASSWORD`/`NAME` and `MINIO_ACCESS_KEY`/`SECRET_KEY`/
+  `BUCKET` explicitly — no baked-in default like `admin`/`password`. An
+  invalid or incomplete configuration refuses to start rather than run in
+  a partially valid state.
+- **No wildcard CORS in production**: `CORS_ALLOWED_ORIGINS=*` is rejected
+  at startup when `APP_ENV=production` (`internal/config/validate.go`).
+- **Bounded HTTP timeouts**: every server timeout (read, write, idle,
+  shutdown) is explicit — never zero/unbounded (`internal/httpserver`).
+- **Request-size protection**: `SERVER_MAX_BODY_BYTES` bounds request
+  bodies via `http.MaxBytesReader` (`internal/middleware/body_limit_middleware.go`).
+- **Safe error responses**: panics and internal errors return a generic
+  `INTERNAL_ERROR` message with no stack trace, SQL text, or file paths;
+  the detail is logged server-side only (`internal/middleware/recovery_middleware.go`).
+- **No secrets in logs**: structured request logging records method, path,
+  status, duration, and request ID — never headers or request/response
+  bodies, so it cannot log an `Authorization` header or a credential by
+  construction (`internal/middleware/logging_middleware.go`).
+- **Bounded, validated request IDs**: an oversized or malformed
+  `X-Request-ID` is replaced rather than trusted
+  (`internal/middleware/request_id_middleware.go`).
+
+None of this is the full model below — it's the infrastructure layer later
+systems build the rest on top of.
 
 ## Principles
 
