@@ -1,28 +1,76 @@
-/* Global CSS Design Tokens & Styles - EVIDENTIA Government Design System */
+/* ==========================================================================
+   EVIDENTIA — Digital Document Management System Design Tokens & Global Styles
+   Official Indian Government Restrained Palette & Modern Web Aesthetics
+   ========================================================================== */
+
 :root {
-  /* Official Palette */
+  /* Official Navy & Government Palette */
   --color-navy-primary: #132a49;
   --color-navy-dark: #0e2038;
+  --color-navy-surface: #183358;
+  --color-navy-hover: #1f406d;
+  --color-navy-active: #091729;
+
+  /* Workspace & Surfaces */
   --color-bg-light: #e6eaed;
+  --color-bg-page: #edf1f5;
   --color-card-bg: #ffffff;
-  --color-section-alt: #f5f6f8;
+  --color-card-raised: #f8fafc;
+  --color-section-alt: #f4f6f9;
+  --color-hover-row: #eef3f8;
+  --color-selected-row: #e4ecf5;
+
+  /* Borders & Dividers */
+  --color-border: #dce2e8;
+  --color-border-subtle: #e9edf1;
+  --color-border-navy: #1f3b60;
+
+  /* Typography Colors */
   --color-text-primary: #172536;
-  --color-text-secondary: #68717c;
-  --color-text-muted: #a7afb7;
-  --color-border: #e2e6ea;
+  --color-text-secondary: #5b6775;
+  --color-text-muted: #8d98a5;
+  --color-text-light: #f1f5f9;
+
+  /* Official Accent Blue */
   --color-accent-blue: #426d9b;
   --color-accent-blue-hover: #2f527a;
-  --color-success: #2e7d4f;
+  --color-accent-blue-light: #eef5fc;
 
-  /* Tricolor Accent */
+  /* Indian National Tricolor */
   --tricolor-saffron: #ff9933;
   --tricolor-white: #ffffff;
   --tricolor-green: #138808;
 
+  /* Status Tokens */
+  --color-success: #2e7d4f;
+  --color-success-bg: #ebf7ee;
+  --color-success-border: #bbf7d0;
+
+  --color-warning: #b26a00;
+  --color-warning-bg: #fff8eb;
+  --color-warning-border: #fed7aa;
+
+  --color-info: #1e4a7a;
+  --color-info-bg: #eef5fc;
+  --color-info-border: #bfdbfe;
+
+  --color-neutral: #5b6775;
+  --color-neutral-bg: #f1f5f9;
+  --color-neutral-border: #e2e8f0;
+
+  --color-danger: #c53030;
+  --color-danger-bg: #fff1f2;
+  --color-danger-border: #fecdd3;
+
   /* Typography */
-  --font-sans:
-    'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'JetBrains Mono', 'Consolas', monospace;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgba(19, 42, 73, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(19, 42, 73, 0.08), 0 2px 4px -2px rgba(19, 42, 73, 0.05);
+  --shadow-lg: 0 10px 15px -3px rgba(19, 42, 73, 0.1), 0 4px 6px -4px rgba(19, 42, 73, 0.05);
+  --shadow-modal: 0 20px 25px -5px rgba(14, 32, 56, 0.25), 0 8px 10px -6px rgba(14, 32, 56, 0.15);
 }
 
 *,
@@ -33,48 +81,48 @@
   padding: 0;
 }
 
-/* Lenis Smooth Scroll resets */
-html.lenis,
-html.lenis body {
-  height: auto;
-}
-
-.lenis.lenis-smooth {
-  scroll-behavior: auto !important;
-}
-
-.lenis.lenis-smooth [data-lenis-prevent] {
-  overscroll-behavior: contain;
-}
-
-.lenis.lenis-stopped {
-  overflow: hidden;
-}
-
-.lenis.lenis-scrolling iframe {
-  pointer-events: none;
+html {
+  font-size: 14px;
+  scroll-behavior: smooth;
+  height: 100%;
 }
 
 body {
   margin: 0;
-  background-color: var(--color-bg-light);
+  padding: 0;
+  min-height: 100%;
+  background-color: var(--color-bg-page);
   font-family: var(--font-sans);
   color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   line-height: 1.5;
+  overflow-x: hidden;
 }
 
-h1,
-h2,
-h3,
-h4,
-h5,
-h6 {
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: #e2e8f0;
+}
+::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Base Typography */
+h1, h2, h3, h4, h5, h6 {
   color: var(--color-text-primary);
   font-family: var(--font-sans);
   font-weight: 700;
   margin: 0;
+  letter-spacing: -0.015em;
 }
 
 p {
@@ -84,135 +132,187 @@ p {
 a {
   color: var(--color-accent-blue);
   text-decoration: none;
-  transition: color 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: color 0.15s ease;
 }
 
 a:hover {
-  color: var(--color-accent-blue-hover);
+  color: var(--color-navy-primary);
   text-decoration: underline;
 }
 
+/* Monospace Helpers */
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* Buttons */
 button {
   font-family: inherit;
   cursor: pointer;
   border: none;
   outline: none;
-  transition:
-    transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-    background-color 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-    border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-    box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-    color 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.15s ease-in-out;
 }
 
-/* Button styles with modern lift & hover micro-interactions */
 .btn-primary {
   background: var(--color-navy-primary);
   border: 1px solid var(--color-navy-primary);
   color: #ffffff;
-  font: 600 14.5px/1 var(--font-sans);
-  padding: 13px 26px;
-  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 15px;
+  border-radius: 5px;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 7px;
   cursor: pointer;
-  box-shadow: 0 2px 4px rgba(19, 42, 73, 0.1);
 }
 
 .btn-primary:hover {
   background: var(--color-navy-dark);
   border-color: var(--color-navy-dark);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(19, 42, 73, 0.22);
 }
 
 .btn-primary:active {
-  transform: translateY(0) scale(0.98);
-  box-shadow: 0 2px 4px rgba(19, 42, 73, 0.1);
+  transform: translateY(1px);
 }
 
 .btn-secondary {
   background: #ffffff;
-  border: 1px solid var(--color-navy-primary);
+  border: 1px solid var(--color-border);
   color: var(--color-navy-primary);
-  font: 600 14.5px/1 var(--font-sans);
-  padding: 13px 26px;
-  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 15px;
+  border-radius: 5px;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 7px;
   cursor: pointer;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
 }
 
 .btn-secondary:hover {
   background: var(--color-section-alt);
-  border-color: var(--color-navy-dark);
-  color: var(--color-navy-dark);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(19, 42, 73, 0.12);
+  border-color: var(--color-accent-blue);
 }
 
-.btn-secondary:active {
-  transform: translateY(0) scale(0.98);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
-}
-
-.btn-outline-white {
+.btn-outline-navy {
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  color: #ffffff;
-  font: 500 13.5px/1 var(--font-sans);
-  padding: 8px 16px;
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-
-.btn-outline-white:hover {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.8);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 14px rgba(255, 255, 255, 0.15);
-}
-
-.btn-outline-white:active {
-  transform: translateY(0) scale(0.98);
-  box-shadow: none;
-}
-
-.btn-white {
-  background: #ffffff;
-  border: 1px solid #ffffff;
+  border: 1px solid var(--color-accent-blue);
   color: var(--color-navy-primary);
-  font: 600 13.5px/1 var(--font-sans);
-  padding: 9px 18px;
-  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 15px;
+  border-radius: 5px;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  gap: 7px;
 }
 
-.btn-white:hover {
-  background: #f8fafc;
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(255, 255, 255, 0.25);
+.btn-outline-navy:hover {
+  background: var(--color-accent-blue-light);
 }
 
-.btn-white:active {
-  transform: translateY(0) scale(0.98);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+/* Status Badges */
+.badge-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  line-height: 1.25;
 }
 
-/* Layout Utilities */
-.container {
-  max-width: 1240px;
-  margin: 0 auto;
-  padding: 0 24px;
+.badge-investigation {
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
 }
 
+.badge-chargesheet {
+  color: var(--color-success);
+  background: var(--color-success-bg);
+  border: 1px solid var(--color-success-border);
+}
+
+.badge-trial {
+  color: var(--color-info);
+  background: var(--color-info-bg);
+  border: 1px solid var(--color-info-border);
+}
+
+.badge-closed {
+  color: var(--color-neutral);
+  background: var(--color-neutral-bg);
+  border: 1px solid var(--color-neutral-border);
+}
+
+.badge-danger {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
+}
+
+/* Micro Animations */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulseDot {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.85);
+  }
+}
+
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-spin {
+  animation: spin 0.75s linear infinite;
+}
+
+.animate-pulse-dot {
+  animation: pulseDot 1.8s ease-in-out infinite;
+}
+
+.animate-fade-in {
+  animation: fadeSlideIn 0.2s ease-out;
+}
+
+/* Document Grid striped canvas */
+.doc-canvas-bg {
+  background: repeating-linear-gradient(
+    45deg,
+    #f8fafc,
+    #f8fafc 9px,
+    #f1f5f9 9px,
+    #f1f5f9 18px
+  );
+}
+
+.doc-canvas-dark-bg {
+  background: repeating-linear-gradient(
+    45deg,
+    #182332,
+    #182332 9px,
+    #0f1722 9px,
+    #0f1722 18px
+  );
+}

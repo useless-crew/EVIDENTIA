@@ -1,0 +1,134 @@
+<div class="modal-backdrop" (click)="close()">
+  <div class="modal-dialog" (click)="$event.stopPropagation()">
+    <!-- Modal Header -->
+    <div class="modal-header">
+      <div class="modal-title-group">
+        <h2 class="modal-title">Upload &amp; Fingerprint Document</h2>
+        <span class="modal-subtitle">Target Case: FIR/2026/4521</span>
+      </div>
+      <button type="button" class="btn-close" (click)="close()">×</button>
+    </div>
+
+    <!-- Modal Body -->
+    <div class="modal-body">
+      <!-- Phase 1: Idle Form -->
+      <div *ngIf="dms.uploadPhase() === 'idle'" class="phase-idle animate-fade-in">
+        <div class="dropzone">
+          <div class="dropzone-icon">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+          </div>
+          <div class="dropzone-text">
+            Drop judicial exhibits or files here, or <span class="browse-link">browse</span>
+          </div>
+          <div class="dropzone-sub">PDF, JPG, PNG, MP4 · Max 250 MB · Hash computed on client</div>
+        </div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label">DOCUMENT TYPE</label>
+            <div class="form-select-display">
+              <span>Forensic Report (§65B compliant)</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">SELECTED FILE</label>
+            <div class="form-file-display font-mono">
+              UPI_trace_v2.pdf (1.4 MB)
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">EVIDENCE DESCRIPTION</label>
+          <textarea
+            class="form-textarea"
+            rows="2"
+            readonly
+          >Transaction trace across three beneficiary accounts with IP address logs requisitioned under §94 BNSS…</textarea>
+        </div>
+      </div>
+
+      <!-- Phase 2 & 3: Progress & Live Hashing -->
+      <div *ngIf="dms.uploadPhase() === 'progress' || dms.uploadPhase() === 'hashing'" class="phase-busy animate-fade-in">
+        <div class="status-stage-row">
+          <span class="stage-label">
+            {{ dms.uploadPhase() === 'hashing' ? 'Computing SHA-256 cryptographic digest…' : 'Uploading UPI_trace_v2.pdf to secure store…' }}
+          </span>
+          <span class="stage-pct font-mono">
+            {{ dms.uploadPhase() === 'hashing' ? '100%' : dms.uploadPct() + '%' }}
+          </span>
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="progress-track">
+          <div class="progress-bar" [style.width]="dms.uploadPhase() === 'hashing' ? '100%' : dms.uploadPct() + '%'"></div>
+        </div>
+
+        <!-- Scrambling Live Hash Box -->
+        <div class="hash-section">
+          <div class="hash-header">
+            <span class="hash-title">SHA-256 CLIENT-SIDE FINGERPRINT</span>
+            <span class="hash-badge" *ngIf="dms.uploadPhase() === 'hashing'">COMPUTING</span>
+          </div>
+          <div class="hash-code-box font-mono" [class.highlight]="dms.uploadPhase() === 'hashing'">
+            {{ dms.liveHash() || '0000000000000000000000000000000000000000000000000000000000000000' }}
+          </div>
+        </div>
+      </div>
+
+      <!-- Phase 4: Done -->
+      <div *ngIf="dms.uploadPhase() === 'done'" class="phase-done animate-fade-in">
+        <div class="success-banner">
+          <div class="success-icon">✓</div>
+          <div>
+            <div class="success-title">Cryptographic Fingerprint Recorded</div>
+            <div class="success-sub">Document successfully sealed and appended to evidence chain</div>
+          </div>
+        </div>
+
+        <div class="fingerprint-result">
+          <div class="result-label">SHA-256 DIGEST · UPI_trace_v2.pdf</div>
+          <div class="hash-copy-row">
+            <div class="hash-code-box font-mono completed">
+              {{ dms.liveHash() }}
+            </div>
+            <button type="button" class="btn-copy" (click)="copyHash()">
+              {{ copied ? 'Copied!' : 'Copy' }}
+            </button>
+          </div>
+        </div>
+
+        <div class="audit-append-notice">
+          <span class="audit-dot"></span>
+          <span>
+            Audit entry <strong class="font-mono">#1205</strong> appended to hash chain with signature <strong class="font-mono">ED25519-01</strong>.
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal Footer -->
+    <div class="modal-footer">
+      <button type="button" class="btn-secondary" (click)="close()">
+        {{ dms.uploadPhase() === 'done' ? 'Close' : 'Cancel' }}
+      </button>
+
+      <button
+        *ngIf="dms.uploadPhase() === 'idle'"
+        type="button"
+        class="btn-primary"
+        (click)="startUpload()"
+      >
+        Upload &amp; Fingerprint
+      </button>
+    </div>
+  </div>
+</div>

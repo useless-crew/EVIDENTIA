@@ -1,0 +1,282 @@
+.dash-view {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Header */
+.dash-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.dash-title {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--color-navy-primary);
+  letter-spacing: -0.02em;
+}
+
+.dash-subtitle {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin-top: 4px;
+}
+
+.dash-header-actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* Stats Cards Grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+@media (max-width: 1024px) {
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.stat-card {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 16px 18px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.stat-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.stat-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.stat-icon-bullet {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid;
+}
+
+.stat-value {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--color-navy-primary);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.stat-delta {
+  margin-top: 8px;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+/* Content Split Grid */
+.dash-content-grid {
+  display: grid;
+  grid-template-columns: 1.65fr 1fr;
+  gap: 18px;
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .dash-content-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Content Panels */
+.content-panel {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.panel-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--color-border);
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--color-navy-primary);
+}
+
+.panel-link {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-accent-blue);
+}
+
+.panel-inner-pad {
+  padding: 16px 18px;
+}
+
+/* Activity Feed */
+.activity-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.activity-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: #ffffff;
+  transition: background-color 0.15s ease;
+}
+
+.activity-row:nth-child(even) {
+  background: #fafbfc;
+}
+
+.activity-row:hover {
+  background: var(--color-hover-row);
+}
+
+.activity-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex: none;
+}
+
+.activity-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.activity-text {
+  font-size: 13px;
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+
+.activity-meta {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  margin-top: 2px;
+}
+
+.activity-time {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* Right Column */
+.dash-sidebar-col {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* Shortcuts */
+.shortcuts-list {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shortcut-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: var(--color-section-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-navy-primary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.shortcut-btn:hover {
+  background: var(--color-accent-blue-light);
+  border-color: var(--color-accent-blue);
+  color: var(--color-navy-dark);
+}
+
+/* Integrity Card */
+.integrity-desc {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+.integrity-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  background: var(--color-success-bg);
+  border: 1px solid var(--color-success-border);
+  border-radius: 4px;
+}
+
+.integrity-pill.tampered {
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-border);
+}
+
+.integrity-pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-success);
+}
+
+.integrity-pill-dot.tampered {
+  background: var(--color-danger);
+}
+
+.integrity-pill-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-success);
+}
+
+.integrity-pill.tampered .integrity-pill-text {
+  color: var(--color-danger);
+}

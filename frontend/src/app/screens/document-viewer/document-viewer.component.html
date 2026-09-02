@@ -1,0 +1,175 @@
+<div class="doc-viewer-view animate-fade-in">
+  <!-- Document Header -->
+  <div class="doc-header">
+    <div>
+      <h1 class="doc-title font-mono">Forensic_Report_UPI_4521.pdf</h1>
+      <p class="doc-subtitle">
+        2.4 MB · Uploaded 18 Feb 2026, 10:14 IST by Dr. A. Iyer (State Cyber Lab)
+      </p>
+    </div>
+
+    <div class="doc-actions">
+      <button type="button" class="btn-secondary">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+        Download
+      </button>
+
+      <button type="button" class="btn-secondary" (click)="goToRedact()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 20h9"></path>
+          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+        </svg>
+        Redact
+      </button>
+
+      <button type="button" class="btn-primary">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="18" cy="5" r="3"></circle>
+          <circle cx="6" cy="12" r="3"></circle>
+          <circle cx="18" cy="19" r="3"></circle>
+          <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+          <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+        </svg>
+        Share
+      </button>
+    </div>
+  </div>
+
+  <!-- Viewer 2-Column Split -->
+  <div class="doc-layout-grid">
+    <!-- Left Column: Document Canvas & Controls -->
+    <div class="viewer-card">
+      <div class="viewer-toolbar">
+        <button type="button" class="tool-btn" (click)="zoomOut()">−</button>
+        <button type="button" class="tool-btn" (click)="zoomIn()">+</button>
+        <span class="page-indicator font-mono">Page 1 / 6 ({{ zoomLevel }}%)</span>
+        <div class="toolbar-spacer"></div>
+        <button type="button" class="tool-btn-fit" (click)="resetZoom()">Fit Width</button>
+      </div>
+
+      <!-- Rendered PDF Preview -->
+      <div class="viewer-viewport doc-canvas-bg">
+        <div class="pdf-page-sheet" [style.transform]="'scale(' + zoomLevel / 100 + ')'">
+          <div class="sheet-emblem">
+            <div class="sheet-seal">STATE FORENSIC SCIENCE LABORATORY</div>
+            <div class="sheet-dept">CYBER DIGITAL FORENSICS DIVISION · NOIDA</div>
+          </div>
+
+          <div class="sheet-divider"></div>
+
+          <div class="sheet-case-row">
+            <div><strong class="font-mono">FIR NO:</strong> 2026/4521</div>
+            <div><strong class="font-mono">DATE:</strong> 18-02-2026</div>
+          </div>
+
+          <h3 class="sheet-subject">
+            SUBJECT: FORENSIC ACQUISITION &amp; TRANSACTION LOG RECONSTRUCTION
+          </h3>
+
+          <div class="sheet-section">
+            <div class="sheet-sec-title">1. EVIDENCE SUBMISSION DETAILS</div>
+            <p class="sheet-p">
+              Exhibit marked 'E-04' (Oneplus Nord CE3 Lite 5G, IMEI: 359124018291021) received under unbroken police seal on 13 Feb 2026 from Investigating Officer SI Rajat Mehra. Physical tampering seals verified intact.
+            </p>
+          </div>
+
+          <div class="sheet-section">
+            <div class="sheet-sec-title">2. CRYPTOGRAPHIC BIT-STREAM ACQUISITION</div>
+            <p class="sheet-p">
+              Logical and physical forensic image extracted utilizing write-blocking interface. Full bit-stream duplicate generated with physical sector verification.
+            </p>
+            <div class="sheet-hash-box font-mono">
+              SHA-256 IMAGE DIGEST: d41f9a3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58
+            </div>
+          </div>
+
+          <div class="sheet-section">
+            <div class="sheet-sec-title">3. PRELIMINARY FINDINGS</div>
+            <p class="sheet-p">
+              14 outgoing UPI debit API calls detected via APK com.phonepe.app within an 18-minute window. Destination VPA: merchant.gateway49&#64;hdfc. IP geo-location logs cross-verified with ISP tower records under §94 BNSS.
+            </p>
+          </div>
+
+          <div class="sheet-signature-block">
+            <div class="sheet-sig-line"></div>
+            <div class="sheet-sig-name">Dr. Anjali Iyer, Ph.D.</div>
+            <div class="sheet-sig-role">Senior Forensic Examiner (Digital Forensics)</div>
+            <div class="sheet-sig-cert font-mono">CERT §65B-CYBER-2026-9912</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Column: Integrity & Custody Sidecars -->
+    <div class="doc-side-col">
+      <!-- SHA-256 Integrity Card -->
+      <div class="side-card">
+        <h2 class="side-card-title">Cryptographic Integrity</h2>
+        <div class="side-card-label">SHA-256 BIT-STREAM DIGEST</div>
+        <div class="digest-box font-mono">{{ docHash }}</div>
+
+        <div class="verify-action-row">
+          <button type="button" class="btn-primary btn-sm" (click)="verify()">
+            Verify Integrity
+          </button>
+          <div class="verify-feedback">
+            <span *ngIf="dms.verifyState() === 'idle'" class="status-idle">
+              Not verified this session
+            </span>
+            <span *ngIf="dms.verifyState() === 'checking'" class="status-checking">
+              <span class="spinner-dot"></span> Recomputing hash…
+            </span>
+            <span *ngIf="dms.verifyState() === 'ok'" class="status-ok">
+              ✓ Unaltered — matches digest
+            </span>
+            <span *ngIf="dms.verifyState() === 'tampered'" class="status-bad">
+              ⚠ Tampered — digest mismatch
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Legal Compliance Card -->
+      <div class="side-card">
+        <div
+          class="compliance-badge-btn"
+          (click)="toggleCert()"
+          title="Click to view §65B compliance certificate"
+        >
+          <span class="compliance-dot"></span>
+          <span>IT Act §65B Compliant</span>
+          <span class="compliance-info-icon">i</span>
+        </div>
+
+        <div *ngIf="certOpen" class="cert-modal animate-fade-in">
+          <div class="cert-title">§65B(4) Legal Certificate</div>
+          <div class="cert-hash font-mono">hash · {{ certHash }}</div>
+          <div class="cert-row">issued · 18 Feb 2026 10:14:07 IST</div>
+          <div class="cert-row">authority · SP Cyber Cell, Gautam Buddh Nagar</div>
+          <div class="cert-statute">Admissible under §63 BSA 2023 / §65B IT Act</div>
+        </div>
+      </div>
+
+      <!-- Chain of Custody Card -->
+      <div class="side-card">
+        <h2 class="side-card-title">Chain of Custody</h2>
+        <div class="custody-timeline">
+          <div *ngFor="let c of dms.chainOfCustody; let last = last" class="custody-step">
+            <div class="custody-axis">
+              <span class="custody-dot" [style.background-color]="c.dotColor"></span>
+              <span *ngIf="!last" class="custody-line"></span>
+            </div>
+            <div class="custody-body">
+              <div class="custody-text">{{ c.text }}</div>
+              <div class="custody-hash font-mono">link · {{ c.hash }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,88 @@
+<!-- National Tricolor Bar -->
+<div class="tricolor-ribbon" aria-hidden="true">
+  <div class="stripe-saffron"></div>
+  <div class="stripe-white"></div>
+  <div class="stripe-green"></div>
+</div>
+
+<!-- Main Executive Navy Header -->
+<header class="header">
+  <div class="header-inner">
+    <!-- Brand Identity -->
+    <div class="brand" (click)="dms.navigateTo('dash')">
+      <div class="seal-badge" aria-hidden="true">
+        <span class="seal-text">SEAL</span>
+      </div>
+      <div class="brand-text">
+        <span class="brand-name">EVIDENTIA</span>
+        <span class="brand-tagline">Secure Digital DMS · India Justice Network</span>
+      </div>
+    </div>
+
+    <!-- Search Input -->
+    <div class="search-bar">
+      <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="8"></circle>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </svg>
+      <input
+        type="text"
+        placeholder="Search cases, documents, hashes (SHA-256)..."
+        class="search-input"
+      />
+    </div>
+
+    <div class="header-spacer"></div>
+
+    <!-- Actions & Personnel Info -->
+    <div class="header-actions">
+      <!-- Role Selector -->
+      <div class="role-selector-wrap">
+        <label for="role-select" class="role-label">ROLE</label>
+        <select
+          id="role-select"
+          class="role-dropdown"
+          [value]="dms.role()"
+          (change)="onRoleChange($event)"
+        >
+          <option *ngFor="let r of dms.roles" [value]="r">{{ r }}</option>
+        </select>
+      </div>
+
+      <!-- Simulate Tamper Toggle -->
+      <button
+        type="button"
+        class="tamper-toggle-btn"
+        [class.active]="dms.simulateTamper()"
+        (click)="toggleTamper()"
+        title="Toggle tamper simulation to test cryptographic integrity alerts"
+      >
+        <span class="tamper-dot" [class.danger]="dms.simulateTamper()"></span>
+        <span class="tamper-text">{{ dms.simulateTamper() ? 'Tamper: ON' : 'Tamper: OFF' }}</span>
+      </button>
+
+      <!-- Notification Bell -->
+      <div class="notification-wrap" title="System Notifications">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+        </svg>
+        <span class="notification-indicator"></span>
+      </div>
+
+      <!-- Officer Profile Badge -->
+      <div class="user-profile">
+        <div class="user-avatar">RM</div>
+        <div class="user-meta">
+          <div class="user-name">SI R. Mehra</div>
+          <div class="user-role-badge">{{ dms.role() }}</div>
+        </div>
+      </div>
+
+      <!-- Logout Button -->
+      <button type="button" class="btn-logout" (click)="signOut()">
+        Logout
+      </button>
+    </div>
+  </div>
+</header>

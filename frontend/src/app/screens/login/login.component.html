@@ -1,0 +1,72 @@
+<div class="login-page">
+  <!-- Top Tricolor Ribbon -->
+  <div class="tricolor-ribbon">
+    <div class="stripe-saffron"></div>
+    <div class="stripe-white"></div>
+    <div class="stripe-green"></div>
+  </div>
+
+  <div class="login-container">
+    <!-- Brand Emblem -->
+    <div class="brand-header">
+      <div class="seal-badge" aria-hidden="true">
+        <span class="seal-text">SEAL</span>
+      </div>
+      <div class="brand-titles">
+        <span class="brand-main">EVIDENTIA</span>
+        <span class="brand-sub">Secure Digital DMS · National Justice Network</span>
+      </div>
+    </div>
+
+    <!-- Login Card -->
+    <div class="login-card">
+      <h1 class="card-title">Authorized Sign In</h1>
+      <p class="card-description">
+        Cryptographic evidence and case file management for India's justice system.
+      </p>
+
+      <form (ngSubmit)="signIn()" class="login-form">
+        <div class="form-field">
+          <label class="field-label">OFFICIAL GOVERNMENT EMAIL</label>
+          <input
+            type="email"
+            class="field-input"
+            [(ngModel)]="email"
+            name="email"
+            required
+          />
+        </div>
+
+        <div class="form-field">
+          <label class="field-label">SECURITY CREDENTIAL / KEY</label>
+          <input
+            type="password"
+            class="field-input font-mono"
+            [(ngModel)]="password"
+            name="password"
+            required
+          />
+        </div>
+
+        <button type="submit" class="btn-primary btn-signin">
+          Sign In to Portal
+        </button>
+      </form>
+
+      <div class="card-footer">
+        <a href="#" class="forgot-link" (click)="$event.preventDefault()">Forgot password / credentials</a>
+        <span class="version-tag font-mono">v2.4.1 (BSA-65B)</span>
+      </div>
+    </div>
+
+    <!-- Compliance Note -->
+    <div class="compliance-note">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="16" x2="12" y2="12"></line>
+        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+      </svg>
+      <span>Authorized personnel only — all access is cryptographically audited under §65B of the IT Act, 2000.</span>
+    </div>
+  </div>
+</div>

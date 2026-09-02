@@ -1,27 +1,55 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
-import { TricolorBarComponent } from './components/tricolor-bar/tricolor-bar.component';
-import { NavbarComponent } from './components/navbar/navbar.component';
-import { FooterComponent } from './components/footer/footer.component';
-import { LenisService } from './core/services/lenis.service';
+import { Component, OnInit, inject, ElementRef, ViewChild } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { DmsStateService } from './core/services/dms-state.service';
+import { SmoothScrollService } from './core/services/smooth-scroll.service';
+import { AnimationService } from './core/services/animation.service';
+
+// Header & Sidebar Components
+import { HeaderComponent } from './components/header/header.component';
+import { SidebarComponent } from './components/sidebar/sidebar.component';
+import { UploadModalComponent } from './components/upload-modal/upload-modal.component';
+
+// Screen Components
+import { LoginComponent } from './screens/login/login.component';
+import { DashboardComponent } from './screens/dashboard/dashboard.component';
+import { CasesComponent } from './screens/cases/cases.component';
+import { CaseDetailComponent } from './screens/case-detail/case-detail.component';
+import { DocumentViewerComponent } from './screens/document-viewer/document-viewer.component';
+import { RedactStudioComponent } from './screens/redact-studio/redact-studio.component';
+import { AuditLogComponent } from './screens/audit-log/audit-log.component';
+import { AccessPreviewComponent } from './screens/access-preview/access-preview.component';
+import { AdminComponent } from './screens/admin/admin.component';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, TricolorBarComponent, NavbarComponent, FooterComponent],
+  imports: [
+    CommonModule,
+    HeaderComponent,
+    SidebarComponent,
+    UploadModalComponent,
+    LoginComponent,
+    DashboardComponent,
+    CasesComponent,
+    CaseDetailComponent,
+    DocumentViewerComponent,
+    RedactStudioComponent,
+    AuditLogComponent,
+    AccessPreviewComponent,
+    AdminComponent
+  ],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
-export class AppComponent implements OnInit, OnDestroy {
-  title = 'EVIDENTIA';
-  private lenisService = inject(LenisService);
+export class AppComponent implements OnInit {
+  dms = inject(DmsStateService);
+  private scrollService = inject(SmoothScrollService);
+  private animService = inject(AnimationService);
 
-  ngOnInit(): void {
-    this.lenisService.init();
-  }
+  @ViewChild('contentArea') contentArea!: ElementRef<HTMLElement>;
 
-  ngOnDestroy(): void {
-    this.lenisService.destroy();
+  ngOnInit() {
+    // Initialize Lenis smooth scrolling
+    this.scrollService.init();
   }
 }
-

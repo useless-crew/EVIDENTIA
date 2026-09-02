@@ -1,0 +1,239 @@
+.cases-view {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.cases-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.cases-title {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--color-navy-primary);
+  letter-spacing: -0.02em;
+}
+
+.cases-subtitle {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin-top: 4px;
+}
+
+/* Card */
+.cases-card {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+/* Filter Bar */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--color-border);
+  background: #ffffff;
+}
+
+.search-field {
+  flex: 1;
+  max-width: 320px;
+  height: 34px;
+  background: var(--color-section-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+}
+
+.search-field svg {
+  color: var(--color-text-muted);
+}
+
+.filter-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: inherit;
+  font-size: 12.5px;
+  width: 100%;
+  color: var(--color-text-primary);
+}
+
+.filter-pills {
+  display: flex;
+  gap: 8px;
+}
+
+.filter-pill {
+  height: 34px;
+  padding: 0 12px;
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.filter-pill:hover {
+  background: var(--color-section-alt);
+  border-color: var(--color-accent-blue);
+  color: var(--color-navy-primary);
+}
+
+.pill-caret {
+  font-size: 8px;
+  color: var(--color-text-muted);
+}
+
+.filter-spacer {
+  flex: 1;
+}
+
+.result-count {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+/* Table Grid Columns */
+.table-header,
+.table-row {
+  display: grid;
+  grid-template-columns: 140px 2.2fr 130px 1.2fr 110px 70px;
+  padding: 11px 18px;
+  align-items: center;
+}
+
+.table-header {
+  background: var(--color-section-alt);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+
+.table-row {
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: #ffffff;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.table-row:nth-child(even) {
+  background: #fafbfc;
+}
+
+.table-row:hover {
+  background: var(--color-hover-row);
+}
+
+.col-caseno {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.case-no-link {
+  color: var(--color-accent-blue);
+}
+
+.table-row:hover .case-no-link {
+  color: var(--color-navy-primary);
+  text-decoration: underline;
+}
+
+.col-title {
+  padding-right: 16px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.col-status {
+  display: flex;
+}
+
+.col-by {
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+}
+
+.col-updated {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.col-docs {
+  font-size: 13px;
+  text-align: right;
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+
+/* Pagination Footer */
+.pagination-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  background: #ffffff;
+  border-top: 1px solid var(--color-border);
+}
+
+.page-count {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.page-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-page {
+  height: 28px;
+  min-width: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: #ffffff;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-page:hover:not(.disabled):not(.active) {
+  background: var(--color-section-alt);
+  border-color: var(--color-accent-blue);
+}
+
+.btn-page.active {
+  background: var(--color-navy-primary);
+  border-color: var(--color-navy-primary);
+  color: #ffffff;
+}
+
+.btn-page.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

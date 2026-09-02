@@ -1,0 +1,343 @@
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(14, 32, 56, 0.65);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 20px;
+}
+
+.modal-dialog {
+  width: 540px;
+  max-width: 100%;
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-modal);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Modal Header */
+.modal-header {
+  padding: 16px 22px;
+  background: var(--color-navy-primary);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.01em;
+}
+
+.modal-subtitle {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.btn-close {
+  background: transparent;
+  border: none;
+  font-size: 20px;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.btn-close:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Modal Body */
+.modal-body {
+  padding: 22px;
+  background: #ffffff;
+}
+
+/* Dropzone */
+.dropzone {
+  border: 1.5px dashed var(--color-accent-blue);
+  border-radius: 6px;
+  background: var(--color-section-alt);
+  padding: 28px 20px;
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+.dropzone-icon {
+  color: var(--color-accent-blue);
+  margin-bottom: 8px;
+}
+
+.dropzone-text {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  margin-bottom: 4px;
+}
+
+.browse-link {
+  color: var(--color-accent-blue);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.dropzone-sub {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+/* Form */
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.form-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+
+.form-select-display {
+  height: 36px;
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  font-size: 12.5px;
+  color: var(--color-text-primary);
+}
+
+.form-file-display {
+  height: 36px;
+  background: var(--color-section-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  font-size: 12px;
+  color: var(--color-navy-primary);
+  font-weight: 500;
+}
+
+.form-textarea {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+  resize: none;
+  line-height: 1.5;
+}
+
+/* Phase Progress & Hashing */
+.status-stage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.stage-label {
+  font-weight: 600;
+  color: var(--color-navy-primary);
+}
+
+.stage-pct {
+  color: var(--color-accent-blue);
+  font-weight: 600;
+}
+
+.progress-track {
+  height: 6px;
+  background: var(--color-border);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 18px;
+}
+
+.progress-bar {
+  height: 100%;
+  background: var(--color-navy-primary);
+  transition: width 0.1s linear;
+}
+
+.hash-section {
+  background: var(--color-section-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 14px;
+}
+
+.hash-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.hash-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+
+.hash-badge {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--color-accent-blue);
+  background: var(--color-accent-blue-light);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.hash-code-box {
+  font-size: 11.5px;
+  line-height: 1.6;
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  word-break: break-all;
+  color: var(--color-text-primary);
+  min-height: 56px;
+}
+
+.hash-code-box.highlight {
+  color: var(--color-accent-blue);
+  border-color: var(--color-accent-blue);
+}
+
+/* Phase Done */
+.success-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  background: var(--color-success-bg);
+  border: 1px solid var(--color-success-border);
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+
+.success-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-success);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex: none;
+}
+
+.success-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--color-success);
+}
+
+.success-sub {
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+}
+
+.fingerprint-result {
+  margin-bottom: 14px;
+}
+
+.result-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+}
+
+.hash-copy-row {
+  display: flex;
+  gap: 8px;
+}
+
+.hash-code-box.completed {
+  flex: 1;
+  background: var(--color-section-alt);
+  font-weight: 500;
+}
+
+.btn-copy {
+  flex: none;
+  width: 68px;
+  background: var(--color-navy-primary);
+  color: #ffffff;
+  border: 1px solid var(--color-navy-primary);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn-copy:hover {
+  background: var(--color-navy-dark);
+}
+
+.audit-append-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+  padding: 10px 12px;
+  background: var(--color-section-alt);
+  border-radius: 4px;
+}
+
+.audit-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-success);
+  flex: none;
+}
+
+/* Modal Footer */
+.modal-footer {
+  padding: 14px 22px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-section-alt);
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}

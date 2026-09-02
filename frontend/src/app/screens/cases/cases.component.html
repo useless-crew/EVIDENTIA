@@ -1,0 +1,97 @@
+<div class="cases-view animate-fade-in">
+  <!-- Header Bar -->
+  <div class="cases-header">
+    <div>
+      <h1 class="cases-title">Case Registry</h1>
+      <p class="cases-subtitle">Official investigative files &amp; forensic dockets</p>
+    </div>
+
+    <button
+      *ngIf="dms.role() === 'Police' || dms.role() === 'Admin'"
+      type="button"
+      class="btn-primary"
+      (click)="dms.navigateTo('case')"
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
+      New Case
+    </button>
+  </div>
+
+  <!-- Main Table Container -->
+  <div class="cases-card">
+    <!-- Filter Bar -->
+    <div class="filter-bar">
+      <div class="search-field">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input type="text" placeholder="Search case number, title, keyword..." class="filter-input" />
+      </div>
+
+      <div class="filter-pills">
+        <div class="filter-pill">
+          <span>Status: Any</span>
+          <span class="pill-caret">▼</span>
+        </div>
+        <div class="filter-pill">
+          <span>Date: Last 90 days</span>
+          <span class="pill-caret">▼</span>
+        </div>
+        <div class="filter-pill">
+          <span>Agency: All</span>
+          <span class="pill-caret">▼</span>
+        </div>
+      </div>
+
+      <div class="filter-spacer"></div>
+
+      <span class="result-count font-mono">6 of 41 results</span>
+    </div>
+
+    <!-- Table Header -->
+    <div class="table-header">
+      <span class="col-caseno">CASE NO. ↑</span>
+      <span class="col-title">TITLE</span>
+      <span class="col-status">STATUS</span>
+      <span class="col-by">INVESTIGATING OFFICER</span>
+      <span class="col-updated">LAST ACTION</span>
+      <span class="col-docs">DOCS</span>
+    </div>
+
+    <!-- Table Rows -->
+    <div class="table-body">
+      <div
+        *ngFor="let c of dms.casesList"
+        class="table-row"
+        (click)="openCase(c)"
+      >
+        <span class="col-caseno font-mono case-no-link">{{ c.no }}</span>
+        <span class="col-title case-title-text">{{ c.title }}</span>
+        <span class="col-status">
+          <span class="badge-status" [ngClass]="getStatusClass(c.status)">
+            {{ c.status }}
+          </span>
+        </span>
+        <span class="col-by">{{ c.by }}</span>
+        <span class="col-updated">{{ c.updated }}</span>
+        <span class="col-docs font-mono docs-count">{{ c.docs }}</span>
+      </div>
+    </div>
+
+    <!-- Pagination Footer -->
+    <div class="pagination-footer">
+      <span class="page-count">Page 1 of 7</span>
+      <div class="page-buttons">
+        <button type="button" class="btn-page disabled">Prev</button>
+        <button type="button" class="btn-page active">1</button>
+        <button type="button" class="btn-page">2</button>
+        <button type="button" class="btn-page">3</button>
+        <button type="button" class="btn-page">Next</button>
+      </div>
+    </div>
+  </div>
+</div>
