@@ -5,9 +5,9 @@
 // to be up with credentials matching docker-compose.yml's defaults, or the
 // corresponding environment variables set to point at real instances.
 //
-// This is the one test in this system that exercises the fully wired
-// application (config -> app container -> router) end to end, rather than
-// a single package in isolation.
+// This exercises the fully wired application (config -> app container ->
+// router) end to end, rather than a single package in isolation — see
+// also auth_flow_integration_test.go.
 package httpserver
 
 import (
@@ -38,6 +38,7 @@ func TestIntegration_HealthAndReadyEndToEnd(t *testing.T) {
 	setenvIfUnset(t, "MINIO_ACCESS_KEY", "evidentia_minio")
 	setenvIfUnset(t, "MINIO_SECRET_KEY", "changeme_example")
 	setenvIfUnset(t, "MINIO_BUCKET", "evidentia-documents")
+	setenvIfUnset(t, "JWT_SIGNING_KEY", "test_signing_key_padded_to_32_chars_min")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
