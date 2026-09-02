@@ -9,7 +9,7 @@
       </p>
       
       <div class="hero-cta-group">
-        <button type="button" class="btn-primary" (click)="scrollToSection('#cta')">Request Access</button>
+        <button type="button" class="btn-primary" (click)="goToLogin($event)">Request Access</button>
         <button type="button" class="btn-secondary" (click)="scrollToSection('#how-it-works')">See How It Works</button>
       </div>
 
@@ -121,8 +121,8 @@
       </p>
 
       <div class="cta-button-group">
-        <button type="button" class="btn-white" (click)="scrollToSection('#cta')">Request Access</button>
-        <button type="button" class="btn-outline-white" (click)="scrollToSection('#cta')">Contact the Implementation Team</button>
+        <button type="button" class="btn-white" (click)="goToLogin($event)">Request Access</button>
+        <button type="button" class="btn-outline-white" (click)="goToLogin($event)">Contact the Implementation Team</button>
       </div>
 
       <p class="cta-footnote">Authorized personnel only. All access to this system is logged.</p>

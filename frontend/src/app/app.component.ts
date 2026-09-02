@@ -10,6 +10,7 @@ import { SidebarComponent } from './components/sidebar/sidebar.component';
 import { UploadModalComponent } from './components/upload-modal/upload-modal.component';
 
 // Screen Components
+import { LandingPageComponent } from './screens/landing-page/landing-page.component';
 import { LoginComponent } from './screens/login/login.component';
 import { DashboardComponent } from './screens/dashboard/dashboard.component';
 import { CasesComponent } from './screens/cases/cases.component';
@@ -28,6 +29,7 @@ import { AdminComponent } from './screens/admin/admin.component';
     HeaderComponent,
     SidebarComponent,
     UploadModalComponent,
+    LandingPageComponent,
     LoginComponent,
     DashboardComponent,
     CasesComponent,
