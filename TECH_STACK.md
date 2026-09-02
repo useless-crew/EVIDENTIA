@@ -92,10 +92,15 @@ Go-side UUID representation).
 its small runtime registration package, `github.com/swaggo/swag`, which
 generated `docs.go` files import).
 
-Not yet added, pending the systems that need them: RBAC/ABAC middleware,
-SHA-256/AES-256/RSA/ECDSA, Asynq, `go-playground/validator`, SSE. Adding
-any of these before their owning system is implemented is scope creep —
-don't.
+**System 4 (Authorization):** no new dependency — `internal/authz` and its
+middleware (`internal/middleware/{rbac,abac}_middleware.go`) are plain Go
+using only what's already listed above (no Casbin, no OPA, no external
+policy server; see master-prompt-driven design rationale in
+docs/SECURITY.md).
+
+Not yet added, pending the systems that need them: SHA-256/AES-256/RSA/
+ECDSA, Asynq, `go-playground/validator`, SSE. Adding any of these before
+their owning system is implemented is scope creep — don't.
 
 ## Explicitly Out of Scope
 

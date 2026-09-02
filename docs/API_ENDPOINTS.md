@@ -89,7 +89,17 @@ GET    /cases/:id
 PUT    /cases/:id
 ```
 
-TODO
+TODO (business logic — not implemented). Required authorization, per
+System 4 (`docs/SECURITY.md`'s Authorization section) — to be wired with
+`middleware.RequirePermission`/`RequireCaseAccess` once these routes and
+their handlers exist:
+
+| Route | Permission (RBAC) | Resource check (ABAC) |
+|---|---|---|
+| `POST /cases` | `case:create` | — (no resource yet; the creator becomes `cases.created_by`) |
+| `GET /cases` | `case:read` | list is scoped by the caller's own case relationships, not a per-item check here |
+| `GET /cases/:id` | `case:read` | `CanAccessCase` — caller must be ADMIN, the case's creator, or an active `case_members` row |
+| `PUT /cases/:id` | `case:update` | `CanAccessCase` (same relationship check) |
 
 ## Case Documents
 
@@ -97,7 +107,9 @@ TODO
 POST /cases/:id/documents
 ```
 
-TODO
+TODO (business logic — not implemented). Required authorization:
+`document:upload` (RBAC) + `CanAccessCase` on the `:id` case (ABAC) — a
+caller must have a relationship to the case before uploading into it.
 
 ## Documents
 
@@ -110,7 +122,20 @@ POST /documents/:id/share
 GET  /documents/:id/certificate
 ```
 
-TODO
+TODO (business logic — not implemented). Required authorization:
+
+| Route | Permission (RBAC) | Resource check (ABAC) |
+|---|---|---|
+| `GET /documents/:id` | `document:read` | `CanAccessDocument` |
+| `GET /documents/:id/download` | `document:download` | `CanAccessDocument` |
+| `POST /documents/:id/verify` | `document:verify` | `CanAccessDocument` |
+| `POST /documents/:id/redact` | `document:redact` | `CanAccessDocument` |
+| `POST /documents/:id/share` | `document:share` | `CanAccessDocument` |
+| `GET /documents/:id/certificate` | `certificate:read` | `CanAccessDocument` on the certificate's document |
+
+`CanAccessDocument` resolves the document's case and applies the same
+case-relationship check as `CanAccessCase` — see `docs/SECURITY.md`'s
+"Document-based ABAC".
 
 ## Audit
 
@@ -119,7 +144,12 @@ GET  /audit
 POST /audit/verify-chain
 ```
 
-TODO
+TODO (business logic — not implemented). Required authorization:
+`GET /audit` needs `audit:read`; `POST /audit/verify-chain` needs
+`audit:verify`. Per the seed data, only ADMIN and POLICE hold `audit:read`
+today (POLICE at case scope, once a future system adds `GET /audit`'s own
+case filtering — this endpoint has no resource ID of its own to run ABAC
+against), and only ADMIN holds `audit:verify`.
 
 ## Admin
 
@@ -130,7 +160,15 @@ PUT  /admin/users/:id/role
 GET  /admin/roles
 ```
 
-TODO
+TODO (business logic — not implemented). Required authorization:
+`POST /admin/users` needs `user:create`; `PUT /admin/users/:id` needs
+`user:update`; `PUT /admin/users/:id/role` needs
+`internal/authz.Service.CanModifyUserRole` (RBAC `user:role` PLUS an
+explicit block on an actor modifying their own role — see
+`docs/SECURITY.md`'s "Privilege escalation / admin boundaries"); `GET
+/admin/roles` needs no special permission beyond authentication (it lists
+the fixed, non-sensitive role catalog). Per the seed data, only ADMIN
+holds `user:create`/`user:update`/`user:role` today.
 
 ## Health and Readiness (implemented)
 
@@ -176,10 +214,24 @@ Unmatched routes and disallowed methods already return this envelope today
 
 ## Authentication & Authorization Requirements
 
-Today: `internal/middleware.Auth` validates a request's JWT and re-resolves
-the caller's current account status/roles from the database (never
-trusting the JWT's role claim alone — see SECURITY.md) — this establishes
-*identity*, not *authorization*. No endpoint yet enforces role/permission-
-based access control (RBAC) or attribute-based rules (ABAC); that is
-System 4's scope. TODO once System 4 lands: document per-endpoint
-required roles/permissions/attributes here.
+`internal/middleware.Auth` validates a request's JWT and re-resolves the
+caller's current account status/roles from the database (never trusting
+the JWT's role claim alone — see SECURITY.md) — this establishes
+*identity*, not *authorization*.
+
+System 4 (`internal/authz`) provides the RBAC (`middleware.RequirePermission`)
+and ABAC (`middleware.RequireCaseAccess`/`RequireDocumentAccess`) checks
+layered on top of it, and the per-route requirements are documented inline
+above (Cases/Case Documents/Documents/Audit/Admin) — but no case/document/
+audit/admin route is registered in `internal/httpserver/router.go` yet
+(their handlers are still TODO stubs), so none of that middleware is wired
+into a live route today. Today's only non-health routes are
+`/api/v1/auth/{login,refresh,logout}`, which need no RBAC/ABAC (see
+"Authentication" above). Full authorization design: `docs/SECURITY.md`'s
+Authorization section.
+
+`401` vs `403`: a request with no/invalid/expired authentication is
+always `401 UNAUTHORIZED`; an authenticated request denied by RBAC or ABAC
+is `403 FORBIDDEN` with the generic message `"You do not have permission
+to perform this action"` — never a message naming the specific
+permission, case, or document relationship that failed.

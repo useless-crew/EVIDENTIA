@@ -13,6 +13,7 @@ import (
 
 	"evidentia/backend/internal/audit"
 	"evidentia/backend/internal/auth"
+	"evidentia/backend/internal/authz"
 	"evidentia/backend/internal/cache"
 	"evidentia/backend/internal/config"
 	"evidentia/backend/internal/database"
@@ -32,6 +33,15 @@ type App struct {
 	Storage     storage.Storage
 	JWTManager  *auth.JWTManager
 	AuthService *service.AuthService
+
+	// AuthzService is System 4's centralized RBAC+ABAC engine (see
+	// internal/authz) — separate from AuthService (System 3, "who is this
+	// user") because it answers a different question ("what may this user
+	// do"). Later systems' handlers/routes depend on this field to guard
+	// their case/document/audit/admin routes; see
+	// internal/middleware.RequirePermission/RequireCaseAccess/
+	// RequireDocumentAccess.
+	AuthzService *authz.Service
 }
 
 // New loads configuration and connects every infrastructure dependency in
@@ -67,17 +77,21 @@ func New(ctx context.Context) (*App, error) {
 		return nil, fmt.Errorf("app: connect storage: %w", err)
 	}
 
+	recorder := audit.NewSlogRecorder(log)
+
 	jwtManager := auth.NewJWTManager(cfg.JWT.SigningKey, cfg.JWT.Issuer, cfg.JWT.Audience, cfg.JWT.AccessTTL)
-	authService := service.NewAuthService(db.Pool(), jwtManager, cfg.JWT.BcryptCost, cfg.JWT.RefreshTTL, audit.NewSlogRecorder(log))
+	authService := service.NewAuthService(db.Pool(), jwtManager, cfg.JWT.BcryptCost, cfg.JWT.RefreshTTL, recorder)
+	authzService := authz.NewService(db.Pool(), recorder)
 
 	return &App{
-		Config:      cfg,
-		Logger:      log,
-		DB:          db,
-		Cache:       redisCache,
-		Storage:     objectStorage,
-		JWTManager:  jwtManager,
-		AuthService: authService,
+		Config:       cfg,
+		Logger:       log,
+		DB:           db,
+		Cache:        redisCache,
+		Storage:      objectStorage,
+		JWTManager:   jwtManager,
+		AuthService:  authService,
+		AuthzService: authzService,
 	}, nil
 }
 

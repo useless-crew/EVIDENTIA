@@ -20,6 +20,7 @@ const (
 	CodeMethodNotAllowed      = "METHOD_NOT_ALLOWED"
 	CodeRequestEntityTooLarge = "REQUEST_ENTITY_TOO_LARGE"
 	CodeUnauthorized          = "UNAUTHORIZED"
+	CodeForbidden             = "FORBIDDEN"
 )
 
 // AppError is the application-wide error type. Status and Code/Message are
@@ -73,6 +74,17 @@ func ErrServiceUnavailable(message string) *AppError {
 // server-side instead.
 func ErrUnauthorized(message string) *AppError {
 	return NewAppError(http.StatusUnauthorized, CodeUnauthorized, message, nil)
+}
+
+// ErrForbidden builds a 403 response: the caller is authenticated but the
+// request is denied by RBAC or ABAC (System 4). Like ErrUnauthorized,
+// message must always be a single generic string — never the specific
+// permission, case, or document relationship that failed, which would
+// hand a client a map of the authorization model (master prompt §21/§30).
+// Log the specific reason server-side (see internal/authz.Decision.Reason)
+// instead.
+func ErrForbidden(message string) *AppError {
+	return NewAppError(http.StatusForbidden, CodeForbidden, message, nil)
 }
 
 // AsAppError unwraps err looking for an *AppError, so callers that receive a

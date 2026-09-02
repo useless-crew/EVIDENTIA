@@ -1,9 +1,13 @@
 # Evidentia — High-Level Architecture
 
-> This document describes the **intended** architecture. Systems 1-3 —
-> Foundation & Infrastructure, Database & Data Layer, and Authentication &
-> Session Security — are implemented (see below); everything under Request
-> Flow and Core Domains past them is still a design reference.
+> This document describes the **intended** architecture. Systems 1-4 —
+> Foundation & Infrastructure, Database & Data Layer, Authentication &
+> Session Security, and Authorization (RBAC + ABAC + RLS integration) —
+> are implemented (see below); everything under Request Flow and Core
+> Domains past them is still a design reference. Note that System 4
+> implements the *authorization infrastructure* only — the case/document/
+> audit/admin HTTP routes it will eventually guard are a later system's
+> scope and are not registered yet (see the System 4 section below).
 
 ## System 1 — Foundation & Infrastructure (Implemented)
 
@@ -130,6 +134,65 @@ the same testability pattern System 1 used for `app.DBConn`/`CacheConn`,
 letting the middleware be unit-tested with a fake and no database. Full
 design/security rationale: [docs/SECURITY.md](./docs/SECURITY.md).
 
+## System 4 — Authorization: RBAC + ABAC + PostgreSQL RLS Integration (Implemented)
+
+```text
+internal/authz.Service
+    |
+    +--> HasPermission(ctx, user, action)          — RBAC
+    |      loads user.Roles' permissions from roles/permissions/
+    |      role_permissions (System 2), unioned across every role
+    |
+    +--> CanAccessCase(ctx, user, caseID, action)   — ABAC
+    +--> CanAccessDocument(ctx, user, docID, action)— ABAC
+    |      HasPermission first (cheap, no resource lookup), then loads the
+    |      resource under the CALLER'S OWN transaction-local RLS identity
+    |      (repository.WithTx) and independently re-derives owner/member
+    |      status from the returned rows
+    |
+    +--> CanModifyUserRole(ctx, actor, targetUserID) — privilege-escalation guard
+    +--> CanViewProtectedPartyDetails / SanitizeInvolvedParty — witness-identity policy
+    |
+    +--> internal/audit.Recorder — AUTHZ_DENIED events on every denial
+
+internal/middleware.RequirePermission(authorizer, action)
+    — RBAC gate: 401 (no authenticated user) / 403 (denied) / 500 (authorizer
+      error) / next handler
+
+internal/middleware.RequireCaseAccess / RequireDocumentAccess(authorizer, action, param)
+    — ABAC gate: parses the path param as a UUID (malformed -> 403, same
+      as a real denial), calls the matching Can* method, same status
+      mapping as above
+```
+
+`app.App` gained an `AuthzService *authz.Service` field (constructed in
+`app.New`, sharing the same `*pgxpool.Pool` and `audit.Recorder` as
+`AuthService`). `internal/authz` depends only on `internal/auth`
+(`AuthenticatedUser`) and `internal/repository` (`WithTx`) — no import
+cycle, and no new external dependency (go.mod unchanged).
+
+**What's genuinely new here** vs. what System 2 already built: System 2
+already implemented full PostgreSQL RLS (`current_app_user_id()`/
+`current_app_role()`, policies on every case/document-adjacent table) and
+the transaction-local identity plumbing (`repository.WithTx`). System 4
+adds the *application-layer* RBAC/ABAC decision engine that composes with
+that RLS as defense-in-depth (neither layer trusts the other blindly —
+see `docs/SECURITY.md`'s "PostgreSQL RLS integration"), the authorization
+middleware, the witness-identity policy, and the privilege-escalation
+guard for role modification.
+
+**What's deliberately not here yet**: `internal/handlers/{case,document,
+audit,user}` and `internal/service/{case,document,audit,user}_service.go`
+remain TODO stubs (later systems' business logic), so no case/document/
+audit/admin route exists in `internal/httpserver/router.go` for this
+middleware to guard yet. `router.go` carries a comment showing the
+intended wiring for whichever system adds those routes. Full design:
+[docs/SECURITY.md](./docs/SECURITY.md); full test coverage (RBAC matrix,
+ABAC case/document relationships, IDOR, privilege escalation, header/role
+spoofing): `backend/internal/authz/*_test.go`,
+`backend/internal/middleware/{rbac,abac}_middleware_test.go`,
+`backend/tests/{rbac,abac}_test.go`.
+
 ## Request Flow (Intended, Later Systems)
 
 ```text
@@ -229,9 +292,10 @@ Realtime / SSE
 
 - **Auth** (implemented — System 3) — JWT issuance/validation, refresh
   tokens, password hashing.
-- **RBAC/ABAC** (not implemented — System 4) — Role- and attribute-based
-  authorization, enforced above the database and reinforced by PostgreSQL
-  RLS.
+- **RBAC/ABAC** (implemented — System 4) — Role- and attribute-based
+  authorization (`internal/authz`), enforced above the database and
+  reinforced by PostgreSQL RLS. The HTTP routes it will guard (cases,
+  documents, audit, admin) are a later system's scope.
 - **Cases** — Case lifecycle and case-user membership.
 - **Documents** — Evidence documents, integrity hashing, redaction lineage,
   compliance certificates.
@@ -269,15 +333,17 @@ The eventual system will enforce:
 11. Secure refresh-token handling
 12. Audit logging of all security-sensitive actions
 
-As of System 3: **1** (JWT) and **11** (refresh-token rotation/revocation)
-are implemented; **4** (RLS) was implemented in System 2, enforced with
-policies and fail-closed behavior verified by integration tests. Audit
-entries have their hash/prev_hash storage and uniqueness invariants
-(**7**, **8**) in place, and failed/successful auth actions are already
-recorded operationally (**12**, partial — see SECURITY.md), but
-*computing* the actual hash chain and verifying it (**9**) is System 8's
-job. SHA-256 document hashing (**5**), AES-256 (**6**), TLS (**10**),
-RBAC (**2**), and ABAC (**3**) remain entirely unimplemented. See
+As of System 4: **1** (JWT) and **11** (refresh-token rotation/revocation)
+were implemented in System 3; **4** (RLS) was implemented in System 2,
+enforced with policies and fail-closed behavior verified by integration
+tests; **2** (RBAC) and **3** (ABAC) are implemented in System 4
+(`internal/authz`), composed with RLS as defense-in-depth rather than
+replacing it. Audit entries have their hash/prev_hash storage and
+uniqueness invariants (**7**, **8**) in place, and failed/successful auth
+actions plus authorization denials are already recorded operationally
+(**12**, partial — see SECURITY.md), but *computing* the actual hash chain
+and verifying it (**9**) is System 8's job. SHA-256 document hashing
+(**5**), AES-256 (**6**), and TLS (**10**) remain unimplemented. See
 [docs/SECURITY.md](./docs/SECURITY.md) and
 [docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md) for what each
 currently covers.

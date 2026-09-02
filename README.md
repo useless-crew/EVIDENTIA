@@ -3,11 +3,12 @@
 Evidentia is a secure digital evidence and case-management platform designed for
 investigative and judicial workflows.
 
-> **Status:** Backend Systems 1-3 are implemented: foundation/
-> infrastructure, the full database schema with Row-Level Security, and
-> JWT + refresh-token authentication with rotation/reuse detection.
-> RBAC/ABAC authorization, case/document HTTP handlers, and the audit-chain
-> writer are not implemented yet — those are later systems; see
+> **Status:** Backend Systems 1-4 are implemented: foundation/
+> infrastructure, the full database schema with Row-Level Security, JWT +
+> refresh-token authentication with rotation/reuse detection, and
+> centralized RBAC/ABAC authorization composed with that Row-Level
+> Security as defense-in-depth. Case/document HTTP handlers and the
+> audit-chain writer are not implemented yet — those are later systems; see
 > [ARCHITECTURE.md](./ARCHITECTURE.md). The `frontend/` directory contains
 > an Angular application (generated via Angular CLI) plus design reference
 > material.
@@ -142,13 +143,16 @@ commands.
   interface (operational logging today; System 8 provides the durable,
   hash-chained implementation later with no change to auth code)
 
-Not yet implemented (later systems): RBAC/ABAC authorization,
-case/document HTTP handlers, document upload/hashing/redaction, the
-audit-chain writer/verifier, compliance certificate generation, and
-background jobs. See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full
-intended design, [docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md) for
-the full schema, and [docs/SECURITY.md](./docs/SECURITY.md) for the full
-security model implemented so far.
+RBAC/ABAC authorization (System 4, `internal/authz`) is implemented:
+centralized permission checks, case/document attribute-based access
+control, IDOR prevention, and privilege-escalation guards, composed with
+System 2's Row-Level Security rather than replacing it — see
+[docs/SECURITY.md](./docs/SECURITY.md)'s Authorization section. It has no
+routes to guard yet, though: case/document HTTP handlers, document
+upload/hashing/redaction, the audit-chain writer/verifier, compliance
+certificate generation, and background jobs remain later systems' scope.
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full intended design and
+[docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md) for the full schema.
 
 ### Frontend
 

@@ -57,5 +57,17 @@ func NewRouter(a *app.App) *gin.Engine {
 	authGroup.POST("/refresh", authhandlers.Refresh(a.AuthService))
 	authGroup.POST("/logout", middleware.Auth(a.JWTManager, a.AuthService, a.Logger), authhandlers.Logout(a.AuthService))
 
+	// Case/document/audit/admin routes (internal/handlers/{case,document,
+	// audit,user}) are not yet implemented — see those packages' TODOs;
+	// their business logic is a later system's scope, not System 4's.
+	// System 4 (internal/authz, internal/middleware.RequirePermission/
+	// RequireCaseAccess/RequireDocumentAccess) provides the authorization
+	// primitives those routes will be guarded with once they exist, e.g.:
+	//
+	//   caseGroup.POST("", middleware.Auth(...), middleware.RequirePermission(a.AuthzService, authz.ActionCaseCreate), handler)
+	//   caseGroup.GET("/:id", middleware.Auth(...), middleware.RequireCaseAccess(a.AuthzService, authz.ActionCaseRead, "id"), handler)
+	//
+	// See docs/API_ENDPOINTS.md for the full intended per-route mapping.
+
 	return r
 }
