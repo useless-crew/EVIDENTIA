@@ -28,25 +28,23 @@ backend/db/generated/*
 !backend/certs/README.md
 secrets/
 
-# ---- Frontend (Angular) ----
+# ---- Frontend (Angular, rooted at frontend/) ----
 
 # Compiled output
-/dist
 /frontend/dist
-/out-tsc
-/bazel-out
+/frontend/out-tsc
+/frontend/bazel-out
 
 # Node
-/node_modules
 /frontend/node_modules
 npm-debug.log
 yarn-error.log
 
 # Miscellaneous
-/.angular/cache
+/frontend/.angular/cache
 .sass-cache/
 /connect.lock
-/coverage
+/frontend/coverage
 /libpeerconnection.log
 testem.log
 /typings
@@ -73,6 +71,12 @@ __screenshots__/
 !.vscode/launch.json
 !.vscode/extensions.json
 !.vscode/mcp.json
+/frontend/.vscode/*
+!/frontend/.vscode/settings.json
+!/frontend/.vscode/tasks.json
+!/frontend/.vscode/launch.json
+!/frontend/.vscode/extensions.json
+!/frontend/.vscode/mcp.json
 .history/*
 
 # System files
