@@ -15,4 +15,7 @@
 export const environment = {
   production: true,
   apiBaseUrl: '/api/v1',
+  // Never true here — see environment.development.ts's comment. A
+  // production build must render no demo/role-selection login UI.
+  demoMode: false,
 };

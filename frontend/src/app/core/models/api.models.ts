@@ -188,3 +188,83 @@ export interface CertificateSummary {
   generated_by: string;
   generated_at: string;
 }
+
+/** Account status (users_status_check in the schema). */
+export type UserStatus = 'active' | 'inactive' | 'suspended';
+
+/** internal/service.AdminUserSummary — every /admin/users* and /users/me
+ * response's user shape. Never carries a password or password hash: the
+ * backend structurally cannot return either (see that Go type's own doc
+ * comment). */
+export interface AdminUser {
+  id: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  display_name?: string;
+  phone?: string;
+  status: UserStatus;
+  roles: Role[];
+  created_at: string;
+  updated_at: string;
+  last_login_at?: string;
+}
+
+/** internal/service.UserListResult — GET /admin/users's response data. */
+export interface AdminUserListResult {
+  users: AdminUser[];
+  meta: PageMeta;
+}
+
+/** GET /admin/users's optional query filters (all optional). */
+export interface AdminUserListFilter {
+  role?: Role;
+  status?: UserStatus;
+  search?: string;
+  page?: number;
+  page_size?: number;
+}
+
+/** POST /admin/users's request body. */
+export interface CreateUserRequest {
+  email: string;
+  password: string;
+  first_name: string;
+  last_name: string;
+  display_name?: string;
+  phone?: string;
+  role: Role;
+  status?: UserStatus;
+}
+
+/** PUT /admin/users/:id's request body — a full replacement of every
+ * mutable profile field (excludes email/password/role/status, each of
+ * which has its own dedicated endpoint below). */
+export interface UpdateUserRequest {
+  first_name: string;
+  last_name: string;
+  display_name?: string;
+  phone?: string;
+}
+
+/** PUT /admin/users/:id/role's request body. */
+export interface UpdateUserRoleRequest {
+  role: Role;
+}
+
+/** PUT /admin/users/:id/status's request body. */
+export interface UpdateUserStatusRequest {
+  status: UserStatus;
+}
+
+/** PUT /admin/users/:id/password's request body. */
+export interface ResetPasswordRequest {
+  password: string;
+}
+
+/** GET /admin/roles's response data (internal/service.RoleCatalogEntry). */
+export interface RoleCatalogEntry {
+  id: string;
+  name: Role;
+  description?: string;
+}

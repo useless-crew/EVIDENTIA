@@ -13,4 +13,9 @@
 export const environment = {
   production: false,
   apiBaseUrl: 'http://localhost:8080/api/v1',
+  // Shows the local-dev demo-account quick-sign-in panel on the login
+  // screen (see login.component.ts) — never true in environment.ts, the
+  // production build config, so that panel never ships to a real
+  // deployment.
+  demoMode: true,
 };

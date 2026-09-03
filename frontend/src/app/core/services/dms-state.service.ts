@@ -92,11 +92,12 @@ const BACKEND_TO_UI_ROLE: Record<BackendRole, Role> = {
  * Also gone: casesList/caseDocuments/caseTimeline/caseParties/
  * chainOfCustody, the hardcoded single-demo-case arrays the old mock UI
  * read from — CasesComponent/CaseDetailComponent/DocumentViewerComponent
- * now fetch real data directly from CaseService/DocumentService. What
- * REMAINS mock (dashboardInfo stats, activityFeed, auditRows/chainRows,
- * accessFields, adminUsers) has no backend equivalent yet (dashboard
- * stats, audit-log read, chain verification, and user administration are
- * not implemented by any system through 7 — see ARCHITECTURE.md) and is
+ * now fetch real data directly from CaseService/DocumentService. Also gone
+ * (System 8): adminUsers — AdminComponent now fetches real data from
+ * AdminUserService (GET /admin/users). What REMAINS mock (dashboardInfo
+ * stats, activityFeed, auditRows/chainRows, accessFields) has no backend
+ * equivalent yet (dashboard stats, audit-log read, and chain verification
+ * are not implemented by any system yet — see ARCHITECTURE.md) and is
  * left as clearly-illustrative content, per master prompt's explicit
  * "do not implement functionality belonging to Systems 8+".
  */
@@ -334,17 +335,6 @@ export class DmsStateService {
     { label: 'Seized Mobile IMEI', value: '35•••••••••••21', restricted: false },
     { label: 'Beneficiary Bank Account', value: 'HDFC ••••7742 — Kolkata Gariahat branch', restricted: false },
     { label: 'Investigating Officer Field Diary', value: 'Suspect vehicle registration DL-3C-AZ-9912 traced via toll gantry camera', restricted: true }
-  ];
-
-  // Administration Users — illustrative only; no user-management
-  // endpoint is implemented by any system through 7
-  // (internal/handlers/user remains a TODO stub — see ARCHITECTURE.md).
-  readonly adminUsers = [
-    { name: 'SI Rajat Mehra', email: 'r.mehra@delhipolice.gov.in', role: 'Police', agency: 'Noida Sec 58 PS' },
-    { name: 'Dr. Anjali Iyer', email: 'a.iyer@cyberlab.gov.in', role: 'Forensics', agency: 'State Cyber Forensics Lab' },
-    { name: 'Shalini Bhat', email: 's.bhat@prosecution.gov.in', role: 'Lawyer', agency: 'District Prosecution Branch' },
-    { name: 'Hon. K. Mahadevan', email: 'k.mahadevan@ecourts.gov.in', role: 'Judge', agency: 'Sessions Court 04' },
-    { name: 'Nikhil Rao', email: 'n.rao@ncrb.gov.in', role: 'Admin', agency: 'National Crime Records Bureau' }
   ];
 
   // Audit Rows — illustrative only; no GET /audit endpoint is implemented

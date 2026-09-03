@@ -100,6 +100,30 @@ func validate(c *errCollector, cfg *Config) {
 	if cfg.JWT.BcryptCost < 10 || cfg.JWT.BcryptCost > 31 {
 		c.add("BCRYPT_COST must be between 10 and 31 (got %d) — below 10 is considered too weak for production use", cfg.JWT.BcryptCost)
 	}
+
+	validateBootstrapAdmin(c, cfg.Bootstrap)
+}
+
+// validateBootstrapAdmin requires EVIDENTIA_BOOTSTRAP_ADMIN_{EMAIL,PASSWORD,
+// NAME} to be either all set or all unset — a partial group almost
+// certainly means a deployment typo (e.g. the password var name misspelled)
+// and must fail startup loudly rather than silently skip bootstrapping or
+// create a user with a placeholder value.
+func validateBootstrapAdmin(c *errCollector, b BootstrapAdminConfig) {
+	set := 0
+	if b.Email != "" {
+		set++
+	}
+	if b.Password != "" {
+		set++
+	}
+	if b.Name != "" {
+		set++
+	}
+	if set == 0 || set == 3 {
+		return
+	}
+	c.add("EVIDENTIA_BOOTSTRAP_ADMIN_EMAIL, _PASSWORD, and _NAME must be either all set or all left unset")
 }
 
 func validatePort(c *errCollector, key string, port int) {

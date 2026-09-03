@@ -84,6 +84,21 @@ func (q *Queries) GetAuthSessionByTokenHash(ctx context.Context, tokenHash []byt
 	return i, err
 }
 
+const revokeAllAuthSessionsForUser = `-- name: RevokeAllAuthSessionsForUser :exec
+UPDATE auth_sessions
+SET revoked_at = now()
+WHERE user_id = $1 AND revoked_at IS NULL
+`
+
+// Invalidates every still-active session belonging to a user, regardless
+// of family — used by admin user management (password reset,
+// deactivation/suspension) so an already-issued refresh token cannot
+// keep a session alive past that action.
+func (q *Queries) RevokeAllAuthSessionsForUser(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, revokeAllAuthSessionsForUser, userID)
+	return err
+}
+
 const revokeAuthSession = `-- name: RevokeAuthSession :exec
 UPDATE auth_sessions
 SET revoked_at = now()

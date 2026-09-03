@@ -14,6 +14,7 @@ import (
 	casehandlers "evidentia/backend/internal/handlers/case"
 	documenthandlers "evidentia/backend/internal/handlers/document"
 	"evidentia/backend/internal/handlers/health"
+	userhandlers "evidentia/backend/internal/handlers/user"
 	"evidentia/backend/internal/middleware"
 	"evidentia/backend/internal/utils"
 	"evidentia/backend/pkg/response"
@@ -106,9 +107,35 @@ func NewRouter(a *app.App) *gin.Engine {
 	r.POST("/api/v1/documents/:id/verify", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentVerify, "id"), documenthandlers.Verify(a.DocumentService))
 	r.GET("/api/v1/documents/:id/certificate", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionCertificateRead, "id"), documenthandlers.Certificate(a.CertificateService))
 
-	// Audit/admin routes (internal/handlers/{audit,user}) remain not yet
-	// implemented — later systems' scope. System 4's authorization
-	// primitives are already available for whichever system adds them; see
+	// Admin user management (System 8): every route requires
+	// authentication; POST/GET/GET-by-id/PUT/status/password additionally
+	// require the matching RBAC user:* permission
+	// (middleware.RequirePermission) — see docs/API_ENDPOINTS.md's Admin
+	// section. The role route is the one exception: its authorization is
+	// entirely UserService.UpdateRole's call to
+	// authz.Service.CanModifyUserRole (RBAC user:role PLUS the hard block
+	// on self-role-modification), exactly as that doc documents, so no
+	// separate RequirePermission wraps it here.
+	adminGroup := r.Group("/api/v1/admin")
+	adminGroup.Use(jsonBodyLimit)
+	adminGroup.POST("/users", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionUserCreate), userhandlers.Create(a.UserService))
+	adminGroup.GET("/users", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionUserRead), userhandlers.List(a.UserService))
+	adminGroup.GET("/users/:id", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionUserRead), userhandlers.Get(a.UserService))
+	adminGroup.PUT("/users/:id", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionUserUpdate), userhandlers.Update(a.UserService))
+	adminGroup.PUT("/users/:id/role", authMW, userhandlers.UpdateRole(a.UserService))
+	adminGroup.PUT("/users/:id/status", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionUserDeactivate), userhandlers.UpdateStatus(a.UserService))
+	adminGroup.PUT("/users/:id/password", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionUserUpdate), userhandlers.ResetPassword(a.UserService))
+	adminGroup.GET("/roles", authMW, userhandlers.ListRoles(a.UserService))
+
+	// Self-profile: any authenticated user, regardless of role, may view
+	// their own record — see handlers/user/profile.go's doc comment for
+	// why this deliberately does not go through the same user:read gate
+	// GET /admin/users/:id does.
+	r.GET("/api/v1/users/me", authMW, userhandlers.Profile(a.UserService))
+
+	// Audit routes (internal/handlers/audit) remain not yet implemented —
+	// a later system's scope. System 4's authorization primitives are
+	// already available for whichever system adds them; see
 	// docs/API_ENDPOINTS.md for the full intended per-route mapping.
 
 	return r

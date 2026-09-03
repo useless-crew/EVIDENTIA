@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -27,6 +28,8 @@ import (
 	"github.com/joho/godotenv"
 
 	"evidentia/backend/internal/app"
+	"evidentia/backend/internal/audit"
+	"evidentia/backend/internal/bootstrap"
 	"evidentia/backend/internal/httpserver"
 )
 
@@ -58,7 +61,22 @@ func startup(ctx context.Context) (*app.App, error) {
 	initCtx, cancel := context.WithTimeout(ctx, startupTimeout)
 	defer cancel()
 
-	return app.New(initCtx)
+	application, err := app.New(initCtx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Idempotent — see internal/bootstrap.EnsureBootstrapAdmin's doc
+	// comment. Failing this fails startup (fail closed): if an operator
+	// set EVIDENTIA_BOOTSTRAP_ADMIN_* they mean for it to take effect, not
+	// to be silently skipped on error.
+	recorder := audit.NewSlogRecorder(application.Logger)
+	if err := bootstrap.EnsureBootstrapAdmin(initCtx, application.DB.Pool(), application.Config.Bootstrap, application.Config.JWT.BcryptCost, recorder, application.Logger); err != nil {
+		application.Close()
+		return nil, fmt.Errorf("bootstrap admin: %w", err)
+	}
+
+	return application, nil
 }
 
 func run(ctx context.Context, a *app.App) {

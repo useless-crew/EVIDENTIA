@@ -1,32 +1,100 @@
 <div class="admin-view animate-fade-in">
   <div class="admin-header">
-    <h1 class="admin-title">Authorized Personnel Management</h1>
-    <p class="admin-subtitle">
-      Manage security roles, cryptographic key attachments, and statutory agency clearances.
-    </p>
+    <div class="admin-header-row">
+      <div>
+        <h1 class="admin-title">User Management</h1>
+        <p class="admin-subtitle">
+          Create accounts and manage roles, status, and passwords for every Evidentia user.
+        </p>
+      </div>
+      <button type="button" class="btn-primary" (click)="openCreate()">+ New User</button>
+    </div>
+
+    <div class="admin-filters">
+      <input
+        type="text"
+        class="filter-input"
+        placeholder="Search name or email…"
+        [value]="searchTerm()"
+        (input)="onSearchInput($any($event.target).value)"
+      />
+      <select class="filter-select" [value]="roleFilter()" (change)="onRoleFilterChange($any($event.target).value)">
+        <option value="">All roles</option>
+        <option *ngFor="let r of roles" [value]="r">{{ r }}</option>
+      </select>
+      <select class="filter-select" [value]="statusFilter()" (change)="onStatusFilterChange($any($event.target).value)">
+        <option value="">All statuses</option>
+        <option *ngFor="let s of statuses" [value]="s">{{ s }}</option>
+      </select>
+    </div>
   </div>
+
+  <div *ngIf="rowActionError()" class="form-alert form-alert-error">{{ rowActionError() }}</div>
 
   <div class="admin-card">
     <div class="admin-table-header">
-      <span class="col-name">PERSONNEL NAME</span>
-      <span class="col-email">OFFICIAL EMAIL</span>
-      <span class="col-role">SYSTEM ROLE</span>
-      <span class="col-agency">ATTACHED AGENCY / COURT</span>
-      <span class="col-action">ACTION</span>
+      <span class="col-name">NAME</span>
+      <span class="col-email">EMAIL</span>
+      <span class="col-role">ROLE</span>
+      <span class="col-status">STATUS</span>
+      <span class="col-created">CREATED</span>
+      <span class="col-action">ACTIONS</span>
     </div>
 
-    <div class="admin-table-body">
-      <div *ngFor="let u of dms.adminUsers" class="admin-row">
-        <span class="col-name">{{ u.name }}</span>
+    <div *ngIf="loading()" class="admin-empty">Loading users…</div>
+    <div *ngIf="!loading() && errorMessage()" class="admin-empty admin-empty-error">{{ errorMessage() }}</div>
+    <div *ngIf="!loading() && !errorMessage() && result()?.users?.length === 0" class="admin-empty">
+      No users match these filters.
+    </div>
+
+    <div class="admin-table-body" *ngIf="!loading() && !errorMessage()">
+      <div *ngFor="let u of result()?.users" class="admin-row">
+        <span class="col-name">{{ displayName(u) }}</span>
         <span class="col-email font-mono">{{ u.email }}</span>
         <span class="col-role">
-          <span class="role-pill">{{ u.role }}</span>
+          <select
+            class="role-select"
+            [value]="primaryRole(u)"
+            [disabled]="u.id === currentUserId || rowBusyId() === u.id"
+            (change)="onRoleSelect(u, $any($event.target).value)"
+            [title]="u.id === currentUserId ? 'You cannot change your own role' : 'Change role'"
+          >
+            <option *ngFor="let r of roles" [value]="r">{{ r }}</option>
+          </select>
         </span>
-        <span class="col-agency">{{ u.agency }}</span>
+        <span class="col-status">
+          <span class="status-pill" [attr.data-status]="u.status">{{ u.status }}</span>
+        </span>
+        <span class="col-created">{{ u.created_at | date:'mediumDate' }}</span>
         <span class="col-action">
-          <a href="#" class="edit-link" (click)="$event.preventDefault()">Configure</a>
+          <button type="button" class="action-link" (click)="openResetPassword(u)" [disabled]="rowBusyId() === u.id">
+            Reset password
+          </button>
+          <button
+            type="button"
+            class="action-link"
+            [class.action-link-danger]="u.status === 'active'"
+            [disabled]="u.id === currentUserId || rowBusyId() === u.id"
+            [title]="u.id === currentUserId ? 'You cannot change your own status' : ''"
+            (click)="toggleStatus(u)"
+          >
+            {{ u.status === 'active' ? 'Deactivate' : 'Activate' }}
+          </button>
         </span>
       </div>
     </div>
   </div>
+
+  <div class="admin-pagination" *ngIf="result() as r">
+    <span class="pagination-info">
+      {{ r.meta.total }} user{{ r.meta.total === 1 ? '' : 's' }} · page {{ r.meta.page }} of {{ r.meta.total_pages || 1 }}
+    </span>
+    <div class="pagination-controls">
+      <button type="button" class="btn-secondary" [disabled]="r.meta.page <= 1" (click)="goToPage(r.meta.page - 1)">Previous</button>
+      <button type="button" class="btn-secondary" [disabled]="r.meta.page >= r.meta.total_pages" (click)="goToPage(r.meta.page + 1)">Next</button>
+    </div>
+  </div>
 </div>
+
+<app-create-user-modal *ngIf="createOpen()" (closed)="createOpen.set(false)" (created)="onUserCreated($event)" />
+<app-reset-password-modal *ngIf="resetPasswordFor() as u" [user]="u" (closed)="resetPasswordFor.set(null)" (done)="onPasswordReset()" />

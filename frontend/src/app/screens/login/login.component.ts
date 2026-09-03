@@ -4,29 +4,8 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 import { ApiError } from '../../core/services/api-client.service';
-import { Role } from '../../core/models/api.models';
-
-/** Local-development convenience only — prefills the sign-in form with
- * one of the accounts backend/cmd/devuser created (see frontend/README.md
- * and backend/cmd/devuser/main.go's doc comment). This is NOT a bypass:
- * clicking one still submits the real credentials through signIn() below,
- * which calls the actual POST /auth/login — there is no code path here
- * that fabricates a session. These are dev-only accounts with no
- * production meaning; nothing here is a real government credential. */
-interface DemoAccount {
-  name: string;
-  email: string;
-  password: string;
-  role: Role;
-}
-
-const DEMO_ACCOUNTS: DemoAccount[] = [
-  { name: 'SI Rajat Mehra', email: 'police@delhipolice.gov.in', password: 'police123', role: 'POLICE' },
-  { name: 'Hon. K. Mahadevan', email: 'judge@ecourts.gov.in', password: 'judge12345', role: 'JUDGE' },
-  { name: 'Shalini Bhat', email: 'lawyer@prosecution.gov.in', password: 'lawyer1234', role: 'LAWYER' },
-  { name: 'Dr. Anjali Iyer', email: 'forensics@cyberlab.gov.in', password: 'forensic123', role: 'FORENSICS' },
-  { name: 'Nikhil Rao', email: 'admin@ncrb.gov.in', password: 'admin1234', role: 'ADMIN' },
-];
+import { environment } from '../../../environments/environment';
+import { DemoAccount } from './demo-accounts';
 
 @Component({
   selector: 'app-login',
@@ -40,8 +19,9 @@ export class LoginComponent {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
 
-  readonly demoAccounts = DEMO_ACCOUNTS;
-  selectedAccount: DemoAccount = DEMO_ACCOUNTS[0];
+  readonly demoMode = environment.demoMode;
+  readonly demoAccounts = signal<DemoAccount[]>([]);
+  selectedAccount: DemoAccount | null = null;
 
   email = '';
   password = '';
@@ -52,6 +32,14 @@ export class LoginComponent {
 
   constructor() {
     this.sessionExpired.set(this.route.snapshot.queryParamMap.get('sessionExpired') === '1');
+
+    // Dynamically imported so this module — and the dev-only credential
+    // strings in it — is a separate chunk a production build (demoMode
+    // false) never imports and the browser never fetches, not merely a
+    // hidden UI element still bundled into the main chunk.
+    if (this.demoMode) {
+      import('./demo-accounts').then((m) => this.demoAccounts.set(m.DEMO_ACCOUNTS));
+    }
   }
 
   selectAccount(acc: DemoAccount) {
@@ -61,7 +49,9 @@ export class LoginComponent {
   }
 
   /** Prefills AND submits — still a real POST /auth/login call (see
-   * signIn()), just a one-click convenience for local demo accounts. */
+   * signIn()), just a one-click convenience for local demo accounts.
+   * Unreachable in a production build: only rendered when demoMode is
+   * true (see login.component.html). */
   quickSignIn(acc: DemoAccount, event?: Event) {
     if (event) event.preventDefault();
     this.selectAccount(acc);

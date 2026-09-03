@@ -51,3 +51,11 @@ func (r *AuthSessionRepo) Revoke(ctx context.Context, sessionID uuid.UUID) error
 func (r *AuthSessionRepo) RevokeFamily(ctx context.Context, familyID uuid.UUID) error {
 	return r.q.RevokeAuthSessionFamily(ctx, familyID)
 }
+
+// RevokeAllForUser invalidates every still-active session belonging to
+// userID, regardless of family — used by admin user management (password
+// reset, deactivation/suspension) so an already-issued refresh token
+// cannot keep a session alive past that action.
+func (r *AuthSessionRepo) RevokeAllForUser(ctx context.Context, userID uuid.UUID) error {
+	return r.q.RevokeAllAuthSessionsForUser(ctx, userID)
+}

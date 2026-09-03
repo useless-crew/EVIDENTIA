@@ -11,6 +11,24 @@ import (
 	"github.com/google/uuid"
 )
 
+const adminUserExists = `-- name: AdminUserExists :one
+SELECT EXISTS (
+    SELECT 1 FROM user_roles ur
+    JOIN roles r ON r.id = ur.role_id
+    WHERE r.name = 'ADMIN'
+) AS exists
+`
+
+// Used only by internal/bootstrap to decide whether the initial-admin
+// bootstrap has already run — true the moment any user holds the ADMIN
+// role, regardless of how they came to hold it.
+func (q *Queries) AdminUserExists(ctx context.Context) (bool, error) {
+	row := q.db.QueryRow(ctx, adminUserExists)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const assignRoleToUser = `-- name: AssignRoleToUser :exec
 INSERT INTO user_roles (user_id, role_id)
 VALUES ($1, $2)

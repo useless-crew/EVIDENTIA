@@ -23,6 +23,7 @@ type Config struct {
 	JWT         JWTConfig
 	Documents   DocumentsConfig
 	Certificate CertificateConfig
+	Bootstrap   BootstrapAdminConfig
 }
 
 // AppConfig describes general application identity.
@@ -139,6 +140,22 @@ type DocumentsConfig struct {
 // not a prerequisite for it.
 type CertificateConfig struct {
 	SigningKeyPEM string
+}
+
+// BootstrapAdminConfig configures the one-time initial-administrator
+// bootstrap (internal/bootstrap) — the ONLY account this project ever
+// creates outside normal admin-driven user management (master prompt
+// §4/§29). Every field is optional and carries no default: unset means
+// "no bootstrap admin to create" (a valid, common state — e.g. every
+// startup after the first, or a deployment relying entirely on
+// backend/cmd/devuser for local dev), never a baked-in email/password
+// (master prompt: never default credentials). Set is only meaningful when
+// ALL THREE are provided — internal/bootstrap treats a partially set
+// group as a misconfiguration, not "some fields optional."
+type BootstrapAdminConfig struct {
+	Email    string
+	Password string
+	Name     string
 }
 
 // LoggingConfig configures structured operational logging.
@@ -258,6 +275,14 @@ func Load() (*Config, error) {
 			// comment: unset is a valid, intentional configuration (an
 			// ephemeral in-memory key is used instead), not an error.
 			SigningKeyPEM: getString("CERTIFICATE_SIGNING_KEY", ""),
+		},
+		Bootstrap: BootstrapAdminConfig{
+			// No requireString/default here either — see
+			// BootstrapAdminConfig's doc comment: unset is the normal state
+			// after the first successful bootstrap.
+			Email:    getString("EVIDENTIA_BOOTSTRAP_ADMIN_EMAIL", ""),
+			Password: getString("EVIDENTIA_BOOTSTRAP_ADMIN_PASSWORD", ""),
+			Name:     getString("EVIDENTIA_BOOTSTRAP_ADMIN_NAME", ""),
 		},
 	}
 

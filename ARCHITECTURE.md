@@ -570,8 +570,8 @@ Realtime / SSE
   tokens, password hashing.
 - **RBAC/ABAC** (implemented — System 4) — Role- and attribute-based
   authorization (`internal/authz`), enforced above the database and
-  reinforced by PostgreSQL RLS. The HTTP routes it will guard (cases,
-  documents, audit, admin) are a later system's scope.
+  reinforced by PostgreSQL RLS. Cases, documents, and admin now guard their
+  routes with it; audit's routes remain a later system's scope.
 - **Cases** (implemented — System 5) — Case CRUD, role-scoped listing,
   status lifecycle, involved parties, case-user membership
   (`internal/service.CaseService`, `internal/handlers/case`).
@@ -582,8 +582,17 @@ Realtime / SSE
   (`internal/service.{DocumentService,CertificateService}`,
   `internal/handlers/document`). Redaction lineage and document sharing
   remain later systems.
+- **Admin / User Management** (implemented — System 8) — Admin-only user
+  CRUD, role assignment, account status, and password reset
+  (`internal/service.UserService`, `internal/handlers/user`), plus a
+  one-time initial-admin bootstrap (`internal/bootstrap`). Every other
+  user is created by an existing ADMIN through `POST /admin/users` — see
+  [docs/API_ENDPOINTS.md](./docs/API_ENDPOINTS.md)'s Admin section.
 - **Audit Chain** — Immutable, hash-chained audit log of security-sensitive
-  actions.
+  actions. Not yet implemented (`internal/audit/{writer,chain}.go` remain
+  TODO stubs) — user-management actions are still recorded through the
+  same operational-log `audit.SlogRecorder` every other system uses, not
+  yet a durable hash-chained table.
 - **Crypto** — SHA-256 integrity hashing (implemented — System 6/7) and
   ECDSA compliance-certificate signing (implemented — System 7,
   `pkg/crypto`); AES-256 encryption and RSA signing remain future.

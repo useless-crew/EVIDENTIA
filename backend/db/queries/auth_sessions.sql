@@ -34,3 +34,12 @@ WHERE id = $1 AND revoked_at IS NULL;
 UPDATE auth_sessions
 SET revoked_at = now()
 WHERE family_id = $1 AND revoked_at IS NULL;
+
+-- name: RevokeAllAuthSessionsForUser :exec
+-- Invalidates every still-active session belonging to a user, regardless
+-- of family — used by admin user management (password reset,
+-- deactivation/suspension) so an already-issued refresh token cannot
+-- keep a session alive past that action.
+UPDATE auth_sessions
+SET revoked_at = now()
+WHERE user_id = $1 AND revoked_at IS NULL;

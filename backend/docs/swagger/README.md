@@ -8,11 +8,13 @@ nothing in the running application imports this package (unlike
 `backend/db/generated`, an empty directory here is harmless to a fresh
 clone).
 
-Currently documents only System 3's authentication endpoints
-(`POST /api/v1/auth/{login,refresh,logout}`) — see the `@title`/`@version`
+Documents every implemented route — authentication
+(`POST /api/v1/auth/{login,refresh,logout}`), cases, case documents,
+document verify/certificate, and admin user management
+(`/api/v1/admin/*`, `/api/v1/users/me`) — see the `@title`/`@version`
 block above `func main` in `backend/cmd/server/main.go` and the
 `@Summary`/`@Success`/`@Failure` annotations on each handler in
-`backend/internal/handlers/auth/`.
+`backend/internal/handlers/*/`.
 
 No live `/swagger/index.html` UI is served yet (that needs
 `swaggo/gin-swagger` wired into the router, not part of this system's

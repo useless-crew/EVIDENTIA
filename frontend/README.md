@@ -61,13 +61,21 @@ allowlist (`CORS_ALLOWED_ORIGINS=http://localhost:4200` — see
 `../.env.example`), so no CORS configuration is needed for local
 development.
 
-### Demo login accounts
+### Getting your first login-able accounts
 
-No user-registration endpoint exists yet (`internal/handlers/user`
-remains a TODO stub — see `../ARCHITECTURE.md`), so a fresh database has
-no login-able accounts. Create one per role with `backend/cmd/devuser`
-(see that command's own doc comment for why it exists and why it's safe —
-nothing it does is wired into any HTTP route):
+A fresh database has no login-able accounts — production real user
+management (System 8) is admin-driven: set
+`EVIDENTIA_BOOTSTRAP_ADMIN_EMAIL`/`_PASSWORD`/`_NAME` before the backend's
+first startup (see `../.env.example`) to provision the one initial ADMIN
+account, sign in as that ADMIN, then use Admin → Users in the app (or
+`POST /api/v1/admin/users`) to create POLICE/FORENSICS/LAWYER/JUDGE/ADMIN
+accounts for everyone else — see `../docs/API_ENDPOINTS.md`'s Admin
+section.
+
+For local development without going through that flow every time,
+`backend/cmd/devuser` remains a quicker shortcut (see that command's own
+doc comment for why it exists and why it's safe — nothing it does is
+wired into any HTTP route):
 
 ```bash
 cd ../backend
@@ -79,10 +87,13 @@ go run ./cmd/devuser -email=police@example.test -password=at-least-8-chars -firs
 Repeat with `-role=ADMIN`/`FORENSICS`/`LAWYER`/`JUDGE` as needed. These
 are local-development-only accounts you create yourself with a password
 you choose — nothing here is a real credential, and none is committed
-anywhere. The login screen's "Local Dev Demo Accounts" chips are a
-convenience for prefilling the sign-in form with accounts created this
-way (they still submit through the real `POST /auth/login` — see
-`src/app/screens/login/login.component.ts`'s own comment).
+anywhere. When `environment.development.ts`'s `demoMode` is true (the
+default for `ng serve`), the login screen's "Local Dev Demo Accounts"
+chips are a convenience for prefilling the sign-in form with accounts
+created this way — they still submit through the real `POST /auth/login`
+(see `src/app/screens/login/login.component.ts`'s own comment). That
+panel is compiled out of a production build (`demoMode: false` in
+`environment.ts`) — production login is just an email/password form.
 
 ## Code scaffolding
 

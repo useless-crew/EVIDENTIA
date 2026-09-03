@@ -46,6 +46,14 @@ func (r *UserRepo) Count(ctx context.Context) (int64, error) {
 	return r.q.CountUsers(ctx)
 }
 
+func (r *UserRepo) ListFiltered(ctx context.Context, arg generated.ListUsersFilteredParams) ([]generated.ListUsersFilteredRow, error) {
+	return r.q.ListUsersFiltered(ctx, arg)
+}
+
+func (r *UserRepo) CountFiltered(ctx context.Context, arg generated.CountUsersFilteredParams) (int64, error) {
+	return r.q.CountUsersFiltered(ctx, arg)
+}
+
 func (r *UserRepo) UpdateProfile(ctx context.Context, arg generated.UpdateUserProfileParams) (generated.UpdateUserProfileRow, error) {
 	return r.q.UpdateUserProfile(ctx, arg)
 }

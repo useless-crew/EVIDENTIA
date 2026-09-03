@@ -64,6 +64,12 @@ type App struct {
 	// exact canonical hash, and audit integration for
 	// GET /documents/:id/certificate.
 	CertificateService *service.CertificateService
+
+	// UserService is System 8's admin user-management business logic (see
+	// internal/service.UserService) — user CRUD, role assignment, account
+	// status, and admin-initiated password reset for
+	// /api/v1/admin/users*/roles and /api/v1/users/me.
+	UserService *service.UserService
 }
 
 // New loads configuration and connects every infrastructure dependency in
@@ -112,6 +118,7 @@ func New(ctx context.Context) (*App, error) {
 		_ = redisCache.Close()
 		return nil, fmt.Errorf("app: build certificate service: %w", err)
 	}
+	userService := service.NewUserService(db.Pool(), authzService, recorder, cfg.JWT.BcryptCost)
 
 	return &App{
 		Config:             cfg,
@@ -125,6 +132,7 @@ func New(ctx context.Context) (*App, error) {
 		CaseService:        caseService,
 		DocumentService:    documentService,
 		CertificateService: certificateService,
+		UserService:        userService,
 	}, nil
 }
 

@@ -24,6 +24,41 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const countUsersFiltered = `-- name: CountUsersFiltered :one
+SELECT count(*) FROM users u
+WHERE ($1::text IS NULL OR u.status = $1)
+  AND (
+      $2::text IS NULL
+      OR EXISTS (
+          SELECT 1 FROM user_roles ur
+          JOIN roles r ON r.id = ur.role_id
+          WHERE ur.user_id = u.id AND r.name = $2
+      )
+  )
+  AND (
+      $3::text IS NULL
+      OR u.email ILIKE '%' || $3::text || '%'
+      OR u.first_name ILIKE '%' || $3::text || '%'
+      OR u.last_name ILIKE '%' || $3::text || '%'
+      OR u.display_name ILIKE '%' || $3::text || '%'
+  )
+`
+
+type CountUsersFilteredParams struct {
+	Status *string `json:"status"`
+	Role   *string `json:"role"`
+	Search *string `json:"search"`
+}
+
+// Same filters as ListUsersFiltered — the caller's filtered total for
+// pagination metadata, not an unfiltered table count.
+func (q *Queries) CountUsersFiltered(ctx context.Context, arg CountUsersFilteredParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countUsersFiltered, arg.Status, arg.Role, arg.Search)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createUser = `-- name: CreateUser :one
 
 INSERT INTO users (
@@ -268,6 +303,101 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 	var items []ListUsersRow
 	for rows.Next() {
 		var i ListUsersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.FirstName,
+			&i.LastName,
+			&i.DisplayName,
+			&i.Phone,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.LastLoginAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUsersFiltered = `-- name: ListUsersFiltered :many
+SELECT
+    id,
+    email,
+    first_name,
+    last_name,
+    display_name,
+    phone,
+    status,
+    created_at,
+    updated_at,
+    last_login_at
+FROM users u
+WHERE ($1::text IS NULL OR u.status = $1)
+  AND (
+      $2::text IS NULL
+      OR EXISTS (
+          SELECT 1 FROM user_roles ur
+          JOIN roles r ON r.id = ur.role_id
+          WHERE ur.user_id = u.id AND r.name = $2
+      )
+  )
+  AND (
+      $3::text IS NULL
+      OR u.email ILIKE '%' || $3::text || '%'
+      OR u.first_name ILIKE '%' || $3::text || '%'
+      OR u.last_name ILIKE '%' || $3::text || '%'
+      OR u.display_name ILIKE '%' || $3::text || '%'
+  )
+ORDER BY u.created_at DESC
+LIMIT $5 OFFSET $4
+`
+
+type ListUsersFilteredParams struct {
+	Status    *string `json:"status"`
+	Role      *string `json:"role"`
+	Search    *string `json:"search"`
+	OffsetVal int32   `json:"offset_val"`
+	LimitVal  int32   `json:"limit_val"`
+}
+
+type ListUsersFilteredRow struct {
+	ID          uuid.UUID          `json:"id"`
+	Email       string             `json:"email"`
+	FirstName   string             `json:"first_name"`
+	LastName    string             `json:"last_name"`
+	DisplayName *string            `json:"display_name"`
+	Phone       *string            `json:"phone"`
+	Status      string             `json:"status"`
+	CreatedAt   time.Time          `json:"created_at"`
+	UpdatedAt   time.Time          `json:"updated_at"`
+	LastLoginAt pgtype.Timestamptz `json:"last_login_at"`
+}
+
+// Every filter is optional (NULL = "no constraint on this field") — same
+// convention as ListCasesFiltered in cases.sql. The role filter is an
+// EXISTS against user_roles/roles rather than a JOIN, so a user with
+// multiple roles is never duplicated in the result set.
+func (q *Queries) ListUsersFiltered(ctx context.Context, arg ListUsersFilteredParams) ([]ListUsersFilteredRow, error) {
+	rows, err := q.db.Query(ctx, listUsersFiltered,
+		arg.Status,
+		arg.Role,
+		arg.Search,
+		arg.OffsetVal,
+		arg.LimitVal,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUsersFilteredRow
+	for rows.Next() {
+		var i ListUsersFilteredRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Email,

@@ -2,18 +2,19 @@
 // local-development login account, directly in the users/user_roles
 // tables — the same tables System 3's real login flow reads.
 //
-// This exists because no user-registration/admin-user-creation endpoint
-// is implemented yet (internal/handlers/user remains a TODO stub — see
-// ARCHITECTURE.md), and backend/db/seed/001_reference_data.sql
-// deliberately seeds no user rows ("a seeded user would need a real
-// bcrypt password_hash... it must be created through [the registration]
-// system's flow, or an explicit, separate, environment-variable-driven
-// script, never hardcoded [in the committed seed file]"). This is that
-// script: every credential is supplied by the caller at run time (a flag
-// or an env var), nothing is hardcoded or committed, and it is never
-// wired into any HTTP route — it exists purely so a developer or the
-// frontend integration's own end-to-end test can log in against a real
-// backend without a production user-management system.
+// System 8 (internal/service.UserService, internal/handlers/user) now
+// implements real admin-driven user management (POST /admin/users) and
+// internal/bootstrap provisions a one-time initial admin — this tool
+// predates both and is kept only as a local-dev convenience: quicker than
+// bootstrapping an admin and going through POST /admin/users just to get
+// one throwaway login for manual testing. backend/db/seed/
+// 001_reference_data.sql still deliberately seeds no user rows ("a seeded
+// user would need a real bcrypt password_hash... it must be created
+// through [the registration] system's flow, or an explicit, separate,
+// environment-variable-driven script, never hardcoded [in the committed
+// seed file]"). This is that script: every credential is supplied by the
+// caller at run time (a flag or an env var), nothing is hardcoded or
+// committed, and it is never wired into any HTTP route.
 //
 // Connects using DATABASE_MIGRATOR_USER/PASSWORD (see cmd/migrate) —
 // the users/user_roles grants would work under the runtime evidentia_app

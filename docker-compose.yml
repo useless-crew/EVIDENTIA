@@ -91,6 +91,18 @@ services:
       # verifiable across a container restart. NEVER commit a real key
       # here or anywhere else.
       CERTIFICATE_SIGNING_KEY: ${CERTIFICATE_SIGNING_KEY:-}
+
+      # Initial-admin bootstrap (System 8, internal/bootstrap) — deliberately
+      # EMPTY by default, same convention as CERTIFICATE_SIGNING_KEY above:
+      # unset is a valid, intentional configuration (the bootstrap is a
+      # no-op with nothing to skip past — see EnsureBootstrapAdmin's doc
+      # comment), never a baked-in placeholder admin. Set all three in your
+      # own (gitignored) .env for the FIRST `docker compose up` against a
+      # fresh database only; leave unset afterward. NEVER commit real
+      # values here or anywhere else.
+      EVIDENTIA_BOOTSTRAP_ADMIN_EMAIL: ${EVIDENTIA_BOOTSTRAP_ADMIN_EMAIL:-}
+      EVIDENTIA_BOOTSTRAP_ADMIN_PASSWORD: ${EVIDENTIA_BOOTSTRAP_ADMIN_PASSWORD:-}
+      EVIDENTIA_BOOTSTRAP_ADMIN_NAME: ${EVIDENTIA_BOOTSTRAP_ADMIN_NAME:-}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     depends_on:

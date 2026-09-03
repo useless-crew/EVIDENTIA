@@ -1,0 +1,71 @@
+<div class="modal-backdrop" (click)="close()">
+  <div class="modal-dialog" (click)="$event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title-group">
+        <h2 class="modal-title">Create User</h2>
+        <span class="modal-subtitle">Creates an account via POST /admin/users</span>
+      </div>
+      <button type="button" class="btn-close" (click)="close()">×</button>
+    </div>
+
+    <div class="modal-body">
+      <div *ngIf="errorMessage()" class="form-alert-error">{{ errorMessage() }}</div>
+
+      <form (ngSubmit)="submit()" class="user-form">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">FIRST NAME</label>
+            <input type="text" class="form-input" [(ngModel)]="firstName" name="firstName" [disabled]="submitting()" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">LAST NAME</label>
+            <input type="text" class="form-input" [(ngModel)]="lastName" name="lastName" [disabled]="submitting()" required />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">EMAIL</label>
+          <input type="email" class="form-input" [(ngModel)]="email" name="email" placeholder="officer@example.gov.in" [disabled]="submitting()" required />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">INITIAL PASSWORD</label>
+          <input type="password" class="form-input font-mono" [(ngModel)]="password" name="password" placeholder="At least 8 characters" [disabled]="submitting()" required />
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">ROLE</label>
+            <select class="form-input" [(ngModel)]="role" name="role" [disabled]="submitting()">
+              <option *ngFor="let r of roles" [value]="r">{{ r }}</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">STATUS</label>
+            <select class="form-input" [(ngModel)]="active" name="active" [disabled]="submitting()">
+              <option [ngValue]="true">Active</option>
+              <option [ngValue]="false">Inactive</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">DISPLAY NAME (OPTIONAL)</label>
+          <input type="text" class="form-input" [(ngModel)]="displayName" name="displayName" [disabled]="submitting()" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">PHONE (OPTIONAL)</label>
+          <input type="tel" class="form-input" [(ngModel)]="phone" name="phone" [disabled]="submitting()" />
+        </div>
+      </form>
+    </div>
+
+    <div class="modal-footer">
+      <button type="button" class="btn-secondary" (click)="close()" [disabled]="submitting()">Cancel</button>
+      <button type="button" class="btn-primary" (click)="submit()" [disabled]="submitting()">
+        {{ submitting() ? 'Creating…' : 'Create User' }}
+      </button>
+    </div>
+  </div>
+</div>

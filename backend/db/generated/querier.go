@@ -19,6 +19,10 @@ type Querier interface {
 	// non-admin caller, at most the one row describing their own membership —
 	// this is a deliberate System 2 scope limit, not a bug in this query.
 	AddCaseMember(ctx context.Context, arg AddCaseMemberParams) (CaseMember, error)
+	// Used only by internal/bootstrap to decide whether the initial-admin
+	// bootstrap has already run — true the moment any user holds the ADMIN
+	// role, regardless of how they came to hold it.
+	AdminUserExists(ctx context.Context) (bool, error)
 	AssignPermissionToRole(ctx context.Context, arg AssignPermissionToRoleParams) error
 	AssignRoleToUser(ctx context.Context, arg AssignRoleToUserParams) error
 	CountAuditEntries(ctx context.Context) (int64, error)
@@ -28,6 +32,9 @@ type Querier interface {
 	CountCasesFiltered(ctx context.Context, arg CountCasesFilteredParams) (int64, error)
 	CountDocumentsByCase(ctx context.Context, caseID uuid.UUID) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
+	// Same filters as ListUsersFiltered — the caller's filtered total for
+	// pagination metadata, not an unfiltered table count.
+	CountUsersFiltered(ctx context.Context, arg CountUsersFilteredParams) (int64, error)
 	// Evidentia — Auth Session (Refresh Token) Queries
 	//
 	// token_hash is always SHA-256(raw refresh token) — the raw token itself
@@ -166,9 +173,19 @@ type Querier interface {
 	ListRolesForUser(ctx context.Context, userID uuid.UUID) ([]Role, error)
 	ListUserIDsForRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error)
+	// Every filter is optional (NULL = "no constraint on this field") — same
+	// convention as ListCasesFiltered in cases.sql. The role filter is an
+	// EXISTS against user_roles/roles rather than a JOIN, so a user with
+	// multiple roles is never duplicated in the result set.
+	ListUsersFiltered(ctx context.Context, arg ListUsersFilteredParams) ([]ListUsersFilteredRow, error)
 	RemoveCaseMember(ctx context.Context, arg RemoveCaseMemberParams) error
 	RemovePermissionFromRole(ctx context.Context, arg RemovePermissionFromRoleParams) error
 	RemoveRoleFromUser(ctx context.Context, arg RemoveRoleFromUserParams) error
+	// Invalidates every still-active session belonging to a user, regardless
+	// of family — used by admin user management (password reset,
+	// deactivation/suspension) so an already-issued refresh token cannot
+	// keep a session alive past that action.
+	RevokeAllAuthSessionsForUser(ctx context.Context, userID uuid.UUID) error
 	// Plain revocation with no replacement — used by logout.
 	RevokeAuthSession(ctx context.Context, id uuid.UUID) error
 	// Marks a session used and revoked in the same step, recording which new

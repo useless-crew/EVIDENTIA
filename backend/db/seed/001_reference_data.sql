@@ -46,6 +46,7 @@ INSERT INTO permissions (name, description, resource, action) VALUES
     ('certificate:read',   'View a compliance certificate.',               'certificate', 'read'),
     ('certificate:create', 'Generate a compliance certificate.',           'certificate', 'create'),
 
+    ('user:read',          'View a user account.',                        'user',        'read'),
     ('user:create',        'Create a user account.',                      'user',        'create'),
     ('user:update',        'Update a user''s profile.',                    'user',        'update'),
     ('user:deactivate',    'Deactivate/suspend a user account.',           'user',        'deactivate'),

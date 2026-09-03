@@ -18,8 +18,9 @@
       </div>
     </div>
 
-    <!-- Quick Role Accounts Demo Selector -->
-    <div class="demo-accounts-card">
+    <!-- Quick Role Accounts Demo Selector — local dev only, never rendered
+         in a production build (environment.demoMode is false there). -->
+    <div class="demo-accounts-card" *ngIf="demoMode">
       <div class="demo-header">
         <span class="demo-title">LOCAL DEV DEMO ACCOUNTS</span>
         <span class="demo-badge font-mono">REAL BACKEND LOGIN</span>
@@ -27,9 +28,9 @@
       <div class="demo-chips-grid">
         <button
           type="button"
-          *ngFor="let acc of demoAccounts"
+          *ngFor="let acc of demoAccounts()"
           class="demo-chip"
-          [class.active]="selectedAccount.email === acc.email"
+          [class.active]="selectedAccount?.email === acc.email"
           [disabled]="submitting()"
           (click)="quickSignIn(acc, $event)"
           [title]="'Fill and sign in as ' + acc.name + ' (' + acc.role + ') — see backend/cmd/devuser'"
@@ -48,7 +49,7 @@
     <div class="login-card">
       <div class="card-header-row">
         <h1 class="card-title">Authorized Sign In</h1>
-        <span class="selected-role-tag">{{ selectedAccount.role }} Clearance</span>
+        <span class="selected-role-tag" *ngIf="selectedAccount">{{ selectedAccount.role }} Clearance</span>
       </div>
       <p class="card-description">
         Cryptographic evidence and case file management for India's justice system.

@@ -3,10 +3,10 @@
 ## Purpose
 
 TODO: Document the full REST API surface for Evidentia. Cases, Case
-Documents (upload/download/verify/certificate), Authentication, Health,
-and Readiness are implemented today. Document redaction/share, Audit, and
-Admin are not implemented yet — those sections document the intended
-surface only.
+Documents (upload/download/verify/certificate), Authentication, Admin
+(user management), and Health/Readiness are implemented today. Document
+redaction/share and Audit are not implemented yet — that section documents
+the intended surface only.
 
 ## Authentication (implemented)
 
@@ -475,24 +475,47 @@ today (POLICE at case scope, once a future system adds `GET /audit`'s own
 case filtering — this endpoint has no resource ID of its own to run ABAC
 against), and only ADMIN holds `audit:verify`.
 
-## Admin
+## Admin (implemented)
+
+All under `/api/v1/admin`, plus `/api/v1/users/me`. See
+`internal/service.UserService` and `internal/handlers/user`.
 
 ```text
-POST /admin/users
-PUT  /admin/users/:id
-PUT  /admin/users/:id/role
-GET  /admin/roles
+POST /api/v1/admin/users
+GET  /api/v1/admin/users
+GET  /api/v1/admin/users/:id
+PUT  /api/v1/admin/users/:id
+PUT  /api/v1/admin/users/:id/role
+PUT  /api/v1/admin/users/:id/status
+PUT  /api/v1/admin/users/:id/password
+GET  /api/v1/admin/roles
+GET  /api/v1/users/me
 ```
 
-TODO (business logic — not implemented). Required authorization:
-`POST /admin/users` needs `user:create`; `PUT /admin/users/:id` needs
-`user:update`; `PUT /admin/users/:id/role` needs
-`internal/authz.Service.CanModifyUserRole` (RBAC `user:role` PLUS an
+Required authorization: `POST /admin/users`/`GET /admin/users`/`GET
+/admin/users/:id` need `user:create`/`user:read`/`user:read` respectively;
+`PUT /admin/users/:id` needs `user:update`; `PUT /admin/users/:id/role`
+needs `internal/authz.Service.CanModifyUserRole` (RBAC `user:role` PLUS an
 explicit block on an actor modifying their own role — see
-`docs/SECURITY.md`'s "Privilege escalation / admin boundaries"); `GET
-/admin/roles` needs no special permission beyond authentication (it lists
-the fixed, non-sensitive role catalog). Per the seed data, only ADMIN
-holds `user:create`/`user:update`/`user:role` today.
+`docs/SECURITY.md`'s "Privilege escalation / admin boundaries"); `PUT
+/admin/users/:id/status` needs `user:deactivate` PLUS the same kind of
+block on an actor changing their own status; `PUT
+/admin/users/:id/password` reuses `user:update` (no separate password
+permission); `GET /admin/roles` and `GET /users/me` need no special
+permission beyond authentication — the roles route lists the fixed,
+non-sensitive role catalog, and every user may view their own profile
+regardless of role. Per the seed data, only ADMIN holds `user:create`/
+`user:read`/`user:update`/`user:deactivate`/`user:role` today.
+
+`PUT /admin/users/:id/status` revokes every one of the target user's
+refresh sessions when the new status isn't `active`; `PUT
+/admin/users/:id/password` always revokes them. Neither route nor any
+other in this section ever returns a password or password hash.
+
+The one account provisioned outside this flow is the initial bootstrap
+admin (`internal/bootstrap.EnsureBootstrapAdmin`, run once at server
+startup) — see the root `.env.example`'s `EVIDENTIA_BOOTSTRAP_ADMIN_*`
+variables and that function's doc comment.
 
 ## Health and Readiness (implemented)
 
@@ -546,18 +569,18 @@ the JWT's role claim alone — see SECURITY.md) — this establishes
 System 4 (`internal/authz`) provides the RBAC (`middleware.RequirePermission`)
 and ABAC (`middleware.RequireCaseAccess`/`RequireDocumentAccess`) checks
 layered on top of it, and the per-route requirements are documented inline
-above (Cases/Case Documents/Documents/Audit/Admin). As of System 7, Cases,
-Case Documents (upload/download), and document verify/certificate routes
-are all live and wired with exactly that middleware (see
-`internal/httpserver/router.go`); the remaining Documents endpoints
-(redact/share) and Audit/Admin routes remain unregistered (their handlers
-are still TODO stubs). Today's non-health routes are
+above (Cases/Case Documents/Documents/Audit/Admin). Cases, Case Documents
+(upload/download), document verify/certificate, and Admin (user
+management) routes are all live and wired with exactly that middleware
+(see `internal/httpserver/router.go`); the remaining Documents endpoints
+(redact/share) and Audit routes remain unregistered (their handlers are
+still TODO stubs). Today's non-health routes are
 `/api/v1/auth/{login,refresh,logout}` (no RBAC/ABAC — see "Authentication"
 above), `/api/v1/cases`/`/api/v1/cases/:id`,
 `/api/v1/cases/:id/documents`, `/api/v1/documents/:id/download`,
-`/api/v1/documents/:id/verify`, and
-`/api/v1/documents/:id/certificate`. Full authorization design:
-`docs/SECURITY.md`'s Authorization section.
+`/api/v1/documents/:id/verify`, `/api/v1/documents/:id/certificate`,
+`/api/v1/admin/users*`, `/api/v1/admin/roles`, and `/api/v1/users/me`.
+Full authorization design: `docs/SECURITY.md`'s Authorization section.
 
 `401` vs `403`: a request with no/invalid/expired authentication is
 always `401 UNAUTHORIZED`; an authenticated request denied by RBAC or ABAC

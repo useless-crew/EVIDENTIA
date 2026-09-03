@@ -41,6 +41,7 @@ const (
 	ActionCertificateRead   Action = "certificate:read"
 	ActionCertificateCreate Action = "certificate:create"
 
+	ActionUserRead       Action = "user:read"
 	ActionUserCreate     Action = "user:create"
 	ActionUserUpdate     Action = "user:update"
 	ActionUserDeactivate Action = "user:deactivate"

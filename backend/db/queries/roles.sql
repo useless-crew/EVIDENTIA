@@ -41,3 +41,13 @@ ORDER BY r.name;
 SELECT ur.user_id
 FROM user_roles ur
 WHERE ur.role_id = $1;
+
+-- name: AdminUserExists :one
+-- Used only by internal/bootstrap to decide whether the initial-admin
+-- bootstrap has already run — true the moment any user holds the ADMIN
+-- role, regardless of how they came to hold it.
+SELECT EXISTS (
+    SELECT 1 FROM user_roles ur
+    JOIN roles r ON r.id = ur.role_id
+    WHERE r.name = 'ADMIN'
+) AS exists;
