@@ -27,6 +27,22 @@ func (r *CertificateRepo) GetByID(ctx context.Context, id uuid.UUID) (generated.
 	return r.q.GetCertificateByID(ctx, id)
 }
 
+// GetByDocumentID returns the single certificate bound to documentID, if
+// any exists — see GetCertificateByDocumentID's own comment on why at
+// most one row can ever match today.
+func (r *CertificateRepo) GetByDocumentID(ctx context.Context, documentID uuid.UUID) (generated.ComplianceCertificate, error) {
+	return r.q.GetCertificateByDocumentID(ctx, documentID)
+}
+
+// GetByDocumentAndHash resolves the "already exists" case after a Create
+// call's ON CONFLICT DO NOTHING matched an existing row (see Create).
+func (r *CertificateRepo) GetByDocumentAndHash(ctx context.Context, documentID uuid.UUID, documentHash []byte) (generated.ComplianceCertificate, error) {
+	return r.q.GetCertificateByDocumentAndHash(ctx, generated.GetCertificateByDocumentAndHashParams{
+		DocumentID:   documentID,
+		DocumentHash: documentHash,
+	})
+}
+
 func (r *CertificateRepo) ListByDocument(ctx context.Context, documentID uuid.UUID) ([]generated.ComplianceCertificate, error) {
 	return r.q.ListCertificatesByDocument(ctx, documentID)
 }

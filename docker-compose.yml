@@ -80,6 +80,17 @@ services:
       # for anything beyond throwaway local dev.
       JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-changeme_example_jwt_signing_key_pad_to_32}
       BCRYPT_COST: ${BCRYPT_COST:-12}
+
+      # Compliance-certificate signing (System 7) — a PEM-encoded PKCS#8
+      # ECDSA private key. Deliberately left EMPTY by default (never a
+      # baked-in placeholder key, unlike JWT_SIGNING_KEY above): unset is
+      # a valid, intentional configuration — service.NewCertificateService
+      # falls back to a fresh, process-lifetime-only key rather than
+      # refusing to start (see that constructor's doc comment). Set
+      # CERTIFICATE_SIGNING_KEY for certificates that must remain
+      # verifiable across a container restart. NEVER commit a real key
+      # here or anywhere else.
+      CERTIFICATE_SIGNING_KEY: ${CERTIFICATE_SIGNING_KEY:-}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     depends_on:

@@ -233,7 +233,7 @@ asserted) in
 | `documents.metadata` | Per-document-type flexible metadata |
 | `redactions.region_data` | Redaction coordinates/pages — shape expected to evolve with the redaction UI, not fixed here |
 | `audit_log.metadata` | Free-form context for an audit entry |
-| `compliance_certificates.certificate_data` | Certificate payload shape not yet finalized |
+| `compliance_certificates.certificate_data` | Certificate signing metadata not covered by the table's own columns — `{signature_algorithm, signature, issuer}` (System 7; see `internal/service.certificatePayloadData`). The document hash/version/generator/timestamp are real columns, not JSONB — this holds only what has no dedicated column |
 
 Core relationships stay fully relational (foreign keys, not JSONB
 references) — JSONB is used only where the project explicitly benefits
@@ -253,11 +253,25 @@ go run ./cmd/migrate up       # or: down, version
 Or via `make migrate-up` / `make migrate-down` from `backend/` (or the
 repository root, via the delegating root `Makefile`).
 
-`000001_init_schema.{up,down}.sql` is the only migration so far. Ordering
+`000001_init_schema.{up,down}.sql` is the foundation migration. Ordering
 inside it: extensions → roles → permissions → users → user_roles →
 role_permissions → cases → case_members → case_involved_parties →
 documents → redactions → audit_log → compliance_certificates → RLS helper
 functions → RLS policies → the `evidentia_app` role and its grants.
+
+`000003_certificate_integrity.{up,down}.sql` (System 7) adds exactly one
+thing: `UNIQUE (document_id, document_hash)` on `compliance_certificates`
+(`compliance_certificates_document_hash_unique`) — the database-level
+guarantee that two concurrent "generate a certificate for this document"
+requests can never both succeed, backing `CreateCertificate`'s
+`INSERT ... ON CONFLICT ... DO NOTHING` (see
+[SECURITY.md](./SECURITY.md)'s "Concurrency" under Document Verification
+& Compliance Certificates). It is a `(document_id, document_hash)` pair,
+not `document_id` alone, matching the table's own existing design intent
+(a certificate is bound to the exact hash it represents) and remaining
+correct if a future system ever legitimately produces more than one
+canonical hash per document. (`000002_auth_sessions` predates this,
+added by System 3.)
 
 The down migration is safe to run repeatedly against development/test
 databases (verified in `backend/tests/db_migration_test.go`, which applies

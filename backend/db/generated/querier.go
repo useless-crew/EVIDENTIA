@@ -48,6 +48,22 @@ type Querier interface {
 	// holds no UPDATE/DELETE grant on this table (see migration). document_hash
 	// is stored redundantly alongside document_id so a certificate remains
 	// historically meaningful even if the document's current metadata changes.
+	// id and generated_at are passed explicitly (server-generated: id via
+	// uuid.New(), generated_at via time.Now().UTC() in Go) rather than
+	// relying on their DEFAULTs, because System 7's certificate signature is
+	// computed over a canonical payload that includes both — the signed
+	// value and the persisted value must be byte-for-byte identical, which a
+	// database-side gen_random_uuid()/now() picked after signing could not
+	// guarantee (see internal/service/certificate_service.go).
+	//
+	// ON CONFLICT DO NOTHING on compliance_certificates_document_hash_unique
+	// (000003_certificate_integrity.up.sql) makes concurrent "generate a
+	// certificate for this document" requests safe: only one INSERT can ever
+	// win for a given (document_id, document_hash) pair. A losing call
+	// returns zero rows (pgx.ErrNoRows for this :one query) rather than an
+	// error — the caller (CertificateService) treats that as "already
+	// exists" and fetches the winning row via GetCertificateByDocumentAndHash,
+	// never as a failure.
 	CreateCertificate(ctx context.Context, arg CreateCertificateParams) (ComplianceCertificate, error)
 	// Evidentia — Document Queries
 	//
@@ -88,6 +104,14 @@ type Querier interface {
 	GetAuthSessionByTokenHash(ctx context.Context, tokenHash []byte) (AuthSession, error)
 	GetCaseByCaseNumber(ctx context.Context, caseNumber string) (Case, error)
 	GetCaseByID(ctx context.Context, id uuid.UUID) (Case, error)
+	// Used to fetch the existing certificate after a CreateCertificate
+	// ON CONFLICT DO NOTHING resolves to "already exists" — see CreateCertificate.
+	GetCertificateByDocumentAndHash(ctx context.Context, arg GetCertificateByDocumentAndHashParams) (ComplianceCertificate, error)
+	// At most one row can ever match in practice (see the unique constraint's
+	// own comment: documents.sha256_hash is immutable, so a document has at
+	// most one distinct hash to be paired with) — LIMIT 1 makes that
+	// assumption explicit rather than relying on it silently.
+	GetCertificateByDocumentID(ctx context.Context, documentID uuid.UUID) (ComplianceCertificate, error)
 	GetCertificateByID(ctx context.Context, id uuid.UUID) (ComplianceCertificate, error)
 	GetDocumentByID(ctx context.Context, id uuid.UUID) (Document, error)
 	GetInvolvedPartyByID(ctx context.Context, id uuid.UUID) (CaseInvolvedParty, error)

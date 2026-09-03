@@ -3,10 +3,10 @@
 ## Purpose
 
 TODO: Document the full REST API surface for Evidentia. Cases, Case
-Documents (upload/download), Authentication, Health, and Readiness are
-implemented today. Document verification/redaction/share/certificate,
-Audit, and Admin are not implemented yet — those sections document the
-intended surface only.
+Documents (upload/download/verify/certificate), Authentication, Health,
+and Readiness are implemented today. Document redaction/share, Audit, and
+Admin are not implemented yet — those sections document the intended
+surface only.
 
 ## Authentication (implemented)
 
@@ -277,10 +277,10 @@ section above):
 ```text
 GET  /api/v1/documents/:id/download
 GET  /documents/:id                    (not implemented — see below)
-POST /documents/:id/verify             (not implemented — System 7)
-POST /documents/:id/redact             (not implemented — System 8)
+POST /api/v1/documents/:id/verify      (implemented — System 7)
+POST /documents/:id/redact             (not implemented — a future redaction system)
 POST /documents/:id/share              (not implemented)
-GET  /documents/:id/certificate        (not implemented — System 10)
+GET  /api/v1/documents/:id/certificate (implemented — System 7)
 ```
 
 ### `GET /api/v1/documents/:id/download` (implemented — System 6)
@@ -313,25 +313,149 @@ Every successful download records a `DOCUMENT_DOWNLOADED` audit event
 confirmed available — it does not wait for the client to finish reading
 the response body.
 
+### `POST /api/v1/documents/:id/verify` (implemented — System 7)
+
+Requires `Authorization: Bearer <access_token>` plus `document:verify`
+(RBAC) and `CanAccessDocument` (ABAC) — the same document-scoped
+authorization pattern as download, re-checked independently at the
+service layer (`DocumentService.VerifyDocument`), not just by the HTTP
+middleware. No request body.
+
+Recomputes the document's SHA-256 hash by streaming the actual object
+retrieved from MinIO through the same `pkg/hash` streaming SHA-256 System
+6 uses at upload, and compares it against `documents.sha256_hash` — the
+canonical hash recorded in PostgreSQL at ingestion time. **The client
+never supplies a hash to compare against**: trusting a client-provided
+hash as evidence of integrity would defeat the entire point of this
+endpoint.
+
+```json
+{
+  "success": true,
+  "data": {
+    "document_id": "...",
+    "status": "VERIFIED",
+    "stored_hash": "64-hex-chars...",
+    "computed_hash": "64-hex-chars...",
+    "verified_at": "2026-01-01T00:00:00Z"
+  }
+}
+```
+
+`status` is one of `VERIFIED` (the hashes match) or `INTEGRITY_FAILURE`
+(they don't) — **both are a `200`**, not an error: verification
+*answering the question correctly* is success, regardless of which answer
+it finds. `stored_hash`/`computed_hash` are always both present, hex
+lowercase, so a caller can see exactly what diverged; no other storage
+detail (bucket, object key) is ever exposed. The canonical
+`documents.sha256_hash` column is **never** rewritten by this endpoint,
+in either outcome — a discovered mismatch is reported, never "repaired".
+The only column verification may update is `documents.status` (moving to
+`TAMPERED` on a mismatch, or back to `ACTIVE` if a previously-tampered
+document now verifies again — always reflecting the *current* truth, and
+only written when it actually needs to change).
+
+- `403` — no relationship to the document's case, OR the document doesn't
+  exist, OR the `:id` isn't a valid UUID — identical response in all
+  three cases, same anti-enumeration posture as download.
+- `503` — the object could not be retrieved/hashed at all (storage
+  outage, object missing) — a **storage error**, categorically different
+  from `INTEGRITY_FAILURE` above and never conflated with it (see
+  `docs/SECURITY.md`'s "Tamper detection").
+
+Every completed verification records an audit event: `DOCUMENT_VERIFIED`
+on a match, `DOCUMENT_INTEGRITY_FAILURE` on a mismatch (with both hashes
+in the event metadata, never raw file bytes) — see "Audit" in
+`docs/SECURITY.md`.
+
+### `GET /api/v1/documents/:id/certificate` (implemented — System 7)
+
+Requires `Authorization: Bearer <access_token>` plus `certificate:read`
+(RBAC) and `CanAccessDocument` (ABAC). Per the seed data, JUDGE and ADMIN
+hold `certificate:read`; POLICE/FORENSICS/LAWYER do not.
+
+This single endpoint both retrieves an existing certificate and, for a
+caller who *also* holds `certificate:create` for this document (ADMIN
+only, per the seed data — ADMIN is the only role holding both), generates
+one on demand if none exists yet. There is deliberately no separate
+`POST` create route.
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "...",
+    "document_id": "...",
+    "document_hash": "64-hex-chars...",
+    "certificate_version": "1.0",
+    "signature_algorithm": "ECDSA-P256-SHA256",
+    "signature": "hex-encoded ASN.1 DER...",
+    "issuer": "Evidentia",
+    "generated_by": "...",
+    "generated_at": "2026-01-01T00:00:00Z"
+  }
+}
+```
+
+`document_hash` is the *exact* hash the document had at generation time —
+the certificate's cryptographic binding, per `docs/SECURITY.md`'s
+"Compliance certificates". The signing **private** key is never reachable
+through this or any other response.
+
+Three outcomes, controlled entirely server-side by the caller's own
+permissions (never leaked to the client as a distinguishable response):
+
+1. An existing certificate bound to the document's *current* canonical
+   hash is returned (`200`).
+2. None exists, but the caller also holds `certificate:create`: one is
+   generated — the document's hash is recomputed from the stored object
+   and compared against the canonical hash again (never trusting an
+   earlier check), and only on a match is a certificate created, signed
+   over a canonical (fixed-field-order, never arbitrary JSON) payload,
+   and persisted (`200`).
+3. None exists and the caller lacks `certificate:create`: `404` — 
+   indistinguishable from "not generated yet", so a `certificate:read`-only
+   caller never learns whether they'd be allowed to generate one.
+
+- `403` — no relationship to the document's case, OR the document doesn't
+  exist, OR the `:id` isn't a valid UUID, OR the caller holds neither
+  `certificate:read` nor `certificate:create` — identical response in
+  every case.
+- `404` — outcome 3 above.
+- `409` — the document failed integrity verification (recomputed hash no
+  longer matches the canonical hash): **a tampered document can never
+  receive a valid certificate**. The canonical hash is not rewritten; the
+  document's `status` may move to `TAMPERED` (same reconciliation
+  `POST /documents/:id/verify` performs).
+- `503` — the object could not be retrieved/hashed at all (storage error,
+  not an integrity finding).
+
+Concurrent "generate a certificate for this document" requests are safe:
+a database-level uniqueness constraint on
+`(document_id, document_hash)` (`compliance_certificates_document_hash_unique`,
+`db/migrations/000003_certificate_integrity.up.sql`) means only one
+`INSERT` can ever win; a losing concurrent request transparently fetches
+and returns the winning row rather than erroring or duplicating.
+
+Every certificate generation records a `CERTIFICATE_CREATED` audit event;
+a discovered mismatch during generation records `DOCUMENT_INTEGRITY_FAILURE`
+(same as verification) instead — see "Audit" in `docs/SECURITY.md`.
+
 ### Not yet implemented
 
 `GET /documents/:id` (standalone metadata — today's only exposure of
 document metadata is via `GET /cases/:id`'s `documents` array, per master
 prompt §27's fallback: "otherwise expose document metadata through the
-existing case detail flow"), `POST /documents/:id/verify` (System 7 —
-cryptographic integrity verification), `POST /documents/:id/redact`
-(System 8), `POST /documents/:id/share`, and
-`GET /documents/:id/certificate` (System 10) remain TODO stubs
-(`internal/handlers/document/{verify,redact,share,certificate}.go`).
-Required authorization for each, once implemented:
+existing case detail flow"), `POST /documents/:id/redact` (a future
+redaction system), and `POST /documents/:id/share` remain TODO stubs
+(`internal/handlers/document/{redact,share}.go`). Required authorization
+for each, once implemented:
 
 | Route | Permission (RBAC) | Resource check (ABAC) |
 |---|---|---|
 | `GET /documents/:id` | `document:read` | `CanAccessDocument` |
-| `POST /documents/:id/verify` | `document:verify` | `CanAccessDocument` |
 | `POST /documents/:id/redact` | `document:redact` | `CanAccessDocument` |
 | `POST /documents/:id/share` | `document:share` | `CanAccessDocument` |
-| `GET /documents/:id/certificate` | `certificate:read` | `CanAccessDocument` on the certificate's document |
 
 `CanAccessDocument` resolves the document's case and applies the same
 case-relationship check as `CanAccessCase` — see `docs/SECURITY.md`'s
@@ -422,15 +546,17 @@ the JWT's role claim alone — see SECURITY.md) — this establishes
 System 4 (`internal/authz`) provides the RBAC (`middleware.RequirePermission`)
 and ABAC (`middleware.RequireCaseAccess`/`RequireDocumentAccess`) checks
 layered on top of it, and the per-route requirements are documented inline
-above (Cases/Case Documents/Documents/Audit/Admin). As of System 6, Cases
-AND Case Documents (upload/download) routes are live and wired with
-exactly that middleware (see `internal/httpserver/router.go`); the
-remaining Documents endpoints (verify/redact/share/certificate) and
-Audit/Admin routes remain unregistered (their handlers are still TODO
-stubs). Today's non-health routes are `/api/v1/auth/{login,refresh,logout}`
-(no RBAC/ABAC — see "Authentication" above), `/api/v1/cases`/
-`/api/v1/cases/:id`, `/api/v1/cases/:id/documents`, and
-`/api/v1/documents/:id/download`. Full authorization design:
+above (Cases/Case Documents/Documents/Audit/Admin). As of System 7, Cases,
+Case Documents (upload/download), and document verify/certificate routes
+are all live and wired with exactly that middleware (see
+`internal/httpserver/router.go`); the remaining Documents endpoints
+(redact/share) and Audit/Admin routes remain unregistered (their handlers
+are still TODO stubs). Today's non-health routes are
+`/api/v1/auth/{login,refresh,logout}` (no RBAC/ABAC — see "Authentication"
+above), `/api/v1/cases`/`/api/v1/cases/:id`,
+`/api/v1/cases/:id/documents`, `/api/v1/documents/:id/download`,
+`/api/v1/documents/:id/verify`, and
+`/api/v1/documents/:id/certificate`. Full authorization design:
 `docs/SECURITY.md`'s Authorization section.
 
 `401` vs `403`: a request with no/invalid/expired authentication is

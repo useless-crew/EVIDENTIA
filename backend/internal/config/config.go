@@ -13,15 +13,16 @@ import (
 
 // Config is the root, strongly typed application configuration.
 type Config struct {
-	App       AppConfig
-	Server    ServerConfig
-	CORS      CORSConfig
-	Database  DatabaseConfig
-	Redis     RedisConfig
-	MinIO     MinIOConfig
-	Logging   LoggingConfig
-	JWT       JWTConfig
-	Documents DocumentsConfig
+	App         AppConfig
+	Server      ServerConfig
+	CORS        CORSConfig
+	Database    DatabaseConfig
+	Redis       RedisConfig
+	MinIO       MinIOConfig
+	Logging     LoggingConfig
+	JWT         JWTConfig
+	Documents   DocumentsConfig
+	Certificate CertificateConfig
 }
 
 // AppConfig describes general application identity.
@@ -122,6 +123,22 @@ type MinIOConfig struct {
 // evidence files before the handler ever saw them.
 type DocumentsConfig struct {
 	MaxUploadSize int64
+}
+
+// CertificateConfig configures compliance-certificate signing (System 7).
+// SigningKeyPEM is deliberately OPTIONAL and carries no default: it is a
+// PEM-encoded PKCS#8 ECDSA private key (see pkg/crypto.ParseECDSAPrivateKeyPEM),
+// read verbatim from CERTIFICATE_SIGNING_KEY, and MUST NEVER be logged,
+// returned through an API response, or given a baked-in fallback value —
+// a hardcoded signing key would let anyone who reads the source forge a
+// certificate. When unset, service.NewCertificateService generates a
+// fresh, process-lifetime-only key instead (see that constructor's doc
+// comment for the consequences of doing so) rather than the application
+// refusing to start — certificate signing is an enhancement over the
+// certificate's core guarantee (binding to the exact document hash),
+// not a prerequisite for it.
+type CertificateConfig struct {
+	SigningKeyPEM string
 }
 
 // LoggingConfig configures structured operational logging.
@@ -235,6 +252,12 @@ func Load() (*Config, error) {
 			// sizing, which a real deployment should tune via
 			// MAX_UPLOAD_SIZE.
 			MaxUploadSize: int64(getInt(c, "MAX_UPLOAD_SIZE", 50<<20)),
+		},
+		Certificate: CertificateConfig{
+			// No requireString/default here — see CertificateConfig's doc
+			// comment: unset is a valid, intentional configuration (an
+			// ephemeral in-memory key is used instead), not an error.
+			SigningKeyPEM: getString("CERTIFICATE_SIGNING_KEY", ""),
 		},
 	}
 

@@ -3,12 +3,14 @@
 ## Purpose
 
 Document the object storage architecture for evidence documents: the
-`Storage` interface and its two implementations (System 1/2), and the
-System 6 document-ingestion/retrieval pipeline that uses them. SHA-256
-*verification*/tamper-detection (System 7), redaction/derivative
-generation (a future redaction system), and compliance certificates
-(System 10) are explicitly NOT covered here — they build on what this
-document describes, but are not implemented yet.
+`Storage` interface and its two implementations (System 1/2), the
+System 6 document-ingestion/retrieval pipeline that uses them, and
+System 7's verification/tamper-detection pipeline built on top of it
+(compliance certificates reuse the same recompute-and-compare read path —
+see [SECURITY.md](./SECURITY.md)'s "Document Verification & Compliance
+Certificates" for the certificate-specific design). Redaction/derivative
+generation (a future redaction system) is explicitly NOT covered here —
+it builds on what this document describes, but is not implemented yet.
 
 ## Storage Interface (Implemented)
 
@@ -151,16 +153,50 @@ plus `X-Content-Type-Options: nosniff`, so a browser never executes or
 renders evidence content by default — this system is storage/retrieval
 infrastructure, not a document viewer or execution engine.
 
+## Document Verification Pipeline (Implemented — System 7)
+
+```text
+Client (no body)
+ ↓
+Authenticate (System 3) + Authorize (System 4: document:verify + CanAccessDocument)
+ ↓
+Resolve document row under RLS (PostgreSQL) — documents.sha256_hash is canonical
+ ↓
+Retrieve object from MinIO  ← only after the above succeeds, never before
+ ↓
+Stream object → SHA-256 (pkg/hash), never io.ReadAll
+ ↓
+bytes.Equal(computed_hash, documents.sha256_hash)
+ ↓
+Reconcile documents.status (TAMPERED/ACTIVE) — sha256_hash itself is NEVER written
+ ↓
+Audit event (DOCUMENT_VERIFIED / DOCUMENT_INTEGRITY_FAILURE)
+ ↓
+Response: both hashes, status VERIFIED or INTEGRITY_FAILURE (both are 200)
+```
+
+`internal/service.DocumentService.VerifyDocument` reuses this pipeline's
+"database before storage, always" ordering and streaming discipline
+exactly as System 6's download path established them — see
+[SECURITY.md](./SECURITY.md)'s "Document Verification & Compliance
+Certificates" for the full design, including why a storage error (`503`)
+and a detected mismatch (`INTEGRITY_FAILURE`, `200`) are categorically
+different outcomes that are never conflated, and why
+`documents.sha256_hash` is never rewritten regardless of the result.
+
+`internal/service.CertificateService` reads through this same MinIO path
+(the shared, package-level `recomputeDocumentHash` function — not a
+second implementation) when generating a compliance certificate: it
+re-verifies the document's hash immediately before signing and refuses
+(`409`) on any mismatch, so a tampered document can never receive a valid
+certificate. Certificates never store or re-derive object bytes — only
+the resulting hash, already computed by this pipeline, is persisted.
+
 ## Future Systems (Not Implemented Here)
 
-- **System 7** — recomputing a document's SHA-256 from its stored object
-  and comparing it against `documents.sha256_hash` to detect tampering.
-  System 6 only computes and persists the *initial* hash at ingestion.
 - A future **redaction system** — a new document row + new object derived from
   an original, never modifying the original in place.
 - **System 8** — the audit hash chain itself (`audit_log.hash`/
-  `prev_hash`); System 6's `DOCUMENT_UPLOADED`/`DOCUMENT_DOWNLOADED`
-  events go through the same `audit.Recorder` interface System 3/4/5
-  already use (today: the operational log only).
-- **System 10** — compliance certificate generation from a verified
-  document hash.
+  `prev_hash`); System 6/7's `DOCUMENT_*`/`CERTIFICATE_*` events go
+  through the same `audit.Recorder` interface System 3/4/5 already use
+  (today: the operational log only).

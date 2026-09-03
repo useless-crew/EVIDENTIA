@@ -8,6 +8,7 @@ package generated
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -15,19 +16,22 @@ import (
 const createCertificate = `-- name: CreateCertificate :one
 
 INSERT INTO compliance_certificates (
-    document_id, document_hash, certificate_version, certificate_data, generated_by
+    id, document_id, document_hash, certificate_version, certificate_data, generated_by, generated_at
 ) VALUES (
-    $1, $2, $3, $4, $5
+    $1, $2, $3, $4, $5, $6, $7
 )
+ON CONFLICT ON CONSTRAINT compliance_certificates_document_hash_unique DO NOTHING
 RETURNING id, document_id, document_hash, certificate_version, certificate_data, generated_by, generated_at, created_at
 `
 
 type CreateCertificateParams struct {
+	ID                 uuid.UUID       `json:"id"`
 	DocumentID         uuid.UUID       `json:"document_id"`
 	DocumentHash       []byte          `json:"document_hash"`
 	CertificateVersion string          `json:"certificate_version"`
 	CertificateData    json.RawMessage `json:"certificate_data"`
 	GeneratedBy        uuid.UUID       `json:"generated_by"`
+	GeneratedAt        time.Time       `json:"generated_at"`
 }
 
 // Evidentia — Compliance Certificate Queries
@@ -36,14 +40,89 @@ type CreateCertificateParams struct {
 // holds no UPDATE/DELETE grant on this table (see migration). document_hash
 // is stored redundantly alongside document_id so a certificate remains
 // historically meaningful even if the document's current metadata changes.
+// id and generated_at are passed explicitly (server-generated: id via
+// uuid.New(), generated_at via time.Now().UTC() in Go) rather than
+// relying on their DEFAULTs, because System 7's certificate signature is
+// computed over a canonical payload that includes both — the signed
+// value and the persisted value must be byte-for-byte identical, which a
+// database-side gen_random_uuid()/now() picked after signing could not
+// guarantee (see internal/service/certificate_service.go).
+//
+// ON CONFLICT DO NOTHING on compliance_certificates_document_hash_unique
+// (000003_certificate_integrity.up.sql) makes concurrent "generate a
+// certificate for this document" requests safe: only one INSERT can ever
+// win for a given (document_id, document_hash) pair. A losing call
+// returns zero rows (pgx.ErrNoRows for this :one query) rather than an
+// error — the caller (CertificateService) treats that as "already
+// exists" and fetches the winning row via GetCertificateByDocumentAndHash,
+// never as a failure.
 func (q *Queries) CreateCertificate(ctx context.Context, arg CreateCertificateParams) (ComplianceCertificate, error) {
 	row := q.db.QueryRow(ctx, createCertificate,
+		arg.ID,
 		arg.DocumentID,
 		arg.DocumentHash,
 		arg.CertificateVersion,
 		arg.CertificateData,
 		arg.GeneratedBy,
+		arg.GeneratedAt,
 	)
+	var i ComplianceCertificate
+	err := row.Scan(
+		&i.ID,
+		&i.DocumentID,
+		&i.DocumentHash,
+		&i.CertificateVersion,
+		&i.CertificateData,
+		&i.GeneratedBy,
+		&i.GeneratedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getCertificateByDocumentAndHash = `-- name: GetCertificateByDocumentAndHash :one
+SELECT id, document_id, document_hash, certificate_version, certificate_data, generated_by, generated_at, created_at
+FROM compliance_certificates
+WHERE document_id = $1 AND document_hash = $2
+`
+
+type GetCertificateByDocumentAndHashParams struct {
+	DocumentID   uuid.UUID `json:"document_id"`
+	DocumentHash []byte    `json:"document_hash"`
+}
+
+// Used to fetch the existing certificate after a CreateCertificate
+// ON CONFLICT DO NOTHING resolves to "already exists" — see CreateCertificate.
+func (q *Queries) GetCertificateByDocumentAndHash(ctx context.Context, arg GetCertificateByDocumentAndHashParams) (ComplianceCertificate, error) {
+	row := q.db.QueryRow(ctx, getCertificateByDocumentAndHash, arg.DocumentID, arg.DocumentHash)
+	var i ComplianceCertificate
+	err := row.Scan(
+		&i.ID,
+		&i.DocumentID,
+		&i.DocumentHash,
+		&i.CertificateVersion,
+		&i.CertificateData,
+		&i.GeneratedBy,
+		&i.GeneratedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getCertificateByDocumentID = `-- name: GetCertificateByDocumentID :one
+SELECT id, document_id, document_hash, certificate_version, certificate_data, generated_by, generated_at, created_at
+FROM compliance_certificates
+WHERE document_id = $1
+ORDER BY generated_at DESC
+LIMIT 1
+`
+
+// At most one row can ever match in practice (see the unique constraint's
+// own comment: documents.sha256_hash is immutable, so a document has at
+// most one distinct hash to be paired with) — LIMIT 1 makes that
+// assumption explicit rather than relying on it silently.
+func (q *Queries) GetCertificateByDocumentID(ctx context.Context, documentID uuid.UUID) (ComplianceCertificate, error) {
+	row := q.db.QueryRow(ctx, getCertificateByDocumentID, documentID)
 	var i ComplianceCertificate
 	err := row.Scan(
 		&i.ID,

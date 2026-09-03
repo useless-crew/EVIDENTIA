@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -93,14 +94,19 @@ type DownloadedDocument struct {
 // middleware.RequireCaseAccess/RequireDocumentAccess — see
 // docs/SECURITY.md's "Service-layer authorization is not optional here".
 //
-// System 6 boundary (master prompt §72): this type computes and persists
-// the INITIAL SHA-256 hash at ingestion and serves authorized downloads.
-// It does not implement hash verification/tamper detection (System 7),
-// redaction/derivative generation (a future redaction system), or the
+// System 6/7 boundary: this type computes and persists the INITIAL
+// SHA-256 hash at ingestion (System 6), serves authorized downloads
+// (System 6), and recomputes/compares that hash on demand to detect
+// tampering (System 7's VerifyDocument). It does not implement
+// redaction/derivative generation (a future redaction system) or the
 // audit hash chain (System 8, per the numbering already established
-// throughout Systems 2-5's code and the applied migration itself) — see
-// UploadDocument/DownloadDocument's doc comments for the exact boundary
-// each respects.
+// throughout Systems 2-5's code and the applied migration itself), and it
+// never generates compliance certificates — that is
+// CertificateService's job (internal/service/certificate_service.go),
+// which depends on this type only via the shared, package-level
+// recomputeDocumentHash function, not on DocumentService itself. See
+// UploadDocument/DownloadDocument/VerifyDocument's doc comments for the
+// exact boundary each respects.
 type DocumentService struct {
 	pool          *pgxpool.Pool
 	authz         *authz.Service
@@ -297,6 +303,189 @@ func (s *DocumentService) DownloadDocument(ctx context.Context, user auth.Authen
 	})
 
 	return &DownloadedDocument{Document: doc, Content: content}, nil
+}
+
+// Verification status values — System 7's entire vocabulary for a
+// verification result. Deliberately not a database column/enum: a
+// verification is a computed-on-request comparison, not persisted state
+// (the persisted side effect, when it occurs, is documents.status moving
+// to/from models.DocumentStatusTampered — see VerifyDocument).
+const (
+	VerificationStatusVerified         = "VERIFIED"
+	VerificationStatusIntegrityFailure = "INTEGRITY_FAILURE"
+)
+
+// VerificationResult is POST /documents/:id/verify's response shape.
+// Both StoredHash and ComputedHash are always populated (hex-encoded) —
+// including on failure — so a client/investigator can see exactly what
+// diverged, without exposing anything beyond the two digests themselves
+// (no storage_bucket/storage_object_key, no internal error detail).
+type VerificationResult struct {
+	DocumentID   uuid.UUID `json:"document_id"`
+	Status       string    `json:"status"`
+	StoredHash   string    `json:"stored_hash"`
+	ComputedHash string    `json:"computed_hash"`
+	VerifiedAt   time.Time `json:"verified_at"`
+}
+
+// VerifyDocument authorizes user for document:verify on documentID (RBAC
+// permission AND the document's case relationship — see
+// authz.Service.CanAccessDocument), loads the document's canonical hash
+// under RLS, retrieves the actual stored object, and recomputes its
+// SHA-256 — the ONLY question this method answers is "does the evidence
+// PostgreSQL and MinIO currently agree it holds still match", per master
+// prompt §3.
+//
+// This is the critical distinction master prompt §5 draws: a STORAGE
+// ERROR (the object could not be retrieved/hashed at all — MinIO down, a
+// missing object) is returned as an *error* (utils.ErrServiceUnavailable/
+// ErrInternal), never as a verification status. An INTEGRITY FAILURE (the
+// object WAS retrieved and hashed successfully, but the digest differs
+// from documents.sha256_hash) is a successful, meaningful verification
+// outcome — returned as a normal (nil-error) VerificationResult with
+// Status == VerificationStatusIntegrityFailure, exactly like a VERIFIED
+// result structurally, differing only in which status string it carries.
+// A caller must not confuse "the request failed" with "the request
+// succeeded and reports tampering".
+//
+// The canonical hash (documents.sha256_hash) is NEVER written here,
+// regardless of outcome — see master prompt §3.6/§12: a mismatch is
+// never "repaired". The only column this method may update is
+// documents.status, moving it to models.DocumentStatusTampered on a
+// mismatch (a value db/migrations/000001_init_schema.up.sql's own
+// comment already reserves for exactly this) or back to
+// models.DocumentStatusActive if a previously-tampered document now
+// verifies again (the state should always reflect the CURRENT truth, not
+// a permanent, un-refreshable flag) — and only when the current value
+// actually needs to change, so a repeated, identical-outcome verification
+// does not churn the row.
+func (s *DocumentService) VerifyDocument(ctx context.Context, user auth.AuthenticatedUser, documentID uuid.UUID) (*VerificationResult, error) {
+	decision, err := s.authz.CanAccessDocument(ctx, user, documentID, authz.ActionDocumentVerify)
+	if err != nil {
+		return nil, utils.ErrInternal(err)
+	}
+	if !decision.Allowed {
+		return nil, utils.ErrForbidden(genericDocumentForbiddenMessage)
+	}
+
+	ident := repository.AppIdentity{UserID: user.ID, Role: effectiveCaseRole(user)}
+	var doc generated.Document
+	err = repository.WithTx(ctx, s.pool, ident, func(ctx context.Context, q *generated.Queries) error {
+		repo := repository.NewDocumentRepo(q)
+		d, err := repo.GetByID(ctx, documentID)
+		doc = d
+		return err
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, utils.ErrForbidden(genericDocumentForbiddenMessage)
+		}
+		return nil, utils.ErrInternal(err)
+	}
+
+	computedHash, err := recomputeDocumentHash(ctx, s.storage, doc)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "document verification: could not recompute hash from stored object",
+			slog.String("document_id", doc.ID.String()),
+			slog.String("case_id", doc.CaseID.String()),
+			slog.String("storage_object_key", doc.StorageObjectKey),
+			slog.String("error", err.Error()),
+		)
+		// Storage error, NOT an integrity finding — master prompt §5.
+		return nil, utils.ErrServiceUnavailable("The document could not be retrieved for verification")
+	}
+
+	verifiedAt := time.Now().UTC()
+	role := effectiveCaseRole(user)
+	matches := bytes.Equal(computedHash, doc.Sha256Hash)
+
+	if err := reconcileTamperStatus(ctx, s.pool, ident, doc, matches); err != nil {
+		return nil, utils.ErrInternal(err)
+	}
+
+	result := &VerificationResult{
+		DocumentID:   doc.ID,
+		StoredHash:   hex.EncodeToString(doc.Sha256Hash),
+		ComputedHash: hex.EncodeToString(computedHash),
+		VerifiedAt:   verifiedAt,
+	}
+
+	if !matches {
+		result.Status = VerificationStatusIntegrityFailure
+		s.recorder.Record(ctx, audit.Event{
+			Action:       "DOCUMENT_INTEGRITY_FAILURE",
+			ResourceType: "document",
+			ResourceID:   &doc.ID,
+			UserID:       &user.ID,
+			Role:         role,
+			CaseID:       &doc.CaseID,
+			Metadata: map[string]any{
+				"stored_hash":   result.StoredHash,
+				"computed_hash": result.ComputedHash,
+			},
+		})
+		return result, nil
+	}
+
+	result.Status = VerificationStatusVerified
+	s.recorder.Record(ctx, audit.Event{
+		Action:       "DOCUMENT_VERIFIED",
+		ResourceType: "document",
+		ResourceID:   &doc.ID,
+		UserID:       &user.ID,
+		Role:         role,
+		CaseID:       &doc.CaseID,
+		Metadata:     map[string]any{"sha256_hash": result.StoredHash},
+	})
+	return result, nil
+}
+
+// reconcileTamperStatus updates documents.status to reflect the CURRENT
+// verification truth — TAMPERED on a mismatch, ACTIVE on a match — but
+// only issues an UPDATE when the stored status doesn't already reflect
+// that outcome, so repeated identical-result verifications don't churn
+// the row (updated_at, etc.) for no reason. Never touches sha256_hash,
+// storage_bucket, storage_object_key, or any other column. Package-level
+// (not a DocumentService method) so CertificateService's own hash check
+// can call it too, without depending on DocumentService — both entry
+// points must react to a discovered mismatch identically.
+func reconcileTamperStatus(ctx context.Context, pool *pgxpool.Pool, ident repository.AppIdentity, doc generated.Document, matches bool) error {
+	var wantStatus string
+	switch {
+	case !matches && doc.Status != models.DocumentStatusTampered:
+		wantStatus = models.DocumentStatusTampered
+	case matches && doc.Status == models.DocumentStatusTampered:
+		wantStatus = models.DocumentStatusActive
+	default:
+		return nil
+	}
+
+	return repository.WithTx(ctx, pool, ident, func(ctx context.Context, q *generated.Queries) error {
+		return repository.NewDocumentRepo(q).UpdateStatus(ctx, doc.ID, wantStatus)
+	})
+}
+
+// recomputeDocumentHash retrieves doc's stored object from objStorage and
+// streams it through SHA-256 — never io.ReadAll, never loading the whole
+// object into memory at once (master prompt §5/§32). This is the single
+// shared core both VerifyDocument and CertificateService's generation
+// path use, so the two entry points' independent authorization checks
+// (document:verify vs certificate:create) never have to duplicate, or risk
+// diverging on, this streaming/hashing logic. It is a package-level
+// function, not a DocumentService method, specifically so CertificateService
+// can call it without depending on DocumentService at all.
+func recomputeDocumentHash(ctx context.Context, objStorage storage.Storage, doc generated.Document) ([]byte, error) {
+	reader, err := objStorage.Get(ctx, doc.StorageObjectKey)
+	if err != nil {
+		return nil, fmt.Errorf("retrieve stored object: %w", err)
+	}
+	defer reader.Close()
+
+	hasher := hash.New()
+	if _, err := io.Copy(hasher, reader); err != nil {
+		return nil, fmt.Errorf("read stored object: %w", err)
+	}
+	return hasher.Sum(nil), nil
 }
 
 // ---- internal helpers ----

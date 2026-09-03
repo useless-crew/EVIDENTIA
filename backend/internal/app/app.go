@@ -54,8 +54,16 @@ type App struct {
 	// logic (see internal/service.DocumentService) — owns multipart
 	// validation, streaming SHA-256 computation, object storage via
 	// Storage, PostgreSQL metadata persistence, and audit integration for
-	// POST /cases/:id/documents and GET /documents/:id/download.
+	// POST /cases/:id/documents and GET /documents/:id/download. System 7
+	// extends it with VerifyDocument (POST /documents/:id/verify).
 	DocumentService *service.DocumentService
+
+	// CertificateService is System 7's compliance-certificate business
+	// logic (see internal/service.CertificateService) — re-verifies a
+	// document's integrity, signs and persists a certificate bound to its
+	// exact canonical hash, and audit integration for
+	// GET /documents/:id/certificate.
+	CertificateService *service.CertificateService
 }
 
 // New loads configuration and connects every infrastructure dependency in
@@ -98,18 +106,25 @@ func New(ctx context.Context) (*App, error) {
 	authzService := authz.NewService(db.Pool(), recorder)
 	caseService := service.NewCaseService(db.Pool(), authzService, recorder)
 	documentService := service.NewDocumentService(db.Pool(), authzService, recorder, objectStorage, cfg.MinIO.Bucket, cfg.Documents.MaxUploadSize, log)
+	certificateService, err := service.NewCertificateService(db.Pool(), authzService, recorder, objectStorage, cfg.Certificate.SigningKeyPEM, log)
+	if err != nil {
+		db.Close()
+		_ = redisCache.Close()
+		return nil, fmt.Errorf("app: build certificate service: %w", err)
+	}
 
 	return &App{
-		Config:          cfg,
-		Logger:          log,
-		DB:              db,
-		Cache:           redisCache,
-		Storage:         objectStorage,
-		JWTManager:      jwtManager,
-		AuthService:     authService,
-		AuthzService:    authzService,
-		CaseService:     caseService,
-		DocumentService: documentService,
+		Config:             cfg,
+		Logger:             log,
+		DB:                 db,
+		Cache:              redisCache,
+		Storage:            objectStorage,
+		JWTManager:         jwtManager,
+		AuthService:        authService,
+		AuthzService:       authzService,
+		CaseService:        caseService,
+		DocumentService:    documentService,
+		CertificateService: certificateService,
 	}, nil
 }
 

@@ -98,9 +98,21 @@ using only what's already listed above (no Casbin, no OPA, no external
 policy server; see master-prompt-driven design rationale in
 docs/SECURITY.md).
 
-Not yet added, pending the systems that need them: SHA-256/AES-256/RSA/
-ECDSA, Asynq, `go-playground/validator`, SSE. Adding any of these before
-their owning system is implemented is scope creep — don't.
+**System 5 (Case Management)** / **System 6 (Document Management)**: no
+new dependency — `pkg/hash` (streaming SHA-256, Go standard library
+`crypto/sha256`) is System 6's own addition, already covered by "Security
+/ Cryptography" above.
+
+**System 7 (Evidence Verification & Compliance Certificates):** no new
+dependency — `pkg/crypto` (ECDSA P-256 signing, Go standard library
+`crypto/ecdsa`/`crypto/x509`) fills in the ECDSA half of "RSA/ECDSA
+reserved for a future digital-signature module" above; RSA remains
+unimplemented (`pkg/crypto/rsa_sign.go` is still a TODO stub — no system
+through 7 needs it).
+
+Not yet added, pending the systems that need them: AES-256, RSA, Asynq,
+`go-playground/validator`, SSE. Adding any of these before their owning
+system is implemented is scope creep — don't.
 
 ## Explicitly Out of Scope
 

@@ -259,16 +259,55 @@ Full detail in "Document Management" below; summary here:
   a second logging system, never document contents or storage credentials
   in the event metadata.
 
+## Implemented in System 7 (Evidence Verification, Tamper Detection & Compliance Certificates)
+
+Full detail in "Document Verification & Compliance Certificates" below;
+summary here:
+
+- **The canonical hash is the single source of truth, and it is
+  immutable**: `POST /documents/:id/verify` and certificate generation
+  both recompute SHA-256 from the object *actually retrieved from MinIO*
+  and compare it against `documents.sha256_hash` — a client-supplied hash
+  is never accepted as evidence of anything. Neither code path ever
+  writes `sha256_hash`; a detected mismatch is reported, never "repaired".
+- **Storage errors and integrity failures are never conflated**: an
+  object that could not be retrieved/hashed at all returns a `503`
+  service error; an object that *was* retrieved and hashed but no longer
+  matches the canonical hash is a successful, meaningful verification
+  result (`INTEGRITY_FAILURE`, `200`) — the two are structurally
+  different outcomes, never confused in the response, the audit event, or
+  the logs.
+- **A tampered document can never receive a valid certificate**:
+  `CertificateService.generateCertificate` re-verifies the document's
+  hash immediately before signing — never trusting an earlier check —
+  and refuses (`409`) on any mismatch.
+- **Certificates are cryptographically bound to the exact hash they
+  verified**, signed (ECDSA P-256) over a canonical, fixed-field-order
+  payload — never arbitrary JSON, whose key order is not a stable
+  contract — and a database-level uniqueness constraint on
+  `(document_id, document_hash)` makes concurrent generation safe without
+  relying on an application-level check-then-insert race.
+- **Authorization is RBAC + ABAC at the service layer**, same pattern as
+  Systems 5/6: `document:verify`/`certificate:read`/`certificate:create`
+  (RBAC) plus `CanAccessDocument` (ABAC), independently re-checked inside
+  `DocumentService`/`CertificateService`, not just HTTP middleware.
+- **Audit integration reuses the existing `Recorder`**: `DOCUMENT_VERIFIED`,
+  `DOCUMENT_INTEGRITY_FAILURE`, `CERTIFICATE_CREATED` — no second logging
+  system, no audit hash-chain logic (still System 8's job).
+
 ## Principles
 
 The eventual system will enforce all twelve of these. Implemented so far:
 **1** (System 3), **2**/**3** (System 4), **4** (System 2), **11**
-(System 3). Partial: **12** (failed/successful auth actions, and now
-authorization denials, are recorded via `internal/audit.Recorder`, but
-only to the operational log — see "Audit integration" above — not the
-durable table); **7**/**8** (audit_log's storage invariants exist —
-System 2 — but nothing computes a hash chain yet). Not started: 5, 6, 9,
-10.
+(System 3). Partial: **5** (System 6 computes/persists the initial hash;
+System 7 adds recompute-and-compare verification and tamper detection —
+AES-256 encryption at rest, the other half of principle **6**'s
+neighbor, remains unstarted); **12** (failed/successful auth actions, and
+now authorization denials plus document/certificate events, are recorded
+via `internal/audit.Recorder`, but only to the operational log — see
+"Audit integration" above — not the durable table); **7**/**8**
+(audit_log's storage invariants exist — System 2 — but nothing computes a
+hash chain yet). Not started: 6, 9, 10.
 
 1. JWT authentication
 2. RBAC (Role-Based Access Control)
@@ -922,9 +961,10 @@ and deliberately never document contents or storage credentials.
 ### What System 6 does *not* do
 
 - **Hash verification/tamper detection** — System 6 computes and persists
-  the *initial* SHA-256 hash only; comparing a stored object's current
-  hash against `documents.sha256_hash` to detect tampering is System 7's
-  job (`POST /documents/:id/verify` remains a TODO stub).
+  the *initial* SHA-256 hash only; recomputing and comparing a stored
+  object's current hash against `documents.sha256_hash` to detect
+  tampering is System 7's job (`POST /documents/:id/verify` — see
+  "Document Verification & Compliance Certificates" below).
 - **Redaction/derivative documents** — a future redaction system. This
   system's storage layout (original object never overwritten,
   `documents.parent_document_id` already present in the schema but
@@ -936,14 +976,225 @@ and deliberately never document contents or storage credentials.
   the applied migration itself); `DOCUMENT_*` events go through the same
   interface-based `Recorder` any future hash-chained writer will
   implement, with no change required to `DocumentService`.
-- **Compliance certificates, document sharing** — Systems 10 and later;
-  `POST /documents/:id/share` and `GET /documents/:id/certificate` remain
-  TODO stubs.
+- **Compliance certificates, document sharing** — certificates are now
+  System 7's job (below); `POST /documents/:id/share` remains a TODO
+  stub, a later system's scope.
+
+## Document Verification & Compliance Certificates
+
+System 7 (`internal/service.DocumentService.VerifyDocument`,
+`internal/service.CertificateService`, `internal/handlers/document/{verify,certificate}.go`)
+implements `POST /documents/:id/verify` and
+`GET /documents/:id/certificate` — see
+[API_ENDPOINTS.md](./API_ENDPOINTS.md)'s Documents section for the
+request/response contract. This section covers the security-relevant
+design decisions. The core question this system answers, and the only
+one it answers:
+
+> Can Evidentia prove that the evidence currently stored is exactly the
+> evidence that was originally ingested?
+
+```text
+documents.sha256_hash (canonical, written once at upload — System 6)
+        |
+        v
+   Storage.Get(bucket, object_key)  ──stream──>  pkg/hash (SHA-256)
+        |                                              |
+        |                                       computed_hash
+        v                                              |
+   bytes.Equal(computed_hash, documents.sha256_hash) <──┘
+        |
+        +── match ────> VERIFIED / certificate generation proceeds
+        |
+        +── mismatch ─> INTEGRITY_FAILURE / certificate generation refused
+                         (documents.sha256_hash is NEVER rewritten)
+```
+
+### The canonical hash is authoritative and immutable
+
+`documents.sha256_hash`, set once at upload (System 6), is the only value
+either verification or certificate generation ever compares against — a
+client-supplied hash is never accepted (there is no request field for
+one on `POST /documents/:id/verify`, which takes no body). Neither
+`VerifyDocument` nor `CertificateService.generateCertificate` contains
+any code path that writes `documents.sha256_hash`: a discovered mismatch
+is reported and audited, never "repaired" by overwriting the canonical
+value with whatever was found in storage. This is the single most
+important invariant System 7 protects — silently "fixing" the hash after
+a mismatch would destroy the platform's ability to ever prove tampering
+occurred.
+
+The one column verification/certificate generation *may* write is
+`documents.status`: `reconcileTamperStatus` (shared by both entry points,
+so a discovered mismatch is handled identically regardless of which
+one found it) moves it to `TAMPERED` on a mismatch, or back to `ACTIVE`
+if a previously-tampered document re-verifies successfully (e.g. after an
+operator restores the object from backup) — always reflecting the
+*current* truth, and only issuing an `UPDATE` when the value actually
+needs to change, so repeated identical-outcome verifications don't churn
+the row.
+
+### Storage errors vs. integrity failures — never conflated
+
+A storage error (the object could not be retrieved or hashed at
+all — MinIO unreachable, the object missing) is returned as an
+`*utils.AppError` (`503`), exactly like any other service-layer failure.
+An integrity failure (the object *was* retrieved and hashed successfully,
+but the digest differs from the canonical hash) is a **successful**
+verification call that *found* tampering — returned as a normal,
+nil-error result with `status: "INTEGRITY_FAILURE"`, structurally
+identical to a `VERIFIED` result except for which status string it
+carries. A caller (or this codebase's own tests —
+`TestDocumentService_VerifyDocument_MissingObjectReturnsStorageError` vs.
+`_ModifiedObjectReturnsIntegrityFailure`) must never confuse "the request
+failed" with "the request succeeded and reports tampering": conflating
+them would let a transient storage outage masquerade as evidence
+tampering, or vice versa.
+
+### Streaming, shared with the upload/download path
+
+`recomputeDocumentHash` (`internal/service/document_service.go`) streams
+the retrieved object through `pkg/hash` via `io.Copy` — never
+`io.ReadAll` — the same streaming discipline
+[STORAGE.md](./STORAGE.md) documents for upload/download. It is a
+package-level function, not a method on either service, specifically so
+`DocumentService.VerifyDocument` and `CertificateService.generateCertificate`
+share the identical hashing logic without either service depending on
+the other — a discovered mismatch is computed and reported the same way
+regardless of which entry point triggered it.
+
+### Authorization: RBAC + ABAC, independently re-checked at the service layer
+
+`VerifyDocument` calls `authz.Service.CanAccessDocument(ctx, user,
+documentID, authz.ActionDocumentVerify)` — the same pattern System 6
+established for download, requiring `document:verify` (POLICE/FORENSICS/
+ADMIN per the seed data — note JUDGE and LAWYER hold no `document:verify`
+grant, so neither can trigger verification even when attached to the
+case) AND the caller's relationship to the document's case.
+
+Certificate access is a three-way split, entirely server-side:
+`GetOrCreateCertificate` first checks `certificate:read`
+(JUDGE/ADMIN per seed data); if an existing certificate is found for the
+document's current hash, it is returned. Otherwise, a **second**,
+independent `CanAccessDocument` check for `certificate:create`
+(ADMIN only) decides whether to attempt generation — a caller who holds
+only `certificate:read` and finds no certificate gets a `404`,
+indistinguishable from "not generated yet", so the create/read permission
+split is never leaked to the client as a different response shape.
+Neither check is HTTP-middleware-only: `middleware.RequireDocumentAccess`
+gates the route with `certificate:read` (the minimum needed to reach the
+handler at all), and `CertificateService` re-derives both decisions
+itself before doing anything — see "Service-layer authorization is not
+optional here" above.
+
+Both services resolve the document row under the caller's own
+transaction-local RLS identity (`repository.WithTx`/`AppIdentity`) before
+touching MinIO — the same "database before storage, always" ordering
+System 6 established for download (see above): a denied caller's request
+never reaches `Storage.Get`, and a guessed/nonexistent document ID is
+denied identically to a real, unrelated one (verified by
+`TestDocumentService_VerifyDocument_GuessedUUIDDenied` and the
+certificate suite's equivalent cases).
+
+### Certificates: cryptographically bound to the exact hash, never issued for tampered evidence
+
+`CertificateService.generateCertificate` re-verifies the document's
+integrity immediately before signing — it never trusts an earlier
+verification result, even one from moments ago — and refuses
+(`utils.ErrConflict`, `409`) if the recomputed hash no longer matches the
+canonical hash. A certificate is signed over a canonical, deterministic
+payload (`canonicalCertificatePayload` — fixed field order:
+`certificate_id`, `document_id`, `document_hash`, `certificate_version`,
+`issued_at`, `issuer`, `generated_by`; never arbitrary JSON marshaling,
+whose key order is not a stable contract in Go or any language) using
+ECDSA P-256 (`pkg/crypto.SignECDSA`, ASN.1 DER signature over the
+payload's SHA-256 digest). The `issued_at` timestamp is truncated to
+microsecond precision *before* signing — PostgreSQL `timestamptz`'s own
+resolution — so the value that gets signed and the value later read back
+from `compliance_certificates.generated_at` are bit-for-bit identical;
+without this, a signature computed over Go's full nanosecond-precision
+`time.Now()` would spuriously fail re-verification after every database
+round-trip (`generated_at` always loses those trailing digits on
+persist). `CertificateService.VerifyCertificateIntegrity` reconstructs
+that same payload from the persisted row and independently checks both
+`certificate.document_hash == document.sha256_hash` and the signature —
+a certificate is never treated as valid merely because its database row
+exists (`TestCertificateService_VerifyCertificateIntegrity_TamperedSignatureFails`).
+
+The signing key (`CertificateConfig.SigningKeyPEM`, read from
+`CERTIFICATE_SIGNING_KEY`) is a PEM-encoded PKCS#8 ECDSA private key,
+never hardcoded, never logged, and never reachable through any API
+response (`CertificateSummary` carries only the resulting signature, not
+the key). If unset, `NewCertificateService` generates a fresh,
+process-lifetime-only key rather than refusing to start (logged once at
+`WARN` so an operator notices) — certificate signing is an enhancement
+over the certificate's core guarantee (exact-hash binding), not a
+prerequisite for it; a misconfigured (unparseable) configured key,
+by contrast, fails construction outright rather than silently falling
+back to an insecure default.
+
+### Concurrency: database-level uniqueness, not an application-level race
+
+Two simultaneous "generate a certificate for this document" requests
+cannot both succeed: `compliance_certificates_document_hash_unique`
+(a `UNIQUE (document_id, document_hash)` constraint,
+`db/migrations/000003_certificate_integrity.up.sql`) backs
+`CreateCertificate`'s `INSERT ... ON CONFLICT ... DO NOTHING`. A losing
+request's `INSERT` returns zero rows rather than an error; the caller
+treats that as "already exists" and fetches the winning row
+(`GetCertificateByDocumentAndHash`) — both requests return the identical
+certificate, never a duplicate row and never a hard error for the loser
+(`TestCertificateService_GetOrCreateCertificate_ConcurrentGenerationProducesOneCertificate`
+issues five concurrent requests and asserts they all resolve to one
+certificate ID).
+
+### Audit integration
+
+`DOCUMENT_VERIFIED`/`DOCUMENT_INTEGRITY_FAILURE` (verification) and
+`CERTIFICATE_CREATED` (successful certificate generation; a mismatch
+discovered during generation records `DOCUMENT_INTEGRITY_FAILURE`
+instead, identically to a direct verify call) go through the same
+`internal/audit.Recorder` interface every prior system uses — event
+metadata carries the hex-encoded hashes involved, never raw file bytes or
+storage credentials, and no second logging system or audit hash-chain
+logic was introduced (still System 8's job).
+
+### What System 7 does *not* do
+
+- **The audit hash chain** — `DOCUMENT_*`/`CERTIFICATE_*` events go
+  through the existing interface-based `Recorder`; computing or verifying
+  a hash chain over `audit_log` remains System 8's job.
+- **Redaction, document sharing** — a future redaction system and
+  `POST /documents/:id/share` remain out of scope; System 7 preserves the
+  original object/hash exactly as System 6 left them.
+- **A public certificate-verification HTTP endpoint** —
+  `CertificateService.VerifyCertificateIntegrity` provides the capability
+  (used directly by this system's own tests), but no route exposes it
+  publicly today; `GET /documents/:id/certificate` returns the
+  certificate's own record, which already carries everything a caller
+  needs to verify it independently if a future system adds that route.
+- **AES-256 encryption at rest, PDF/legal-format certificate rendering,
+  a blockchain, or any output format beyond the JSON API response** — all
+  explicitly out of this system's scope.
 
 ## Cryptography
 
-TODO: Document SHA-256 integrity hashing, AES-256 encryption key management,
-and the future RSA/ECDSA signing module.
+- **SHA-256** (`pkg/hash`) — document integrity hashing at upload
+  (System 6) and recompute-and-compare verification (System 7,
+  above). Streaming (`io.Copy`, never `io.ReadAll`), lowercase hex
+  representation, verified against known test vectors
+  (`backend/pkg/hash/sha256_test.go`).
+- **ECDSA P-256** (`pkg/crypto.{GenerateECDSAKey,ParseECDSAPrivateKeyPEM,SignECDSA,VerifyECDSA}`,
+  System 7) — compliance-certificate signing. ASN.1 DER signatures over a
+  payload's SHA-256 digest (`crypto/ecdsa`'s standard wire format); keys
+  are PEM-encoded PKCS#8, configured via `CERTIFICATE_SIGNING_KEY` (never
+  hardcoded, never logged, never returned through an API response) with
+  an ephemeral, process-lifetime fallback when unset — see "Document
+  Verification & Compliance Certificates" above for the full design
+  rationale.
+- **AES-256 encryption at rest** and **RSA** signing remain unimplemented
+  — no system through 7 needs either; `pkg/crypto/aes.go` remains a TODO
+  stub.
 
 ## Transport Security
 

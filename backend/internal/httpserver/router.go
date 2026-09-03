@@ -96,6 +96,16 @@ func NewRouter(a *app.App) *gin.Engine {
 	r.POST("/api/v1/cases/:id/documents", authMW, middleware.RequireCaseAccess(a.AuthzService, authz.ActionDocumentUpload, "id"), uploadBodyLimit, documenthandlers.Upload(a.DocumentService))
 	r.GET("/api/v1/documents/:id/download", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentDownload, "id"), documenthandlers.Download(a.DocumentService))
 
+	// Verification & compliance certificates (System 7): both routes are
+	// document-scoped (:id is the DOCUMENT id) and use RequireDocumentAccess,
+	// same as download above. Verify needs no body limit (POST with no
+	// request body). Certificate generation's ADDITIONAL certificate:create
+	// check (beyond the certificate:read gate here) happens inside
+	// CertificateService itself — see its doc comment for why a second
+	// route-level middleware isn't the right place for that distinction.
+	r.POST("/api/v1/documents/:id/verify", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentVerify, "id"), documenthandlers.Verify(a.DocumentService))
+	r.GET("/api/v1/documents/:id/certificate", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionCertificateRead, "id"), documenthandlers.Certificate(a.CertificateService))
+
 	// Audit/admin routes (internal/handlers/{audit,user}) remain not yet
 	// implemented — later systems' scope. System 4's authorization
 	// primitives are already available for whichever system adds them; see

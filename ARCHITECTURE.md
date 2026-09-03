@@ -1,13 +1,15 @@
 # Evidentia — High-Level Architecture
 
-> This document describes the **intended** architecture. Systems 1-4 —
+> This document describes the **intended** architecture. Systems 1-7 —
 > Foundation & Infrastructure, Database & Data Layer, Authentication &
-> Session Security, and Authorization (RBAC + ABAC + RLS integration) —
-> are implemented (see below); everything under Request Flow and Core
-> Domains past them is still a design reference. Note that System 4
-> implements the *authorization infrastructure* only — the case/document/
-> audit/admin HTTP routes it will eventually guard are a later system's
-> scope and are not registered yet (see the System 4 section below).
+> Session Security, Authorization (RBAC + ABAC + RLS integration), Case
+> Management, Document Management & Evidence Ingestion, and Evidence
+> Verification/Tamper Detection/Compliance Certificates — are implemented
+> (see below); everything under Request Flow past them is still a design
+> reference. Note that System 4 implements the *authorization
+> infrastructure* only — the audit/admin HTTP routes it will eventually
+> guard are a later system's scope and are not registered yet (see the
+> System 4 section below).
 
 ## System 1 — Foundation & Infrastructure (Implemented)
 
@@ -354,18 +356,118 @@ in System 5 for case-detail's embedded document references) gained
 standalone upload-response shape — one DTO, two call sites, not a
 duplicate.
 
-**What's deliberately not here**: hash verification/tamper detection
-(System 7), redaction/derivative generation (a future redaction
-system), the audit hash chain (System 8), compliance certificates
-(System 10), and document
-share (`internal/handlers/document/{verify,redact,share,certificate}.go`
-remain TODO stubs). Full design: [docs/SECURITY.md](./docs/SECURITY.md)'s
+**What's deliberately not here**: hash verification/tamper detection and
+compliance certificates (System 7, below), redaction/derivative
+generation (a future redaction system), the audit hash chain (System 8),
+and document share (`internal/handlers/document/{redact,share}.go` remain
+TODO stubs). Full design: [docs/SECURITY.md](./docs/SECURITY.md)'s
 "Document Management" section and [docs/STORAGE.md](./docs/STORAGE.md);
 tests: `backend/pkg/hash/sha256_test.go`,
 `backend/internal/service/document_service_test.go` (pure unit tests:
 filename sanitization, object-key generation, streaming size guard, MIME
 sniffing), `backend/internal/service/document_service_integration_test.go`,
 `backend/internal/httpserver/document_flow_integration_test.go`.
+
+## System 7 — Evidence Verification, Tamper Detection & Compliance Certificates (Implemented)
+
+```text
+internal/handlers/document.Verify (POST, no body)
+    |
+    v
+internal/service.DocumentService.VerifyDocument
+    |
+    +--> authz.Service.CanAccessDocument(ctx, user, docID, ActionDocumentVerify)
+    +--> repository.WithTx: GetDocumentByID (under RLS) — documents.sha256_hash is canonical
+    +--> recomputeDocumentHash(ctx, storage, doc)  — stream MinIO object -> pkg/hash, never io.ReadAll
+    +--> bytes.Equal(computed, doc.Sha256Hash)
+    |      match    -> VERIFIED
+    |      mismatch -> INTEGRITY_FAILURE (doc.Sha256Hash is NEVER rewritten)
+    +--> reconcileTamperStatus — documents.status -> TAMPERED/ACTIVE, only if it must change
+    +--> audit.Recorder — DOCUMENT_VERIFIED / DOCUMENT_INTEGRITY_FAILURE
+
+internal/handlers/document.Certificate (GET — retrieval, or generation on demand)
+    |
+    v
+internal/service.CertificateService.GetOrCreateCertificate
+    |
+    +--> authz.Service.CanAccessDocument(ctx, user, docID, ActionCertificateRead)
+    +--> repository.WithTx: GetDocumentByID (under RLS)
+    +--> fetchCertificate(docID, doc.Sha256Hash) — existing cert for the CURRENT hash?
+    |      found -> return it (200)
+    +--> not found: authz.Service.CanAccessDocument(..., ActionCertificateCreate)
+    |      denied -> 404 (indistinguishable from "not generated yet")
+    +--> generateCertificate:
+    |      +--> recomputeDocumentHash (SAME function VerifyDocument uses — package-level,
+    |      |      not a DocumentService method, so neither service depends on the other)
+    |      +--> mismatch -> reconcileTamperStatus + audit DOCUMENT_INTEGRITY_FAILURE, 409, no certificate
+    |      +--> match -> canonicalCertificatePayload (fixed field order, never arbitrary JSON)
+    |             +--> pkg/crypto.SignECDSA (ECDSA P-256, signing key never hardcoded/logged/returned)
+    |             +--> repository.WithTx: CreateCertificate — INSERT ... ON CONFLICT (document_id,
+    |             |      document_hash) DO NOTHING (000003_certificate_integrity.up.sql); a losing
+    |             |      concurrent request fetches and returns the winning row instead of erroring
+    |             +--> audit.Recorder — CERTIFICATE_CREATED
+```
+
+`app.App` gained a `CertificateService *service.CertificateService` field
+(constructed in `app.New`, sharing `AuthzService`/`audit.Recorder`/
+`Storage` with `DocumentService`, plus a new
+`config.CertificateConfig.SigningKeyPEM` — `CERTIFICATE_SIGNING_KEY`,
+optional; an ephemeral, process-lifetime ECDSA key is generated instead
+when unset — see that field's doc comment). Routes registered in
+`internal/httpserver/router.go`:
+
+```text
+POST /api/v1/documents/:id/verify       Auth + RequireDocumentAccess(document:verify, "id")
+GET  /api/v1/documents/:id/certificate  Auth + RequireDocumentAccess(certificate:read, "id")
+```
+
+**No new authorization primitive was needed**: `CanAccessDocument`
+(System 4) already expressed exactly "RBAC permission AND resource
+relationship" — System 7 supplies two more `Action` constants
+(`ActionDocumentVerify`/`ActionCertificateRead`/`ActionCertificateCreate`,
+already defined in `internal/authz/action.go` and seeded in
+`db/seed/001_reference_data.sql` since System 4/6's authorization
+groundwork). Certificate generation is the one route with a *second*,
+service-layer-only authorization check beyond what the route's own
+middleware enforces (`certificate:create`, ADMIN-only per seed data) —
+see `docs/SECURITY.md`'s "Document Verification & Compliance
+Certificates" for why that split lives in `CertificateService`, not a
+second route.
+
+**sqlc/migration**: `000003_certificate_integrity.up.sql` adds one
+constraint — `UNIQUE (document_id, document_hash)` on
+`compliance_certificates` — backing `CreateCertificate`'s new
+`ON CONFLICT DO NOTHING` clause. Two new queries
+(`GetCertificateByDocumentAndHash`, `GetCertificateByDocumentID`)
+support fetching the winning row after a losing concurrent insert and
+certificate retrieval by document. No other schema change: `documents`'
+`status` column already reserved the `TAMPERED` value (System 2's own
+comment), and `compliance_certificates`' shape (System 2) already matched
+what System 7 needed.
+
+**What's genuinely new here**: `pkg/crypto/ecdsa_sign.go` (previously a
+TODO stub) now implements ECDSA key generation/parsing/signing/
+verification; `internal/service.CertificateService` and
+`internal/handlers/document/{verify,certificate}.go` are the first live
+verification/certificate business logic;
+`internal/service.recomputeDocumentHash`/`reconcileTamperStatus` are
+package-level (not methods) specifically so `DocumentService` and
+`CertificateService` share identical hashing/tamper-status logic without
+either depending on the other.
+
+**What's deliberately not here**: the audit hash chain (System 8, per the
+numbering already established throughout Systems 2-6's code and the
+applied migrations themselves), redaction/derivative generation (a future
+redaction system), document share, and a public certificate-verification
+HTTP endpoint (`CertificateService.VerifyCertificateIntegrity` exists and
+is tested, but no route exposes it — see `docs/SECURITY.md`). Full
+design: [docs/SECURITY.md](./docs/SECURITY.md)'s "Document Verification &
+Compliance Certificates" section and [docs/STORAGE.md](./docs/STORAGE.md)'s
+"Document Verification Pipeline"; tests:
+`backend/pkg/crypto/ecdsa_sign_test.go`,
+`backend/internal/service/document_verify_integration_test.go`,
+`backend/internal/service/certificate_service_integration_test.go`,
+`backend/internal/httpserver/document_verify_certificate_flow_integration_test.go`.
 
 ## Request Flow (Intended, Later Systems)
 
@@ -473,16 +575,18 @@ Realtime / SSE
 - **Cases** (implemented — System 5) — Case CRUD, role-scoped listing,
   status lifecycle, involved parties, case-user membership
   (`internal/service.CaseService`, `internal/handlers/case`).
-- **Documents** (upload/download implemented — System 6) — Evidence
-  document ingestion (streaming SHA-256 + MinIO storage + PostgreSQL
-  metadata) and authorized retrieval
-  (`internal/service.DocumentService`, `internal/handlers/document`).
-  Integrity *verification*, redaction lineage, and compliance
-  certificates remain later systems.
+- **Documents** (implemented — Systems 6/7) — Evidence document ingestion
+  (streaming SHA-256 + MinIO storage + PostgreSQL metadata), authorized
+  retrieval, integrity *verification*/tamper detection, and compliance
+  certificate generation/retrieval
+  (`internal/service.{DocumentService,CertificateService}`,
+  `internal/handlers/document`). Redaction lineage and document sharing
+  remain later systems.
 - **Audit Chain** — Immutable, hash-chained audit log of security-sensitive
   actions.
-- **Crypto** — SHA-256 integrity hashing, AES-256 encryption, RSA/ECDSA
-  signing (future).
+- **Crypto** — SHA-256 integrity hashing (implemented — System 6/7) and
+  ECDSA compliance-certificate signing (implemented — System 7,
+  `pkg/crypto`); AES-256 encryption and RSA signing remain future.
 - **Storage** — MinIO-backed object storage behind a provider-agnostic
   interface.
 - **Jobs** — Redis/Asynq-backed background processing.
@@ -513,21 +617,22 @@ The eventual system will enforce:
 11. Secure refresh-token handling
 12. Audit logging of all security-sensitive actions
 
-As of System 6: **1** (JWT) and **11** (refresh-token rotation/revocation)
+As of System 7: **1** (JWT) and **11** (refresh-token rotation/revocation)
 were implemented in System 3; **4** (RLS) was implemented in System 2,
 enforced with policies and fail-closed behavior verified by integration
 tests; **2** (RBAC) and **3** (ABAC) are implemented in System 4
 (`internal/authz`), composed with RLS as defense-in-depth rather than
 replacing it. Audit entries have their hash/prev_hash storage and
 uniqueness invariants (**7**, **8**) in place, and failed/successful auth
-actions, authorization denials, and now document upload/download
-(**12**, partial — see SECURITY.md) are already recorded operationally,
-but *computing* the actual hash chain and verifying it (**9**) is System
-9's job. **5** (SHA-256 document integrity) is partial: System 6
-*computes and persists* the initial hash at ingestion
-(`pkg/hash`, `documents.sha256_hash`) — *verifying* a stored object
-against it to detect tampering is System 7's job, not yet implemented.
-AES-256 (**6**) and TLS (**10**) remain unimplemented. See
-[docs/SECURITY.md](./docs/SECURITY.md) and
-[docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md) for what each
+actions, authorization denials, and now document upload/download/verify
+and certificate generation (**12**, partial — see SECURITY.md) are
+already recorded operationally, but *computing* the actual hash chain and
+verifying it (**9**) is System 8's job. **5** (SHA-256 document
+integrity) is now complete end-to-end: System 6 *computes and persists*
+the initial hash at ingestion (`pkg/hash`, `documents.sha256_hash`), and
+System 7 *recomputes and compares* a stored object's current hash against
+it to detect tampering (`DocumentService.VerifyDocument`), never
+rewriting the canonical value on a mismatch. AES-256 (**6**) and TLS
+(**10**) remain unimplemented. See [docs/SECURITY.md](./docs/SECURITY.md)
+and [docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md) for what each
 currently covers.
