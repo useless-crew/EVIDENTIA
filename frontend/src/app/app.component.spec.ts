@@ -1,23 +1,26 @@
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { provideRouter } from '@angular/router';
 import { TestBed } from '@angular/core/testing';
-import { App } from './app.component';
+import { AppComponent } from './app.component';
 
-describe('App', () => {
+// This file pre-existed as Angular CLI's default scaffold spec, which
+// imported a component named `App` that never actually existed in this
+// codebase (the real export has always been `AppComponent`) and asserted
+// on placeholder "Hello, evidentia" text no template here ever contained
+// — it could not have compiled. Fixed to actually exercise the real
+// AppComponent (now just a root <router-outlet> — see app.component.ts).
+describe('AppComponent', () => {
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [App],
+      imports: [AppComponent],
+      providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])],
     }).compileComponents();
   });
 
   it('should create the app', () => {
-    const fixture = TestBed.createComponent(App);
+    const fixture = TestBed.createComponent(AppComponent);
     const app = fixture.componentInstance;
     expect(app).toBeTruthy();
-  });
-
-  it('should render title', async () => {
-    const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
-    const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('h1')?.textContent).toContain('Hello, evidentia');
   });
 });

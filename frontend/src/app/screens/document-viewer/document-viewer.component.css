@@ -30,6 +30,11 @@
   gap: 8px;
 }
 
+.doc-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Layout */
 .doc-layout-grid {
   display: grid;
@@ -119,121 +124,76 @@
   overflow: auto;
 }
 
-/* Simulated PDF Page Sheet */
-.pdf-page-sheet {
-  width: 520px;
-  min-height: 680px;
+/* No-inline-preview placeholder (see the template's own comment on why
+   there is no fabricated document-content renderer here). */
+.preview-placeholder {
+  width: 420px;
+  max-width: 100%;
   background: #ffffff;
   border: 1px solid #cbd5e1;
   box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
-  padding: 36px 40px;
+  padding: 48px 32px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
   transition: transform 0.2s ease;
   transform-origin: top center;
 }
 
-.sheet-emblem {
-  text-align: center;
+.preview-icon {
+  font-size: 40px;
+  margin-bottom: 8px;
 }
 
-.sheet-seal {
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  color: var(--color-navy-primary);
-}
-
-.sheet-dept {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  margin-top: 2px;
-}
-
-.sheet-divider {
-  height: 2px;
-  background: var(--color-navy-primary);
-  width: 100%;
-}
-
-.sheet-case-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 11.5px;
-  color: var(--color-text-primary);
-}
-
-.sheet-subject {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--color-navy-dark);
-  text-decoration: underline;
-  margin-top: 4px;
-}
-
-.sheet-section {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.sheet-sec-title {
-  font-size: 11px;
+.preview-filename {
+  font-size: 13px;
   font-weight: 700;
   color: var(--color-navy-primary);
-}
-
-.sheet-p {
-  font-size: 11.5px;
-  line-height: 1.55;
-  color: #334155;
-}
-
-.sheet-hash-box {
-  font-size: 10px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  padding: 6px 8px;
-  border-radius: 3px;
   word-break: break-all;
-  color: #0f172a;
-  margin-top: 4px;
 }
 
-.sheet-signature-block {
-  margin-top: auto;
-  align-self: flex-end;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  text-align: right;
-  gap: 2px;
-}
-
-.sheet-sig-line {
-  width: 140px;
-  height: 1px;
-  background: #64748b;
-  margin-bottom: 6px;
-}
-
-.sheet-sig-name {
+.preview-type {
   font-size: 11px;
-  font-weight: 700;
-  color: var(--color-navy-primary);
+  color: var(--color-text-muted);
 }
 
-.sheet-sig-role {
-  font-size: 10px;
+.preview-note {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin-top: 8px;
+}
+
+.state-panel {
+  padding: 24px 18px;
+  text-align: center;
+  font-size: 13px;
   color: var(--color-text-secondary);
 }
 
-.sheet-sig-cert {
-  font-size: 9px;
-  color: var(--color-accent-blue);
-  margin-top: 2px;
+.state-error {
+  color: var(--color-danger);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn-retry {
+  width: auto;
+  padding: 0 14px;
+  height: 30px;
+}
+
+.inline-error {
+  font-size: 12px;
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
+  border-radius: 5px;
+  padding: 8px 12px;
 }
 
 /* Right Side Column */
@@ -293,6 +253,11 @@
   font-size: 12px;
 }
 
+.btn-sm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .verify-feedback {
   font-size: 12px;
   font-weight: 500;
@@ -326,6 +291,66 @@
 .status-bad {
   color: var(--color-danger);
   font-weight: 600;
+}
+
+.status-unavailable {
+  color: var(--color-warning);
+  font-weight: 600;
+}
+
+/* Integrity failure — deliberately prominent (master prompt §20). */
+.integrity-failure-panel {
+  margin-top: 6px;
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
+  border-radius: 6px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.failure-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-danger);
+}
+
+.failure-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+}
+
+.failure-hash-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.failure-hash-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+
+.digest-box.danger {
+  border-color: var(--color-danger-border);
+  color: var(--color-danger);
+  background: #ffffff;
+}
+
+.failure-meta {
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+}
+
+.verify-success-detail {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 /* Compliance Badge */
@@ -384,10 +409,12 @@
 .cert-hash {
   color: rgba(255, 255, 255, 0.8);
   font-size: 10.5px;
+  word-break: break-all;
 }
 
 .cert-row {
   color: rgba(255, 255, 255, 0.75);
+  word-break: break-all;
 }
 
 .cert-statute {
@@ -398,50 +425,11 @@
   color: var(--tricolor-saffron);
 }
 
-/* Custody Timeline */
-.custody-timeline {
-  display: flex;
-  flex-direction: column;
-}
-
-.custody-step {
-  display: flex;
-  gap: 10px;
-}
-
-.custody-axis {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  flex: none;
-}
-
-.custody-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  margin-top: 4px;
-}
-
-.custody-line {
-  width: 1px;
-  flex: 1;
-  background: var(--color-border);
-  min-height: 24px;
-}
-
-.custody-body {
-  padding-bottom: 12px;
-}
-
-.custody-text {
+.cert-state {
+  color: rgba(255, 255, 255, 0.85);
   font-size: 12px;
-  font-weight: 500;
-  color: var(--color-text-primary);
 }
 
-.custody-hash {
-  font-size: 10.5px;
-  color: var(--color-text-muted);
-  margin-top: 2px;
+.cert-state-error {
+  color: #fecaca;
 }

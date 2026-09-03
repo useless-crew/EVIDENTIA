@@ -10,7 +10,7 @@
       *ngIf="dms.role() === 'Police' || dms.role() === 'Admin'"
       type="button"
       class="btn-primary"
-      (click)="dms.navigateTo('case')"
+      (click)="openCreate()"
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -29,69 +29,72 @@
           <circle cx="11" cy="11" r="8"></circle>
           <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
         </svg>
-        <input type="text" placeholder="Search case number, title, keyword..." class="filter-input" />
+        <input
+          type="text"
+          placeholder="Search by title..."
+          class="filter-input"
+          [value]="searchTerm()"
+          (input)="onSearchInput($any($event.target).value)"
+        />
       </div>
 
-      <div class="filter-pills">
-        <div class="filter-pill">
-          <span>Status: Any</span>
-          <span class="pill-caret">▼</span>
-        </div>
-        <div class="filter-pill">
-          <span>Date: Last 90 days</span>
-          <span class="pill-caret">▼</span>
-        </div>
-        <div class="filter-pill">
-          <span>Agency: All</span>
-          <span class="pill-caret">▼</span>
-        </div>
-      </div>
+      <select class="filter-pill status-select" [value]="statusFilter()" (change)="onStatusChange($any($event.target).value)">
+        <option value="">Status: Any</option>
+        <option *ngFor="let s of statuses" [value]="s">{{ formatStatus(s) }}</option>
+      </select>
 
       <div class="filter-spacer"></div>
 
-      <span class="result-count font-mono">6 of 41 results</span>
+      <span class="result-count font-mono" *ngIf="result() as r">{{ r.cases.length }} of {{ r.meta.total }} results</span>
     </div>
 
-    <!-- Table Header -->
-    <div class="table-header">
-      <span class="col-caseno">CASE NO. ↑</span>
-      <span class="col-title">TITLE</span>
-      <span class="col-status">STATUS</span>
-      <span class="col-by">INVESTIGATING OFFICER</span>
-      <span class="col-updated">LAST ACTION</span>
-      <span class="col-docs">DOCS</span>
+    <!-- Loading -->
+    <div class="state-panel" *ngIf="loading()">Loading cases…</div>
+
+    <!-- Error -->
+    <div class="state-panel state-error" *ngIf="!loading() && errorMessage()">
+      {{ errorMessage() }}
+      <button type="button" class="btn-secondary btn-retry" (click)="fetch()">Retry</button>
     </div>
 
-    <!-- Table Rows -->
-    <div class="table-body">
-      <div
-        *ngFor="let c of dms.casesList"
-        class="table-row"
-        (click)="openCase(c)"
-      >
-        <span class="col-caseno font-mono case-no-link">{{ c.no }}</span>
-        <span class="col-title case-title-text">{{ c.title }}</span>
-        <span class="col-status">
-          <span class="badge-status" [ngClass]="getStatusClass(c.status)">
-            {{ c.status }}
+    <!-- Empty -->
+    <div class="state-panel" *ngIf="!loading() && !errorMessage() && result() && result()!.cases.length === 0">
+      No cases found. {{ dms.role() === 'Police' || dms.role() === 'Admin' ? 'Create one to get started.' : '' }}
+    </div>
+
+    <ng-container *ngIf="!loading() && !errorMessage() && result() && result()!.cases.length > 0">
+      <!-- Table Header -->
+      <div class="table-header">
+        <span class="col-caseno">CASE NO.</span>
+        <span class="col-title">TITLE</span>
+        <span class="col-status">STATUS</span>
+        <span class="col-updated">LAST UPDATED</span>
+      </div>
+
+      <!-- Table Rows -->
+      <div class="table-body">
+        <div *ngFor="let c of result()!.cases" class="table-row" (click)="openCase(c)">
+          <span class="col-caseno font-mono case-no-link">{{ c.case_number }}</span>
+          <span class="col-title case-title-text">{{ c.title }}</span>
+          <span class="col-status">
+            <span class="badge-status" [ngClass]="getStatusClass(c.status)">
+              {{ formatStatus(c.status) }}
+            </span>
           </span>
-        </span>
-        <span class="col-by">{{ c.by }}</span>
-        <span class="col-updated">{{ c.updated }}</span>
-        <span class="col-docs font-mono docs-count">{{ c.docs }}</span>
+          <span class="col-updated">{{ c.updated_at | date: 'medium' }}</span>
+        </div>
       </div>
-    </div>
 
-    <!-- Pagination Footer -->
-    <div class="pagination-footer">
-      <span class="page-count">Page 1 of 7</span>
-      <div class="page-buttons">
-        <button type="button" class="btn-page disabled">Prev</button>
-        <button type="button" class="btn-page active">1</button>
-        <button type="button" class="btn-page">2</button>
-        <button type="button" class="btn-page">3</button>
-        <button type="button" class="btn-page">Next</button>
+      <!-- Pagination Footer -->
+      <div class="pagination-footer" *ngIf="result()!.meta.total_pages > 1">
+        <span class="page-count">Page {{ result()!.meta.page }} of {{ result()!.meta.total_pages }}</span>
+        <div class="page-buttons">
+          <button type="button" class="btn-page" [class.disabled]="page() <= 1" (click)="goToPage(page() - 1)">Prev</button>
+          <button type="button" class="btn-page" [class.disabled]="page() >= result()!.meta.total_pages" (click)="goToPage(page() + 1)">Next</button>
+        </div>
       </div>
-    </div>
+    </ng-container>
   </div>
 </div>
+
+<app-create-case-modal *ngIf="createOpen()" (closed)="createOpen.set(false)" (created)="onCaseCreated($event)"></app-create-case-modal>

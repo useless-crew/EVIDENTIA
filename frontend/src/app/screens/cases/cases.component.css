@@ -110,11 +110,40 @@
   color: var(--color-text-secondary);
 }
 
+.status-select {
+  height: 34px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--color-text-secondary);
+}
+
+.state-panel {
+  padding: 40px 18px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.state-error {
+  color: var(--color-danger);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn-retry {
+  width: auto;
+  padding: 0 14px;
+  height: 30px;
+}
+
 /* Table Grid Columns */
 .table-header,
 .table-row {
   display: grid;
-  grid-template-columns: 140px 2.2fr 130px 1.2fr 110px 70px;
+  grid-template-columns: 150px 2.5fr 160px 160px;
   padding: 11px 18px;
   align-items: center;
 }

@@ -1,4 +1,9 @@
-import { Injectable, signal, computed } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
+import { NavigationEnd, Router } from '@angular/router';
+import { filter } from 'rxjs';
+import { AuthService } from './auth.service';
+import { DocumentService } from './document.service';
+import { DocumentType, Role as BackendRole } from '../models/api.models';
 
 export type Role = 'Police' | 'Judge' | 'Lawyer' | 'Forensics' | 'Admin';
 export type Screen = 'landing' | 'login' | 'dash' | 'cases' | 'case' | 'doc' | 'audit' | 'redact' | 'access' | 'admin';
@@ -10,43 +15,12 @@ export interface NavItem {
   weight: number;
 }
 
-
 export interface StatItem {
   label: string;
   value: string;
   delta: string;
   deltaType: 'up' | 'down' | 'neutral' | 'warn';
   deltaColor: string;
-}
-
-export interface CaseRecord {
-  no: string;
-  title: string;
-  status: 'Under investigation' | 'In trial' | 'Chargesheet filed' | 'Closed';
-  by: string;
-  updated: string;
-  docs: number;
-}
-
-export interface DocItem {
-  name: string;
-  kind: string;
-  badge: 'Verified' | 'Pending review' | 'Redacted copy' | 'Hash mismatch';
-  badgeType: 'verified' | 'pending' | 'redacted' | 'mismatch';
-  by: string;
-}
-
-export interface TimelineItem {
-  text: string;
-  time: string;
-  isLatest: boolean;
-}
-
-export interface PartyItem {
-  initials: string;
-  name: string;
-  role: string;
-  accent: string;
 }
 
 export interface AuditRow {
@@ -84,195 +58,146 @@ export interface RedactionRegion {
   reason: string;
 }
 
-export interface UserAccount {
-  name: string;
-  email: string;
-  password: string;
-  role: Role;
-  agency: string;
-  initials: string;
-}
-
-export const DUMMY_ACCOUNTS: UserAccount[] = [
-  {
-    name: 'SI Rajat Mehra',
-    email: 'police@delhipolice.gov.in',
-    password: 'police123',
-    role: 'Police',
-    agency: 'Noida Sec 58 Police Station',
-    initials: 'RM'
-  },
-  {
-    name: 'Hon. K. Mahadevan',
-    email: 'judge@ecourts.gov.in',
-    password: 'judge123',
-    role: 'Judge',
-    agency: 'Sessions Court 04',
-    initials: 'KM'
-  },
-  {
-    name: 'Shalini Bhat',
-    email: 'lawyer@prosecution.gov.in',
-    password: 'lawyer123',
-    role: 'Lawyer',
-    agency: 'District Prosecution Branch',
-    initials: 'SB'
-  },
-  {
-    name: 'Dr. Anjali Iyer',
-    email: 'forensics@cyberlab.gov.in',
-    password: 'forensic123',
-    role: 'Forensics',
-    agency: 'State Cyber Forensics Lab',
-    initials: 'AI'
-  },
-  {
-    name: 'Nikhil Rao',
-    email: 'admin@ncrb.gov.in',
-    password: 'admin123',
-    role: 'Admin',
-    agency: 'National Crime Records Bureau',
-    initials: 'NR'
-  }
-];
-
-const HEX_CHARS = '0123456789abcdef';
-export const H_DOC = 'd41f9a3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58';
-export const H_UP  = '7b2e4c91a08df365c4a17e0b92d5f83a6c1e074bd39f52a8e6c0b74132fd9e05';
+// Fixed demo hash used ONLY by the redact-studio mock (no redaction
+// backend exists yet — a future system's scope, see docs/SECURITY.md's
+// "What System 7 does not do"). Document verification/certificates no
+// longer use a hardcoded hash anywhere — see document-viewer.component.ts,
+// which now displays the real sha256_hash/stored_hash/computed_hash
+// values POST /documents/:id/verify and GET /documents/:id/certificate
+// actually return.
 export const H_RED = 'a09c73e51bd82f460a7e3c19d54b06f2837ea1c9b0d64f5382e17ca09bd435f6';
 
+const BACKEND_TO_UI_ROLE: Record<BackendRole, Role> = {
+  ADMIN: 'Admin',
+  POLICE: 'Police',
+  FORENSICS: 'Forensics',
+  LAWYER: 'Lawyer',
+  JUDGE: 'Judge',
+};
+
+/**
+ * Shared UI state: navigation (now backed by the real Angular Router —
+ * see the constructor and navigateTo()), role-derived nav/dashboard
+ * content, and the upload-modal workflow (now a real
+ * POST /cases/:id/documents call — see startUpload()).
+ *
+ * What is DELIBERATELY NOT here any more: authentication. Login/session
+ * state lives entirely in AuthService (the real backend integration);
+ * `currentUser`/`role` below are thin, template-compatible views DERIVED
+ * from AuthService, never an independent source of truth — there is no
+ * code path left that can set a role or user without a real
+ * POST /auth/login response driving it (see docs/SECURITY.md — the
+ * backend is authoritative for role regardless of what a client sends).
+ *
+ * Also gone: casesList/caseDocuments/caseTimeline/caseParties/
+ * chainOfCustody, the hardcoded single-demo-case arrays the old mock UI
+ * read from — CasesComponent/CaseDetailComponent/DocumentViewerComponent
+ * now fetch real data directly from CaseService/DocumentService. What
+ * REMAINS mock (dashboardInfo stats, activityFeed, auditRows/chainRows,
+ * accessFields, adminUsers) has no backend equivalent yet (dashboard
+ * stats, audit-log read, chain verification, and user administration are
+ * not implemented by any system through 7 — see ARCHITECTURE.md) and is
+ * left as clearly-illustrative content, per master prompt's explicit
+ * "do not implement functionality belonging to Systems 8+".
+ */
 @Injectable({
   providedIn: 'root'
 })
 export class DmsStateService {
-  // Navigation & Role State
-  readonly screen = signal<Screen>('landing');
-  readonly role = signal<Role>('Police');
-  readonly roles: Role[] = ['Police', 'Judge', 'Lawyer', 'Forensics', 'Admin'];
-  readonly simulateTamper = signal<boolean>(false);
+  private readonly router = inject(Router);
+  private readonly auth = inject(AuthService);
+  private readonly documentService = inject(DocumentService);
 
-  // Authenticated User & JWT Session State
-  readonly currentUser = signal<UserAccount | null>(DUMMY_ACCOUNTS[0]);
-  readonly jwtToken = signal<string | null>(null);
+  // ---- Navigation (Router-backed) ----
+  private readonly _screen = signal<Screen>(this.mapUrlToScreen(this.router.url));
+  readonly screen = this._screen.asReadonly();
+
+  private readonly screenPaths: Partial<Record<Screen, string>> = {
+    landing: '/landing',
+    login: '/login',
+    dash: '/app/dashboard',
+    cases: '/app/cases',
+    audit: '/app/audit',
+    access: '/app/access-preview',
+    admin: '/app/admin',
+  };
 
   constructor() {
-    this.restoreSession();
+    this.router.events.pipe(filter((e): e is NavigationEnd => e instanceof NavigationEnd)).subscribe((e) => {
+      this._screen.set(this.mapUrlToScreen(e.urlAfterRedirects));
+    });
   }
 
-  restoreSession() {
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        const saved = localStorage.getItem('evidentia_session');
-        if (saved) {
-          const data = JSON.parse(saved);
-          if (data && data.user && data.token) {
-            this.currentUser.set(data.user);
-            this.jwtToken.set(data.token);
-            this.role.set(data.user.role);
-          }
-        }
-      }
-    } catch {}
-  }
+  private mapUrlToScreen(url: string): Screen {
+    const path = url.split('?')[0];
+    if (path.startsWith('/login')) return 'login';
+    if (!path.startsWith('/app')) return 'landing';
 
-  generateJwtToken(account: UserAccount): string {
-    const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-    const payload = btoa(JSON.stringify({
-      sub: account.email,
-      name: account.name,
-      role: account.role,
-      agency: account.agency,
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + 86400
-    }));
-    const sig = 'c3VwZXJzZWNyZXRqd3RzaWduYXR1cmU';
-    return `${header}.${payload}.${sig}`;
-  }
-
-  loginWithAccount(account: UserAccount): boolean {
-    const token = this.generateJwtToken(account);
-    this.currentUser.set(account);
-    this.jwtToken.set(token);
-    this.role.set(account.role);
-    this.screen.set('dash');
-
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        localStorage.setItem('evidentia_session', JSON.stringify({ token, user: account }));
-      }
-    } catch {}
-
-    return true;
-  }
-
-  loginWithCredentials(emailInput: string, passwordInput: string): { success: boolean; message?: string } {
-    const normalizedEmail = emailInput.trim().toLowerCase();
-
-    // Check exact dummy account match
-    let found = DUMMY_ACCOUNTS.find(
-      a => a.email.toLowerCase() === normalizedEmail && (a.password === passwordInput || passwordInput.length >= 3)
-    );
-
-    // Fallback: match by role keyword or domain prefix
-    if (!found) {
-      if (normalizedEmail.includes('judge') || normalizedEmail.includes('ecourts')) {
-        found = DUMMY_ACCOUNTS.find(a => a.role === 'Judge');
-      } else if (normalizedEmail.includes('lawyer') || normalizedEmail.includes('prosecution')) {
-        found = DUMMY_ACCOUNTS.find(a => a.role === 'Lawyer');
-      } else if (normalizedEmail.includes('forensic') || normalizedEmail.includes('lab')) {
-        found = DUMMY_ACCOUNTS.find(a => a.role === 'Forensics');
-      } else if (normalizedEmail.includes('admin') || normalizedEmail.includes('ncrb')) {
-        found = DUMMY_ACCOUNTS.find(a => a.role === 'Admin');
-      } else {
-        found = DUMMY_ACCOUNTS.find(a => a.role === 'Police');
-      }
+    const segs = path.replace(/^\/app\/?/, '').split('/').filter(Boolean);
+    if (segs.length === 0 || segs[0] === 'dashboard') return 'dash';
+    if (segs[0] === 'audit') return 'audit';
+    if (segs[0] === 'admin') return 'admin';
+    if (segs[0] === 'access-preview') return 'access';
+    if (segs[0] === 'cases') {
+      if (segs.length <= 1) return 'cases';
+      if (segs.length >= 5 && segs[4] === 'redact') return 'redact';
+      if (segs.length >= 4 && segs[2] === 'documents') return 'doc';
+      return 'case';
     }
-
-    if (found) {
-      this.loginWithAccount(found);
-      return { success: true };
-    }
-
-    return { success: false, message: 'Invalid government credentials.' };
+    return 'dash';
   }
+
+  /** Navigates for the screens that need no dynamic ID (dashboard, cases
+   * list, audit, admin, access-preview, login, landing). Case/document
+   * detail navigation happens directly via Router in the component that
+   * already has the real ID (CasesComponent.openCase,
+   * CaseDetailComponent.openDoc, etc.) — see those files. */
+  navigateTo(target: Screen | 'upload') {
+    if (target === 'upload') {
+      // No case context from a generic nav click — send the user to pick
+      // one; a specific case's own "Upload Document" button
+      // (CaseDetailComponent) opens the modal directly with that case's
+      // id via openUploadModal(caseId).
+      this.router.navigateByUrl('/app/cases');
+      return;
+    }
+    const path = this.screenPaths[target];
+    if (path) this.router.navigateByUrl(path);
+  }
+
+  // ---- Authenticated user (derived from AuthService — see class doc) ----
+  readonly role = computed<Role>(() => {
+    const backendRole = this.auth.role();
+    return backendRole ? BACKEND_TO_UI_ROLE[backendRole] : 'Police';
+  });
+
+  readonly currentUser = computed(() => {
+    const u = this.auth.currentUser();
+    if (!u) return null;
+    const name = `${u.first_name} ${u.last_name}`.trim();
+    const initials = `${u.first_name.charAt(0)}${u.last_name.charAt(0)}`.toUpperCase();
+    return { name, initials, email: u.email, role: BACKEND_TO_UI_ROLE[u.role] };
+  });
 
   signOut() {
-    this.currentUser.set(null);
-    this.jwtToken.set(null);
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        localStorage.removeItem('evidentia_session');
-      }
-    } catch {}
-    this.screen.set('login');
+    this.auth.logout().subscribe(() => this.router.navigateByUrl('/login'));
   }
 
-  // Upload Modal State
-  readonly uploadOpen = signal<boolean>(false);
-  readonly uploadPhase = signal<'idle' | 'progress' | 'hashing' | 'done'>('idle');
-  readonly uploadPct = signal<number>(0);
-  readonly liveHash = signal<string>('');
+  // Legacy demo-only chain-tamper visual flag — no toggle exists in the
+  // UI any more (removing the header's toggle was necessary: a
+  // client-side flag with no relationship to a real backend check would
+  // otherwise sit right next to the now-REAL "Verify Integrity" action
+  // and look like it does something). Always false; kept only so the
+  // still-mock audit-log/dashboard/sidebar chain-status widgets (System
+  // 8's audit-chain verification is not implemented by any system
+  // through 7) keep compiling unchanged.
+  readonly simulateTamper = signal<boolean>(false);
 
-  // Document Integrity State
-  readonly verifyState = signal<'idle' | 'checking' | 'ok' | 'tampered'>('idle');
-  readonly certOpen = signal<boolean>(false);
+  readonly roles: Role[] = ['Police', 'Judge', 'Lawyer', 'Forensics', 'Admin'];
 
-  // Chain Verification State
-  readonly chainRunning = signal<boolean>(false);
-  readonly chainDone = signal<boolean>(false);
-  readonly chainCount = signal<number>(0);
-  readonly auditTab = signal<'table' | 'graph'>('table');
-  readonly expandedAuditId = signal<number | null>(null);
-
-  // Redaction Canvas State
-  readonly redactions = signal<RedactionRegion[]>([]);
-  readonly draft = signal<{ x: number; y: number; w: number; h: number } | null>(null);
-  readonly redactSaved = signal<boolean>(false);
-
-  // Timers for animations
-  private activeTimers: any[] = [];
-
-  // Breadcrumb mapping
+  // Breadcrumb mapping — generic per screen type; no longer names a
+  // specific fake case/document (the old text hardcoded "FIR/2026/4521"
+  // regardless of which real case/document was actually open).
   readonly breadcrumb = computed(() => {
     const s = this.screen();
     const map: Record<Screen, string> = {
@@ -280,11 +205,11 @@ export class DmsStateService {
       login: 'Sign In',
       dash: 'Home / Dashboard',
       cases: 'Home / Cases',
-      case: 'Home / Cases / FIR/2026/4521',
-      doc: 'Home / Cases / FIR/2026/4521 / Forensic_Report_UPI_4521.pdf',
-      redact: 'Home / Cases / FIR/2026/4521 / Document / Redact',
+      case: 'Home / Cases / Case Detail',
+      doc: 'Home / Cases / Case Detail / Document',
+      redact: 'Home / Cases / Case Detail / Document / Redact',
       audit: 'Home / Audit Log',
-      access: 'Home / Cases / FIR/2026/4521 / Access Preview',
+      access: 'Home / Access Policy Preview',
       admin: 'Home / Administration / Users'
     };
     return map[s] || 'Home';
@@ -326,7 +251,8 @@ export class DmsStateService {
     }));
   });
 
-  // Dashboard configuration by role
+  // Dashboard configuration by role — illustrative only; no backend
+  // endpoint provides aggregate stats for any system through 7.
   readonly dashboardInfo = computed(() => {
     const r = this.role();
     switch (r) {
@@ -389,7 +315,8 @@ export class DmsStateService {
     }
   });
 
-  // Recent Activity Feed
+  // Recent Activity Feed — illustrative only, no backend timeline/activity
+  // feed endpoint exists yet.
   readonly activityFeed = [
     { text: 'Forensic_Report_UPI_4521.pdf uploaded', meta: 'sha256 d41f9a3c…2d58 · Dr. A. Iyer', time: '2h ago', dotColor: '#2e7d4f' },
     { text: 'Adv. S. Bhat viewed Witness_statement_02.pdf', meta: 'audit entry #1203 · Disclosure verified', time: '4h ago', dotColor: '#426d9b' },
@@ -398,53 +325,31 @@ export class DmsStateService {
     { text: 'Access denied — defence counsel, exhibit E-04', meta: 'policy enforcement: police-only clearance', time: '2 days ago', dotColor: '#c53030' }
   ];
 
-  // Cases List Data
-  readonly casesList: CaseRecord[] = [
-    { no: 'FIR/2026/4521', title: 'Cyber fraud — unauthorised UPI transfers, Sector 62', status: 'Under investigation', by: 'SI R. Mehra', updated: '2h ago', docs: 7 },
-    { no: 'FIR/2026/4488', title: 'Vehicle theft — Kalindi Kunj parking complex', status: 'Chargesheet filed', by: 'SI D. Rana', updated: 'Yesterday', docs: 12 },
-    { no: 'CC/2025/1189', title: 'State v. Nagpal — cheque dishonour & extortion', status: 'In trial', by: 'PP S. Bhat', updated: '3 days ago', docs: 24 },
-    { no: 'FIR/2026/4502', title: 'Data exfiltration at private hospital pathology server', status: 'Under investigation', by: 'Insp. K. Verma', updated: '5h ago', docs: 9 },
-    { no: 'FIR/2025/3871', title: 'Counterfeit currency seizure — Anand Vihar ISBT', status: 'Closed', by: 'SI R. Mehra', updated: '12 Jan 2026', docs: 31 },
-    { no: 'CC/2026/0042', title: 'State v. Qureshi — commercial narcotics possession', status: 'In trial', by: 'PP L. Nair', updated: '1 day ago', docs: 18 }
+  // Access Policy Preview Fields — static illustrative content
+  // (access-preview screen isn't backed by any specific endpoint).
+  readonly accessFields = [
+    { label: 'Complainant Full Name', value: 'Meera Krishnan', restricted: false },
+    { label: 'Complainant Contact', value: '+91 98•• ••4471', restricted: false },
+    { label: 'Witness Protected Identity', value: 'Suresh Pillai, 44, Sector 62', restricted: true },
+    { label: 'Seized Mobile IMEI', value: '35•••••••••••21', restricted: false },
+    { label: 'Beneficiary Bank Account', value: 'HDFC ••••7742 — Kolkata Gariahat branch', restricted: false },
+    { label: 'Investigating Officer Field Diary', value: 'Suspect vehicle registration DL-3C-AZ-9912 traced via toll gantry camera', restricted: true }
   ];
 
-  // Case Documents
-  readonly caseDocuments: DocItem[] = [
-    { name: 'FIR_4521_scan.pdf', kind: 'PDF · 6pp', badge: 'Verified', badgeType: 'verified', by: 'SI R. Mehra' },
-    { name: 'Forensic_Report_UPI_4521.pdf', kind: 'PDF · 22pp', badge: 'Verified', badgeType: 'verified', by: 'Dr. A. Iyer' },
-    { name: 'Bank_statement_HDFC.pdf', kind: 'PDF · 4pp', badge: 'Verified', badgeType: 'verified', by: 'SI R. Mehra' },
-    { name: 'Seizure_memo_device.jpg', kind: 'JPG · 1.1 MB', badge: 'Pending review', badgeType: 'pending', by: 'HC P. Singh' },
-    { name: 'Witness_statement_02.pdf', kind: 'PDF · 3pp', badge: 'Redacted copy', badgeType: 'redacted', by: 'SI R. Mehra' },
-    { name: 'CCTV_frame_export.png', kind: 'PNG · 0.8 MB', badge: 'Hash mismatch', badgeType: 'mismatch', by: 'HC P. Singh' }
+  // Administration Users — illustrative only; no user-management
+  // endpoint is implemented by any system through 7
+  // (internal/handlers/user remains a TODO stub — see ARCHITECTURE.md).
+  readonly adminUsers = [
+    { name: 'SI Rajat Mehra', email: 'r.mehra@delhipolice.gov.in', role: 'Police', agency: 'Noida Sec 58 PS' },
+    { name: 'Dr. Anjali Iyer', email: 'a.iyer@cyberlab.gov.in', role: 'Forensics', agency: 'State Cyber Forensics Lab' },
+    { name: 'Shalini Bhat', email: 's.bhat@prosecution.gov.in', role: 'Lawyer', agency: 'District Prosecution Branch' },
+    { name: 'Hon. K. Mahadevan', email: 'k.mahadevan@ecourts.gov.in', role: 'Judge', agency: 'Sessions Court 04' },
+    { name: 'Nikhil Rao', email: 'n.rao@ncrb.gov.in', role: 'Admin', agency: 'National Crime Records Bureau' }
   ];
 
-  // Case Timeline
-  readonly caseTimeline: TimelineItem[] = [
-    { text: 'Case registered under Bharatiya Nyaya Sanhita §318(4)', time: '11 Feb 2026 · 09:12 IST', isLatest: false },
-    { text: 'Mobile device seized and sealed — exhibit E-04', time: '11 Feb 2026 · 17:40 IST', isLatest: false },
-    { text: 'Forensic imaging requisition raised with Cyber Lab', time: '13 Feb 2026 · 10:05 IST', isLatest: false },
-    { text: 'Forensic report uploaded and signed by Dr. A. Iyer', time: '18 Feb 2026 · 10:14 IST', isLatest: false },
-    { text: 'Status updated to Under Investigation with bank log additions', time: '18 Feb 2026 · 11:02 IST', isLatest: true }
-  ];
-
-  // Case Parties
-  readonly caseParties: PartyItem[] = [
-    { initials: 'RM', name: 'SI Rajat Mehra', role: 'Investigating Officer (IO)', accent: '#132a49' },
-    { initials: 'AI', name: 'Dr. Anjali Iyer', role: 'Forensics — State Cyber Lab', accent: '#2e7d4f' },
-    { initials: 'SB', name: 'Shalini Bhat', role: 'Public Prosecutor', accent: '#426d9b' },
-    { initials: 'KM', name: 'Hon. K. Mahadevan', role: 'Presiding Judge, Sessions Court', accent: '#b26a00' }
-  ];
-
-  // Chain of Custody for Document
-  readonly chainOfCustody = [
-    { text: 'Uploaded & fingerprinted by Dr. A. Iyer', hash: 'd41f9a3c…2d58', dotColor: '#2e7d4f' },
-    { text: 'Cryptographic receipt issued & signed by System', hash: '3c7b208e…1e94', dotColor: '#426d9b' },
-    { text: 'Inspected by SI Rajat Mehra (Noida Sec 58 PS)', hash: 'b0e19470…c63a', dotColor: '#5b6775' },
-    { text: 'Prosecution disclosure bundle attached by Adv. Bhat', hash: '7fa3d5c2…8b0e', dotColor: '#5b6775' },
-    { text: 'Sealed for judicial trial record by Sessions Registrar', hash: 'c0ba97e3…f5d2', dotColor: '#132a49' }
-  ];
-
-  // Audit Rows
+  // Audit Rows — illustrative only; no GET /audit endpoint is implemented
+  // by any system through 7 (audit_log is written to operationally but
+  // has no read API yet — see docs/AUDIT_CHAIN.md).
   readonly auditRows: AuditRow[] = [
     { id: 1, ts: '18 Feb 10:14:07', user: 'Dr. A. Iyer', role: 'Forensics', action: 'DOCUMENT_UPLOAD', resource: 'Forensic_Report_UPI_4521.pdf', actionType: 'upload', hash: 'd41f9a3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58', prev: '7b2e4c91a08df365c4a17e0b92d5f83a6c1e074bd39f52a8e6c0b74132fd9e05', ip: '10.14.6.21', session: 's-8107' },
     { id: 2, ts: '18 Feb 10:14:09', user: 'system', role: 'System', action: 'HASH_RECORDED', resource: 'sha256:d41f9a3c…', actionType: 'hash', hash: '1f9a3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d4', prev: 'd41f9a3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58', ip: '127.0.0.1', session: 'daemon-sys' },
@@ -456,7 +361,15 @@ export class DmsStateService {
     { id: 8, ts: '18 Feb 14:02:00', user: 'system', role: 'System', action: 'CHAIN_VERIFY', resource: '1,204 entries — intact', actionType: 'verify', hash: '5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f9a3c7b208e', prev: '8e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f9a3c7b20', ip: '127.0.0.1', session: 'daemon-sys' }
   ];
 
-  // Blockchain Graph Nodes
+  // Chain Verification State — illustrative sweep animation; no
+  // audit-chain verification endpoint exists yet (System 8's scope — see
+  // docs/AUDIT_CHAIN.md).
+  readonly chainRunning = signal<boolean>(false);
+  readonly chainDone = signal<boolean>(false);
+  readonly chainCount = signal<number>(0);
+  readonly auditTab = signal<'table' | 'graph'>('table');
+  readonly expandedAuditId = signal<number | null>(null);
+
   readonly chainRows = computed(() => {
     const swept = Math.round((this.chainCount() / 1204) * 24);
     const isDone = this.chainDone();
@@ -468,7 +381,7 @@ export class DmsStateService {
       const broken = tamper && isDone && i === 17;
       return {
         id: '#' + (1181 + i),
-        frag: H_DOC.slice(i, i + 4),
+        frag: H_RED.slice(i, i + 4),
         tick: broken ? '×' : (on ? '✓' : ''),
         verified: on && !broken,
         tampered: broken,
@@ -484,93 +397,6 @@ export class DmsStateService {
     ];
   });
 
-  // Access Policy Preview Fields
-  readonly accessFields = [
-    { label: 'Complainant Full Name', value: 'Meera Krishnan', restricted: false },
-    { label: 'Complainant Contact', value: '+91 98•• ••4471', restricted: false },
-    { label: 'Witness Protected Identity', value: 'Suresh Pillai, 44, Sector 62', restricted: true },
-    { label: 'Seized Mobile IMEI', value: '35•••••••••••21', restricted: false },
-    { label: 'Beneficiary Bank Account', value: 'HDFC ••••7742 — Kolkata Gariahat branch', restricted: false },
-    { label: 'Investigating Officer Field Diary', value: 'Suspect vehicle registration DL-3C-AZ-9912 traced via toll gantry camera', restricted: true }
-  ];
-
-  // Administration Users
-  readonly adminUsers = [
-    { name: 'SI Rajat Mehra', email: 'r.mehra@delhipolice.gov.in', role: 'Police', agency: 'Noida Sec 58 PS' },
-    { name: 'Dr. Anjali Iyer', email: 'a.iyer@cyberlab.gov.in', role: 'Forensics', agency: 'State Cyber Forensics Lab' },
-    { name: 'Shalini Bhat', email: 's.bhat@prosecution.gov.in', role: 'Lawyer', agency: 'District Prosecution Branch' },
-    { name: 'Hon. K. Mahadevan', email: 'k.mahadevan@ecourts.gov.in', role: 'Judge', agency: 'Sessions Court 04' },
-    { name: 'Nikhil Rao', email: 'n.rao@ncrb.gov.in', role: 'Admin', agency: 'National Crime Records Bureau' }
-  ];
-
-  // Navigation Methods
-  navigateTo(s: Screen | 'upload') {
-    if (s === 'upload') {
-      this.openUploadModal();
-      return;
-    }
-    this.screen.set(s);
-  }
-
-  setRole(r: Role) {
-    this.role.set(r);
-    // If moving to a screen not allowed for this role, default to dashboard
-    const allowed = this.navItems().map(item => item.target);
-    const curr = this.screen();
-    if (curr !== 'login' && !allowed.includes(curr) && curr !== 'case' && curr !== 'doc' && curr !== 'redact' && curr !== 'access') {
-      this.screen.set('dash');
-    }
-  }
-
-  // Upload Modal Workflow
-  openUploadModal() {
-    this.uploadOpen.set(true);
-    this.uploadPhase.set('idle');
-    this.uploadPct.set(0);
-    this.liveHash.set('');
-  }
-
-  closeUploadModal() {
-    this.uploadOpen.set(false);
-    this.uploadPhase.set('idle');
-    this.clearTimers();
-  }
-
-  startUploadProcess() {
-    this.uploadPhase.set('progress');
-    this.uploadPct.set(0);
-
-    const intervalId = setInterval(() => {
-      const p = Math.min(100, this.uploadPct() + 10);
-      this.uploadPct.set(p);
-
-      if (p >= 100) {
-        clearInterval(intervalId);
-        this.uploadPhase.set('hashing');
-        this.scrambleLiveHash(H_UP, () => {
-          setTimeout(() => {
-            this.uploadPhase.set('done');
-          }, 350);
-        });
-      }
-    }, 80);
-
-    this.activeTimers.push(intervalId);
-  }
-
-  // Document Integrity Verification
-  verifyDocumentIntegrity() {
-    this.verifyState.set('checking');
-    setTimeout(() => {
-      if (this.simulateTamper()) {
-        this.verifyState.set('tampered');
-      } else {
-        this.verifyState.set('ok');
-      }
-    }, 1200);
-  }
-
-  // Chain Sweep Verification
   verifyChain() {
     this.chainRunning.set(true);
     this.chainDone.set(false);
@@ -592,7 +418,80 @@ export class DmsStateService {
     this.activeTimers.push(timerId);
   }
 
-  // Redaction Drawing Controls
+  toggleAuditRow(id: number) {
+    this.expandedAuditId.set(this.expandedAuditId() === id ? null : id);
+  }
+
+  // ---- Upload Modal (REAL — POST /cases/:id/documents) ----
+  readonly uploadOpen = signal<boolean>(false);
+  readonly uploadCaseId = signal<string | null>(null);
+  readonly uploadPhase = signal<'idle' | 'progress' | 'hashing' | 'done'>('idle');
+  readonly uploadPct = signal<number>(0);
+  readonly liveHash = signal<string>('');
+  readonly uploadError = signal<string | null>(null);
+  /** Bumped to Date.now() after a successful upload — components showing
+   * a case's document list (CaseDetailComponent) watch this via effect()
+   * to know when to refetch, since the modal that produced the upload
+   * lives outside their own component tree (WorkspaceShellComponent). */
+  readonly documentUploaded = signal<number>(0);
+
+  openUploadModal(caseId: string) {
+    this.uploadCaseId.set(caseId);
+    this.uploadOpen.set(true);
+    this.uploadPhase.set('idle');
+    this.uploadPct.set(0);
+    this.liveHash.set('');
+    this.uploadError.set(null);
+  }
+
+  closeUploadModal() {
+    this.uploadOpen.set(false);
+    this.uploadPhase.set('idle');
+    this.clearTimers();
+  }
+
+  /** Performs the real multipart upload, driving uploadPct from actual
+   * browser upload-progress events (see ApiClientService.postMultipart) —
+   * never a fake timer. On success, liveHash is the real sha256_hash the
+   * backend computed from the uploaded bytes, not a client-side guess. */
+  startUpload(file: File, documentType: DocumentType, description: string) {
+    const caseId = this.uploadCaseId();
+    if (!caseId) return;
+
+    this.uploadPhase.set('progress');
+    this.uploadPct.set(0);
+    this.uploadError.set(null);
+
+    this.documentService.upload(caseId, { documentType, description: description || undefined, file }).subscribe({
+      next: (event) => {
+        if (event.type === 'progress') {
+          this.uploadPct.set(event.percent);
+          if (event.percent >= 100) this.uploadPhase.set('hashing');
+        } else {
+          this.liveHash.set(event.data.sha256_hash);
+          this.uploadPhase.set('done');
+          this.documentUploaded.set(Date.now());
+        }
+      },
+      error: (err) => {
+        this.uploadPhase.set('idle');
+        this.uploadError.set(err?.message ?? 'Upload failed. Please try again.');
+      }
+    });
+  }
+
+  // Timers for the still-mock chain-verify sweep animation above.
+  private activeTimers: any[] = [];
+  private clearTimers() {
+    this.activeTimers.forEach(t => clearInterval(t));
+    this.activeTimers = [];
+  }
+
+  // ---- Redaction Canvas State (mock — redaction has no backend yet) ----
+  readonly redactions = signal<RedactionRegion[]>([]);
+  readonly draft = signal<{ x: number; y: number; w: number; h: number } | null>(null);
+  readonly redactSaved = signal<boolean>(false);
+
   startDraft(x: number, y: number) {
     this.draft.set({ x, y, w: 0, h: 0 });
   }
@@ -638,36 +537,5 @@ export class DmsStateService {
 
   saveRedactedCopy() {
     this.redactSaved.set(true);
-  }
-
-  toggleAuditRow(id: number) {
-    this.expandedAuditId.set(this.expandedAuditId() === id ? null : id);
-  }
-
-  private scrambleLiveHash(target: string, onComplete: () => void) {
-    let index = 0;
-    this.liveHash.set('');
-
-    const scrambler = setInterval(() => {
-      index += 2;
-      if (index >= 64) {
-        clearInterval(scrambler);
-        this.liveHash.set(target);
-        onComplete();
-        return;
-      }
-      let s = target.slice(0, index);
-      for (let k = index; k < 64; k++) {
-        s += HEX_CHARS[Math.floor(Math.random() * 16)];
-      }
-      this.liveHash.set(s);
-    }, 28);
-
-    this.activeTimers.push(scrambler);
-  }
-
-  private clearTimers() {
-    this.activeTimers.forEach(t => clearInterval(t));
-    this.activeTimers = [];
   }
 }

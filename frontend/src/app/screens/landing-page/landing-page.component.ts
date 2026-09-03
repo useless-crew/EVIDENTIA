@@ -50,7 +50,7 @@ export class LandingPageComponent implements OnInit {
     if (event) {
       event.preventDefault();
     }
-    this.dms.screen.set('login');
+    this.dms.navigateTo('login');
   }
 }
 

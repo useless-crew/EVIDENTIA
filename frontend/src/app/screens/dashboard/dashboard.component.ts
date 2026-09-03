@@ -13,7 +13,12 @@ export class DashboardComponent {
   dms = inject(DmsStateService);
 
   openUpload() {
-    this.dms.openUploadModal();
+    // No case context from the dashboard's generic shortcut — send the
+    // user to pick a case, exactly like DmsStateService.navigateTo('upload')
+    // does for the sidebar's equivalent nav item; a specific case's own
+    // "Upload Document" button (CaseDetailComponent) opens the modal
+    // directly with that case's id.
+    this.dms.navigateTo('cases');
   }
 
   goToCases() {
@@ -21,7 +26,7 @@ export class DashboardComponent {
   }
 
   goToCase() {
-    this.dms.navigateTo('case');
+    this.dms.navigateTo('cases');
   }
 
   goToAudit() {

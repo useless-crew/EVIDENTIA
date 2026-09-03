@@ -21,17 +21,18 @@
     <!-- Quick Role Accounts Demo Selector -->
     <div class="demo-accounts-card">
       <div class="demo-header">
-        <span class="demo-title">SELECT DUMMY ROLE &amp; CREDENTIALS</span>
-        <span class="demo-badge font-mono">JWT AUTH DEMO</span>
+        <span class="demo-title">LOCAL DEV DEMO ACCOUNTS</span>
+        <span class="demo-badge font-mono">REAL BACKEND LOGIN</span>
       </div>
       <div class="demo-chips-grid">
         <button
           type="button"
-          *ngFor="let acc of dummyAccounts"
+          *ngFor="let acc of demoAccounts"
           class="demo-chip"
           [class.active]="selectedAccount.email === acc.email"
+          [disabled]="submitting()"
           (click)="quickSignIn(acc, $event)"
-          [title]="'Click to auto-fill & login as ' + acc.name + ' (' + acc.role + ')'"
+          [title]="'Fill and sign in as ' + acc.name + ' (' + acc.role + ') — see backend/cmd/devuser'"
         >
           <span class="chip-role-badge" [attr.data-role]="acc.role">{{ acc.role }}</span>
           <div class="chip-info">
@@ -53,6 +54,13 @@
         Cryptographic evidence and case file management for India's justice system.
       </p>
 
+      <div *ngIf="sessionExpired()" class="form-alert form-alert-warn">
+        Your session expired. Please sign in again.
+      </div>
+      <div *ngIf="errorMessage()" class="form-alert form-alert-error">
+        {{ errorMessage() }}
+      </div>
+
       <form (ngSubmit)="signIn()" class="login-form">
         <div class="form-field">
           <label class="field-label">OFFICIAL GOVERNMENT EMAIL</label>
@@ -61,6 +69,7 @@
             class="field-input"
             [(ngModel)]="email"
             name="email"
+            [disabled]="submitting()"
             required
           />
         </div>
@@ -72,12 +81,13 @@
             class="field-input font-mono"
             [(ngModel)]="password"
             name="password"
+            [disabled]="submitting()"
             required
           />
         </div>
 
-        <button type="submit" class="btn-primary btn-signin">
-          Sign In as {{ selectedAccount.role }} (Generate JWT)
+        <button type="submit" class="btn-primary btn-signin" [disabled]="submitting()">
+          {{ submitting() ? 'Signing in…' : 'Sign In' }}
         </button>
       </form>
 

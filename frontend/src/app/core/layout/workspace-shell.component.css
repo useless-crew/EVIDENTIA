@@ -1,0 +1,75 @@
+.app-workspace {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-page);
+}
+
+.workspace-body {
+  display: flex;
+  flex: 1;
+  min-height: calc(100vh - 59.5px);
+  position: relative;
+}
+
+.workspace-content {
+  flex: 1;
+  min-width: 0;
+  padding: 20px 30px 40px;
+  background: var(--color-bg-page);
+  display: flex;
+  flex-direction: column;
+}
+
+app-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: block;
+}
+
+.workspace-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+  margin-bottom: 16px;
+  font-weight: 500;
+}
+
+.crumb-icon {
+  color: var(--color-accent-blue);
+  font-size: 10px;
+}
+
+.crumb-path {
+  color: var(--color-text-secondary);
+}
+
+.screen-container {
+  flex: 1;
+}
+
+/* Trust Footer */
+.workspace-footer {
+  margin-top: 36px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.footer-trust-left {
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.footer-trust-right {
+  color: var(--color-text-muted);
+}

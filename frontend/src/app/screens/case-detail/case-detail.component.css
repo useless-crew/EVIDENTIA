@@ -4,6 +4,27 @@
   gap: 18px;
 }
 
+.state-panel {
+  padding: 24px 18px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.state-error {
+  color: var(--color-danger);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn-retry {
+  width: auto;
+  padding: 0 14px;
+  height: 30px;
+}
+
 /* Header */
 .case-header {
   display: flex;

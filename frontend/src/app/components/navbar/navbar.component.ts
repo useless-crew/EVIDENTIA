@@ -39,7 +39,7 @@ export class NavbarComponent {
       event.preventDefault();
     }
     this.mobileMenuOpen = false;
-    this.dms.screen.set('login');
+    this.dms.navigateTo('login');
   }
 
   goToLanding(event?: Event) {
@@ -47,7 +47,7 @@ export class NavbarComponent {
       event.preventDefault();
     }
     this.mobileMenuOpen = false;
-    this.dms.screen.set('landing');
+    this.dms.navigateTo('landing');
   }
 }
 

@@ -36,6 +36,15 @@ func CORS(cfg config.CORSConfig) gin.HandlerFunc {
 
 		c.Writer.Header().Set("Access-Control-Allow-Methods", methods)
 		c.Writer.Header().Set("Access-Control-Allow-Headers", headers)
+		// Content-Disposition carries the server-suggested filename on
+		// GET /documents/:id/download (internal/handlers/document/download.go)
+		// — browsers hide response headers from cross-origin JS unless
+		// explicitly exposed, so a frontend on a different origin/port
+		// (e.g. the Angular dev server) could not otherwise read it to
+		// name a saved file. This exposes exactly one read-only response
+		// header; it does not widen which origins/methods/request headers
+		// are allowed.
+		c.Writer.Header().Set("Access-Control-Expose-Headers", "Content-Disposition")
 
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)

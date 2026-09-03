@@ -1,59 +1,121 @@
 # Evidentia Frontend
 
-Angular application for Evidentia, generated using [Angular CLI](https://github.com/angular/angular-cli) version 22.1.6.
+Angular 22 application (standalone components, no NgModules) for
+Evidentia — connects to the real Go/Gin backend under `../backend/`; see
+the root [README.md](../README.md) and [ARCHITECTURE.md](../ARCHITECTURE.md)
+for the full-stack picture.
+
+## Backend Integration
+
+`src/app/core/` holds the entire frontend↔backend integration layer:
+
+- `services/api-client.service.ts` — the one centralized HTTP client
+  (base URL, `pkg/response` envelope unwrap, one consistent `ApiError`
+  shape). No other file calls `HttpClient` directly for a backend
+  request.
+- `services/auth.service.ts` + `interceptors/auth.interceptor.ts` — real
+  `POST /auth/{login,refresh,logout}`, automatic single-flight
+  refresh-and-retry-once on a `401`, session persisted via
+  `services/token-storage.service.ts`.
+- `guards/auth.guard.ts` — protects every `/app/**` route.
+- `services/case.service.ts` / `services/document.service.ts` — System
+  5/6/7 endpoints (cases, upload/download, `POST /documents/:id/verify`,
+  `GET /documents/:id/certificate`).
+- `models/api.models.ts` — TypeScript types matching the backend's actual
+  JSON field names (snake_case) exactly.
+
+`docs/API_ENDPOINTS.md` (repository root) is the authoritative contract —
+these services implement exactly what it (and the live backend) document,
+nothing invented.
+
+## Configuration
+
+Angular's CLI (esbuild-based `@angular/build:application`) does not read
+`.env` files — the project's real, functioning equivalent of a Vite
+`VITE_API_BASE_URL` is `src/environments/environment*.ts` +
+`angular.json`'s `fileReplacements`:
+
+- `src/environments/environment.development.ts` — used by `ng serve`
+  and `ng build --configuration development`. Defaults to
+  `http://localhost:8080/api/v1` (the backend's default port — see the
+  root `docker-compose.yml`/`.env.example`).
+- `src/environments/environment.ts` — used by a plain `ng build`
+  (production). Defaults to `/api/v1` (same-origin, for a deployment that
+  reverse-proxies the API alongside the built static files). Override
+  this file's value at build time for a deployment where the backend is
+  served from a different origin — never hardcode a specific production
+  domain into source control.
 
 ## Development server
 
-To start a local development server, run:
+Start the backend first (see the root README's "Full stack via Docker
+Compose" or "Backend directly on the host"), then:
 
 ```bash
-ng serve
+npm install
+npm start        # ng serve — http://localhost:4200
 ```
 
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
+The dev server's default port (4200) matches the backend's default CORS
+allowlist (`CORS_ALLOWED_ORIGINS=http://localhost:4200` — see
+`../.env.example`), so no CORS configuration is needed for local
+development.
+
+### Demo login accounts
+
+No user-registration endpoint exists yet (`internal/handlers/user`
+remains a TODO stub — see `../ARCHITECTURE.md`), so a fresh database has
+no login-able accounts. Create one per role with `backend/cmd/devuser`
+(see that command's own doc comment for why it exists and why it's safe —
+nothing it does is wired into any HTTP route):
+
+```bash
+cd ../backend
+export DATABASE_MIGRATOR_USER=evidentia DATABASE_MIGRATOR_PASSWORD=changeme_example \
+       DATABASE_HOST=localhost DATABASE_NAME=evidentia
+go run ./cmd/devuser -email=police@example.test -password=at-least-8-chars -first=Jane -last=Doe -role=POLICE
+```
+
+Repeat with `-role=ADMIN`/`FORENSICS`/`LAWYER`/`JUDGE` as needed. These
+are local-development-only accounts you create yourself with a password
+you choose — nothing here is a real credential, and none is committed
+anywhere. The login screen's "Local Dev Demo Accounts" chips are a
+convenience for prefilling the sign-in form with accounts created this
+way (they still submit through the real `POST /auth/login` — see
+`src/app/screens/login/login.component.ts`'s own comment).
 
 ## Code scaffolding
 
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
-
 ```bash
 ng generate component component-name
-```
-
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
-
-```bash
-ng generate --help
+ng generate --help   # full schematic list
 ```
 
 ## Building
 
-To build the project run:
-
 ```bash
-ng build
+ng build                               # production (dist/evidentia)
+ng build --configuration development
 ```
-
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
 
 ## Running unit tests
 
-To execute unit tests with the [Vitest](https://vitest.dev/) test runner, use the following command:
-
 ```bash
-ng test
+ng test    # Vitest
 ```
 
-## Running end-to-end tests
+## What's real vs. still illustrative
 
-For end-to-end (e2e) testing, run:
-
-```bash
-ng e2e
-```
-
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
+Connected to the real backend: authentication, cases (list/detail/
+create), document upload/download, and System 7's verify/certificate
+flows. Dashboard aggregate stats, the audit-log table/chain-graph,
+redaction, admin user management, and the access-policy preview remain
+illustrative mock content — no backend endpoint exists yet for any of
+them (audit read, redaction, user administration, and audit-chain
+verification are later systems' scope; see `../ARCHITECTURE.md`). Each is
+commented in `src/app/core/services/dms-state.service.ts` at the exact
+point it's still mock, so it's never ambiguous which is which.
 
 ## Additional Resources
 
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+[Angular CLI Overview and Command Reference](https://angular.dev/tools/cli).

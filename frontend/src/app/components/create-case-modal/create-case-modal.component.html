@@ -1,0 +1,61 @@
+<div class="modal-backdrop" (click)="close()">
+  <div class="modal-dialog" (click)="$event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title-group">
+        <h2 class="modal-title">Register New Case</h2>
+        <span class="modal-subtitle">Creates a case record via POST /cases</span>
+      </div>
+      <button type="button" class="btn-close" (click)="close()">×</button>
+    </div>
+
+    <div class="modal-body">
+      <div *ngIf="errorMessage()" class="form-alert-error">{{ errorMessage() }}</div>
+
+      <form (ngSubmit)="submit()" class="case-form">
+        <div class="form-group">
+          <label class="form-label">CASE NUMBER</label>
+          <input
+            type="text"
+            class="form-input"
+            [(ngModel)]="caseNumber"
+            name="caseNumber"
+            placeholder="FIR/2026/0001"
+            [disabled]="submitting()"
+            required
+          />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">TITLE</label>
+          <input
+            type="text"
+            class="form-input"
+            [(ngModel)]="title"
+            name="title"
+            placeholder="Short case title"
+            [disabled]="submitting()"
+            required
+          />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">DESCRIPTION (OPTIONAL)</label>
+          <textarea
+            class="form-textarea"
+            rows="3"
+            [(ngModel)]="description"
+            name="description"
+            [disabled]="submitting()"
+          ></textarea>
+        </div>
+      </form>
+    </div>
+
+    <div class="modal-footer">
+      <button type="button" class="btn-secondary" (click)="close()" [disabled]="submitting()">Cancel</button>
+      <button type="button" class="btn-primary" (click)="submit()" [disabled]="submitting()">
+        {{ submitting() ? 'Creating…' : 'Create Case' }}
+      </button>
+    </div>
+  </div>
+</div>

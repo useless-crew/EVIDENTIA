@@ -1,5 +1,6 @@
 import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { ActivatedRoute, Router } from '@angular/router';
 import { DmsStateService, H_RED } from '../../core/services/dms-state.service';
 
 @Component({
@@ -11,6 +12,8 @@ import { DmsStateService, H_RED } from '../../core/services/dms-state.service';
 })
 export class RedactStudioComponent {
   dms = inject(DmsStateService);
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   readonly redactHash = H_RED;
 
   private canvasBox: DOMRect | null = null;
@@ -47,6 +50,12 @@ export class RedactStudioComponent {
   }
 
   cancel() {
-    this.dms.navigateTo('doc');
+    const caseId = this.route.snapshot.paramMap.get('caseId');
+    const documentId = this.route.snapshot.paramMap.get('documentId');
+    if (caseId && documentId) {
+      this.router.navigate(['/app/cases', caseId, 'documents', documentId]);
+    } else {
+      this.router.navigateByUrl('/app/cases');
+    }
   }
 }
