@@ -67,6 +67,10 @@ func validate(c *errCollector, cfg *Config) {
 		c.add("MINIO_ENDPOINT must not be empty")
 	}
 
+	if cfg.Documents.MaxUploadSize <= 0 {
+		c.add("MAX_UPLOAD_SIZE must be greater than 0, got %d", cfg.Documents.MaxUploadSize)
+	}
+
 	if _, err := logger.ParseLevel(cfg.Logging.Level); err != nil {
 		c.add("%s", err)
 	}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -131,17 +132,22 @@ type InvolvedPartySummary struct {
 	CreatedAt   time.Time       `json:"created_at"`
 }
 
-// DocumentSummary is case-detail's document reference — metadata and
-// references only (master prompt §22/§46: never file bytes, never
-// storage_bucket/storage_object_key, which are System 6's internal
-// concern, and sha256_hash, whose hex-encoded exposure belongs to
-// System 7).
+// DocumentSummary is a document reference — metadata and references only
+// (master prompt §22/§46: never file bytes, never storage_bucket/
+// storage_object_key, which remain internal). Used both standalone
+// (System 6's upload response) and embedded in case detail (System 5).
+// Sha256Hash is the hex-encoded digest System 6 computed at ingestion —
+// exposing it here is display only; comparing it against a freshly
+// recomputed hash to verify integrity is System 7's job, not this type's.
 type DocumentSummary struct {
 	ID           uuid.UUID `json:"id"`
+	CaseID       uuid.UUID `json:"case_id"`
 	DocumentType string    `json:"document_type"`
 	Filename     string    `json:"filename"`
+	Description  *string   `json:"description,omitempty"`
 	MimeType     string    `json:"mime_type"`
 	FileSize     int64     `json:"file_size"`
+	Sha256Hash   string    `json:"sha256_hash"`
 	Status       string    `json:"status"`
 	UploadedBy   uuid.UUID `json:"uploaded_by"`
 	UploadedAt   time.Time `json:"uploaded_at"`
@@ -655,10 +661,13 @@ func (s *CaseService) loadCaseDetail(ctx context.Context, user auth.Authenticate
 	for i, d := range documents {
 		docSummaries[i] = DocumentSummary{
 			ID:           d.ID,
+			CaseID:       d.CaseID,
 			DocumentType: d.DocumentType,
 			Filename:     d.Filename,
+			Description:  d.Description,
 			MimeType:     d.MimeType,
 			FileSize:     d.FileSize,
+			Sha256Hash:   hex.EncodeToString(d.Sha256Hash),
 			Status:       d.Status,
 			UploadedBy:   d.UploadedBy,
 			UploadedAt:   d.UploadedAt,

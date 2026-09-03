@@ -13,14 +13,15 @@ import (
 
 // Config is the root, strongly typed application configuration.
 type Config struct {
-	App      AppConfig
-	Server   ServerConfig
-	CORS     CORSConfig
-	Database DatabaseConfig
-	Redis    RedisConfig
-	MinIO    MinIOConfig
-	Logging  LoggingConfig
-	JWT      JWTConfig
+	App       AppConfig
+	Server    ServerConfig
+	CORS      CORSConfig
+	Database  DatabaseConfig
+	Redis     RedisConfig
+	MinIO     MinIOConfig
+	Logging   LoggingConfig
+	JWT       JWTConfig
+	Documents DocumentsConfig
 }
 
 // AppConfig describes general application identity.
@@ -47,9 +48,10 @@ type ServerConfig struct {
 	WriteTimeout    time.Duration
 	IdleTimeout     time.Duration
 	ShutdownTimeout time.Duration
-	// MaxBodyBytes bounds the size of JSON request bodies this system's own
-	// endpoints accept. Document upload endpoints (a later system) will
-	// apply their own, larger limit rather than reuse this one.
+	// MaxBodyBytes bounds the size of JSON request bodies (auth, cases).
+	// Document upload endpoints apply DocumentsConfig.MaxUploadSize
+	// instead — see body_limit_middleware.go's doc comment for why the
+	// two must not compose.
 	MaxBodyBytes int64
 }
 
@@ -110,6 +112,16 @@ type MinIOConfig struct {
 	SecretKey string
 	UseSSL    bool
 	Bucket    string
+}
+
+// DocumentsConfig configures document upload behavior (System 6).
+// MaxUploadSize is deliberately independent of ServerConfig.MaxBodyBytes
+// (see body_limit_middleware.go's doc comment): JSON API bodies and
+// multipart evidence uploads need very different limits, and applying
+// MaxBodyBytes' small default to an upload route would reject legitimate
+// evidence files before the handler ever saw them.
+type DocumentsConfig struct {
+	MaxUploadSize int64
 }
 
 // LoggingConfig configures structured operational logging.
@@ -215,6 +227,14 @@ func Load() (*Config, error) {
 			RefreshTTL: getDuration(c, "JWT_REFRESH_TTL", 168*time.Hour),
 			SigningKey: requireString(c, "JWT_SIGNING_KEY"),
 			BcryptCost: getInt(c, "BCRYPT_COST", 12),
+		},
+		Documents: DocumentsConfig{
+			// 50 MiB: a sensible default for a hackathon/demo environment
+			// (comfortably covers scanned FIRs, forensic report PDFs, and
+			// photo evidence) — not a claim about production evidence-file
+			// sizing, which a real deployment should tune via
+			// MAX_UPLOAD_SIZE.
+			MaxUploadSize: int64(getInt(c, "MAX_UPLOAD_SIZE", 50<<20)),
 		},
 	}
 

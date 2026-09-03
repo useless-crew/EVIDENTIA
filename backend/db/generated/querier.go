@@ -55,6 +55,14 @@ type Querier interface {
 	// API/JSON boundary (a later system's concern). Documents are never
 	// deleted through these queries: there is no DeleteDocument query, and the
 	// runtime role holds no DELETE grant on this table (see migration).
+	// id is passed explicitly (server-generated via uuid.New(), never
+	// client-supplied) rather than relying on the id column's DEFAULT
+	// gen_random_uuid(): the document's storage object key
+	// (cases/{case_id}/documents/{document_id}/original — see
+	// internal/service/document_service.go) must be known BEFORE this row is
+	// inserted, since the file is streamed to object storage first (System 6
+	// master prompt §16's upload ordering) and this INSERT records where it
+	// ended up.
 	CreateDocument(ctx context.Context, arg CreateDocumentParams) (Document, error)
 	// Evidentia — Case Involved-Party Queries
 	//

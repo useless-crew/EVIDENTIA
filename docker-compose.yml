@@ -60,6 +60,11 @@ services:
       MINIO_USE_SSL: "false"
       MINIO_BUCKET: ${MINIO_BUCKET:-evidentia-documents}
 
+      # Max size, in bytes, of a single uploaded evidence file (System 6)
+      # — independent of any request-body limit used elsewhere. 50 MiB
+      # default; override for real evidence-file sizing.
+      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-52428800}
+
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LOG_FORMAT: ${LOG_FORMAT:-json}
 

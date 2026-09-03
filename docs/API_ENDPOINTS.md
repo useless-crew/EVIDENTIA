@@ -2,8 +2,9 @@
 
 ## Purpose
 
-TODO: Document the full REST API surface for Evidentia. Cases (below),
-Authentication, Health, and Readiness are implemented today. Documents,
+TODO: Document the full REST API surface for Evidentia. Cases, Case
+Documents (upload/download), Authentication, Health, and Readiness are
+implemented today. Document verification/redaction/share/certificate,
 Audit, and Admin are not implemented yet — those sections document the
 intended surface only.
 
@@ -207,33 +208,126 @@ transition, duplicate `case_number`) never produces one of these — see
 `case_service_integration_test.go`'s `TestCaseService_*_Denied`/
 `*Rejected`/`*Conflict` tests, which assert exactly that.
 
-## Case Documents
+## Case Documents (implemented — System 6)
 
 ```text
-POST /cases/:id/documents
+POST /api/v1/cases/:id/documents
 ```
 
-TODO (business logic — not implemented). Required authorization:
-`document:upload` (RBAC) + `CanAccessCase` on the `:id` case (ABAC) — a
-caller must have a relationship to the case before uploading into it.
+Requires `Authorization: Bearer <access_token>` plus `document:upload`
+(RBAC) and `CanAccessCase` on the `:id` case (ABAC) — POLICE/FORENSICS/
+ADMIN by seed data; a caller must have a relationship to the case (owner,
+active `case_members` row, or ADMIN) before uploading into it. Holding
+`document:upload` alone (e.g. as POLICE) never grants access to another
+officer's unrelated case.
+
+Content type `multipart/form-data`, streamed (never buffered whole into
+memory or a temp file — see `internal/handlers/document/upload.go`).
+Fields:
+
+| Field | Required | Notes |
+|---|---|---|
+| `document_type` | yes | One of `FIR`, `FORENSIC_REPORT`, `PHOTO_EVIDENCE`, `WITNESS_STATEMENT`, `OTHER` — must appear **before** `file` in the multipart body (see below) |
+| `description` | no | Free text, max 10,000 bytes, must be valid UTF-8 |
+| `file` | yes | The evidence file — must appear **after** `document_type` |
+
+**Field order matters**: the body is read as a true byte stream
+(`http.Request.MultipartReader`), which can only be consumed once, in the
+order the client sent it. `document_type` (and `description`, if present)
+must precede `file` — exactly how a browser's `FormData`/JS multipart
+encoder serializes fields appended in that order. `id`/`created_by`/
+`uploaded_by`/`bucket`/`object_key`/`sha256_hash` are never accepted as
+form fields — there is no field name for any of them; the server always
+determines the uploader from the authenticated caller, generates the
+document ID and object key itself, and computes the hash from the actual
+uploaded bytes.
+
+On success (`201`), the response is a document metadata object — the same
+shape embedded in `GET /cases/:id`'s `documents` array (see the Cases
+section above):
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "...", "case_id": "...", "document_type": "FIR",
+    "filename": "fir-scan.pdf", "description": "...",
+    "mime_type": "application/pdf", "file_size": 245098,
+    "sha256_hash": "64-hex-chars...", "status": "ACTIVE",
+    "uploaded_by": "...", "uploaded_at": "..."
+  }
+}
+```
+
+- `400` — missing `file`, `document_type` absent/invalid, `document_type`
+  arrived after `file` in the multipart body, or `description` too
+  long/not valid UTF-8.
+- `403` — no relationship to the case, OR the case doesn't exist, OR the
+  `:id` isn't a valid UUID — identical response in all three cases (no
+  confirmation of case existence to an unrelated caller).
+- `413` — the file (or the request body as a whole) exceeds
+  `MAX_UPLOAD_SIZE`. Both the coarse, whole-request body-size guard
+  (`middleware.BodyLimit`) and `DocumentService`'s fine-grained,
+  file-content-only streaming guard map to this same status/code — a
+  client never sees a different response depending on which layer caught
+  it.
 
 ## Documents
 
 ```text
-GET  /documents/:id
-GET  /documents/:id/download
-POST /documents/:id/verify
-POST /documents/:id/redact
-POST /documents/:id/share
-GET  /documents/:id/certificate
+GET  /api/v1/documents/:id/download
+GET  /documents/:id                    (not implemented — see below)
+POST /documents/:id/verify             (not implemented — System 7)
+POST /documents/:id/redact             (not implemented — System 8)
+POST /documents/:id/share              (not implemented)
+GET  /documents/:id/certificate        (not implemented — System 10)
 ```
 
-TODO (business logic — not implemented). Required authorization:
+### `GET /api/v1/documents/:id/download` (implemented — System 6)
+
+Requires `Authorization: Bearer <access_token>` plus `document:download`
+(RBAC) and `CanAccessDocument` (ABAC) — a document has no independent
+access grant; it inherits its authorization scope entirely from the
+caller's relationship to the document's case (owner, active
+`case_members` row, or ADMIN), resolved server-side — a client-supplied
+case ID is never trusted as proof of access.
+
+Streams the object directly from MinIO to the HTTP response (never
+buffered whole in this process). Always served with
+`Content-Disposition: attachment` (never rendered inline) and
+`X-Content-Type-Options: nosniff`, so a browser never executes/renders
+evidence content by default. `Content-Type` is the MIME type detected
+server-side from the file's actual bytes at upload time (never the
+client-declared `Content-Type` from the original upload request).
+
+- `403` — no relationship to the document's case, OR the document doesn't
+  exist, OR the `:id` isn't a valid UUID — identical response in all
+  three cases (the same anti-enumeration posture as case detail).
+- `503` — the database row exists but the object could not be retrieved
+  from storage (e.g. deleted out-of-band, storage outage) — logged
+  operationally with the object key for investigation; never a raw MinIO/
+  driver error returned to the client.
+
+Every successful download records a `DOCUMENT_DOWNLOADED` audit event
+(see "Audit" in `docs/SECURITY.md`) as soon as the object stream is
+confirmed available — it does not wait for the client to finish reading
+the response body.
+
+### Not yet implemented
+
+`GET /documents/:id` (standalone metadata — today's only exposure of
+document metadata is via `GET /cases/:id`'s `documents` array, per master
+prompt §27's fallback: "otherwise expose document metadata through the
+existing case detail flow"), `POST /documents/:id/verify` (System 7 —
+cryptographic integrity verification), `POST /documents/:id/redact`
+(System 8), `POST /documents/:id/share`, and
+`GET /documents/:id/certificate` (System 10) remain TODO stubs
+(`internal/handlers/document/{verify,redact,share,certificate}.go`).
+Required authorization for each, once implemented:
 
 | Route | Permission (RBAC) | Resource check (ABAC) |
 |---|---|---|
 | `GET /documents/:id` | `document:read` | `CanAccessDocument` |
-| `GET /documents/:id/download` | `document:download` | `CanAccessDocument` |
 | `POST /documents/:id/verify` | `document:verify` | `CanAccessDocument` |
 | `POST /documents/:id/redact` | `document:redact` | `CanAccessDocument` |
 | `POST /documents/:id/share` | `document:share` | `CanAccessDocument` |
@@ -328,13 +422,16 @@ the JWT's role claim alone — see SECURITY.md) — this establishes
 System 4 (`internal/authz`) provides the RBAC (`middleware.RequirePermission`)
 and ABAC (`middleware.RequireCaseAccess`/`RequireDocumentAccess`) checks
 layered on top of it, and the per-route requirements are documented inline
-above (Cases/Case Documents/Documents/Audit/Admin). As of System 5, the
-Cases routes are live and wired with exactly that middleware (see
-`internal/httpserver/router.go`); Case Documents/Documents/Audit/Admin
-routes remain unregistered (their handlers are still TODO stubs). Today's
-non-health routes are `/api/v1/auth/{login,refresh,logout}` (no RBAC/ABAC
-— see "Authentication" above) and `/api/v1/cases`/`/api/v1/cases/:id`.
-Full authorization design: `docs/SECURITY.md`'s Authorization section.
+above (Cases/Case Documents/Documents/Audit/Admin). As of System 6, Cases
+AND Case Documents (upload/download) routes are live and wired with
+exactly that middleware (see `internal/httpserver/router.go`); the
+remaining Documents endpoints (verify/redact/share/certificate) and
+Audit/Admin routes remain unregistered (their handlers are still TODO
+stubs). Today's non-health routes are `/api/v1/auth/{login,refresh,logout}`
+(no RBAC/ABAC — see "Authentication" above), `/api/v1/cases`/
+`/api/v1/cases/:id`, `/api/v1/cases/:id/documents`, and
+`/api/v1/documents/:id/download`. Full authorization design:
+`docs/SECURITY.md`'s Authorization section.
 
 `401` vs `403`: a request with no/invalid/expired authentication is
 always `401 UNAUTHORIZED`; an authenticated request denied by RBAC or ABAC

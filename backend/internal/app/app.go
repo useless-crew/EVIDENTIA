@@ -49,6 +49,13 @@ type App struct {
 	// POST/GET/PUT /cases. Depends on AuthzService for its own
 	// service-layer authorization re-check (see that type's doc comment).
 	CaseService *service.CaseService
+
+	// DocumentService is System 6's document-ingestion/retrieval business
+	// logic (see internal/service.DocumentService) — owns multipart
+	// validation, streaming SHA-256 computation, object storage via
+	// Storage, PostgreSQL metadata persistence, and audit integration for
+	// POST /cases/:id/documents and GET /documents/:id/download.
+	DocumentService *service.DocumentService
 }
 
 // New loads configuration and connects every infrastructure dependency in
@@ -90,17 +97,19 @@ func New(ctx context.Context) (*App, error) {
 	authService := service.NewAuthService(db.Pool(), jwtManager, cfg.JWT.BcryptCost, cfg.JWT.RefreshTTL, recorder)
 	authzService := authz.NewService(db.Pool(), recorder)
 	caseService := service.NewCaseService(db.Pool(), authzService, recorder)
+	documentService := service.NewDocumentService(db.Pool(), authzService, recorder, objectStorage, cfg.MinIO.Bucket, cfg.Documents.MaxUploadSize, log)
 
 	return &App{
-		Config:       cfg,
-		Logger:       log,
-		DB:           db,
-		Cache:        redisCache,
-		Storage:      objectStorage,
-		JWTManager:   jwtManager,
-		AuthService:  authService,
-		AuthzService: authzService,
-		CaseService:  caseService,
+		Config:          cfg,
+		Logger:          log,
+		DB:              db,
+		Cache:           redisCache,
+		Storage:         objectStorage,
+		JWTManager:      jwtManager,
+		AuthService:     authService,
+		AuthzService:    authzService,
+		CaseService:     caseService,
+		DocumentService: documentService,
 	}, nil
 }
 

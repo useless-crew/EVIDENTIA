@@ -65,6 +65,25 @@ func TestLoad_DefaultsAppliedWhenUnset(t *testing.T) {
 	assert.Equal(t, 15*time.Minute, cfg.JWT.AccessTTL)
 	assert.Equal(t, 168*time.Hour, cfg.JWT.RefreshTTL)
 	assert.Equal(t, 12, cfg.JWT.BcryptCost)
+	assert.Equal(t, int64(50<<20), cfg.Documents.MaxUploadSize)
+}
+
+func TestLoad_RejectsNonPositiveMaxUploadSize(t *testing.T) {
+	setRequired(t)
+	t.Setenv("MAX_UPLOAD_SIZE", "0")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "MAX_UPLOAD_SIZE")
+}
+
+func TestLoad_CustomMaxUploadSize(t *testing.T) {
+	setRequired(t)
+	t.Setenv("MAX_UPLOAD_SIZE", "104857600")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, int64(100<<20), cfg.Documents.MaxUploadSize)
 }
 
 func TestLoad_RejectsShortJWTSigningKey(t *testing.T) {

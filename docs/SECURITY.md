@@ -198,6 +198,67 @@ Full detail in "Case Management" below; summary here:
   every `TestCaseService_*_Denied`/`*Rejected`/`*Conflict` test asserting
   on a `spyRecorder`.
 
+## Implemented in System 6 (Document Management & Evidence Ingestion)
+
+Full detail in "Document Management" below; summary here:
+
+- **Raw evidence bytes never touch PostgreSQL**: `documents.sha256_hash`/
+  `storage_bucket`/`storage_object_key` are the only storage-related
+  columns; the file itself is streamed straight to MinIO. No `BYTEA`
+  column, no code path, stores or even transiently buffers a whole
+  evidence file's content in the database.
+- **True streaming, not memory-bound upload/download**: both directions
+  (`DocumentService.UploadDocument`/`DownloadDocument`) move bytes via
+  `io.Reader`/`io.TeeReader`/`io.Copy` chains — never `io.ReadAll` on an
+  arbitrarily large file, and never Gin's buffer-to-memory-or-tempfile
+  multipart parsing (`ParseMultipartForm`/`FormFile`).
+- **Streaming SHA-256 at ingestion**: computed in the same pass as the
+  object-storage write (one read of the source, two destinations via
+  `io.TeeReader`), representing exactly the uploaded bytes — never a
+  filename, metadata, or object key. Verified against known test vectors
+  and streaming/buffered equivalence (`backend/pkg/hash/sha256_test.go`).
+- **Server-generated, non-guessable storage identity**: object keys
+  (`cases/{case_id}/documents/{document_id}/original`) are built entirely
+  from server-resolved UUIDs — a client can supply neither the bucket nor
+  the object key nor the case ID's authorization (that's still
+  `CanAccessCase`'s job). The original filename is sanitized (path
+  separators under both `/` and `\` conventions, control characters
+  including CR/LF, length) but is display metadata only — it plays no
+  role in storage addressing, so a hostile filename cannot become a path-
+  traversal or header-injection vector.
+- **Upload authorization is RBAC AND ABAC in one call**: `CanAccessCase(ctx,
+  user, caseID, authz.ActionDocumentUpload)` — reused as-is from System 4,
+  no new authorization code — checks `document:upload` (POLICE/FORENSICS/
+  ADMIN per seed data) AND the caller's relationship to *this* case.
+  LAWYER/JUDGE attached to a case still cannot upload (no `document:upload`
+  grant); POLICE holding `document:upload` still cannot upload to another
+  officer's unrelated case (no case relationship).
+- **Download authorization never touches storage first**: `CanAccessDocument`
+  resolves the document's case and authorizes it under RLS BEFORE
+  `Storage.Get` is ever called — RLS protects PostgreSQL rows, not MinIO
+  objects, so the database decision must always come first (master
+  prompt §54). Cross-case LAWYER/FORENSICS access and guessed document
+  UUIDs are denied identically to a nonexistent document — verified by
+  `internal/service/document_service_integration_test.go` and
+  `internal/httpserver/document_flow_integration_test.go`.
+- **Never expose storage internals**: the document metadata DTO
+  (`service.DocumentSummary`) has no `storage_bucket`/`storage_object_key`
+  field, and no MinIO credential, connection string, or filesystem path
+  ever reaches a client response or an operational log line.
+- **Content-based MIME detection**: `http.DetectContentType` on the
+  actual uploaded bytes, never the client-declared `Content-Type` header
+  — stored and later served as the canonical `mime_type`.
+- **Orphan-object handling, not silent loss**: a PostgreSQL insert failure
+  after a successful object write triggers best-effort cleanup
+  (`Storage.Delete`); a cleanup failure is logged operationally (ERROR,
+  with case/document ID and object key) rather than left unhandled or
+  silently swallowed — a failed upload is always reported as failed to
+  the client, never a false success.
+- **Audit integration**: `DOCUMENT_UPLOADED`/`DOCUMENT_DOWNLOADED` events
+  via the same `internal/audit.Recorder` System 3/4/5 already use — never
+  a second logging system, never document contents or storage credentials
+  in the event metadata.
+
 ## Principles
 
 The eventual system will enforce all twelve of these. Implemented so far:
@@ -642,14 +703,16 @@ with no change required here.
 
 ### What System 4 does *not* do
 
-- **Business logic for documents/audit/admin** — `internal/handlers/
-  {document,audit,user}` and `internal/service/{document,audit,
-  user}_service.go` remain TODO stubs for later systems. Cases
-  (`internal/handlers/case`, `internal/service.CaseService`) were System 5
-  — see "Implemented in System 5" above and "Case Management" below; that
-  system used exactly the primitives (`app.App.AuthzService`,
-  `RequirePermission`/`RequireCaseAccess`) this one built, with no changes
-  to `internal/authz` itself.
+- **Business logic for audit/admin, and most of documents** —
+  `internal/handlers/{audit,user}` and `internal/service/{audit,
+  user}_service.go` remain TODO stubs for later systems, as do
+  `internal/handlers/document/{verify,redact,share,certificate}.go`.
+  Cases (System 5) and document upload/download (System 6) are
+  implemented — see "Implemented in System 5"/"Implemented in System 6"
+  above and "Case Management"/"Document Management" below; both systems
+  used exactly the primitives (`app.App.AuthzService`,
+  `RequirePermission`/`RequireCaseAccess`/`RequireDocumentAccess`) this
+  one built, with no changes to `internal/authz` itself.
 - **Membership-type-specific action gating** — see "Case-based ABAC"
   above.
 - **Finer-grained protected-information classification** beyond
@@ -735,6 +798,147 @@ for `CASE_CREATED`. A duplicate `case_number` (unique-constraint violation)
 or any other database error rolls the whole transaction back and produces
 no audit event at all — verified by
 `TestCaseService_CreateCase_DuplicateCaseNumberConflict`.
+
+## Document Management
+
+System 6 (`internal/service.DocumentService`, `internal/handlers/document`)
+implements `POST /cases/:id/documents` and
+`GET /documents/:id/download` — see
+[API_ENDPOINTS.md](./API_ENDPOINTS.md)'s Case Documents/Documents sections
+for the request/response contract and
+[STORAGE.md](./STORAGE.md) for the full upload/download pipeline
+narrative. This section covers the security-relevant design decisions.
+
+### Upload authorization: RBAC and case ABAC in a single call
+
+`DocumentService.UploadDocument` calls
+`authz.Service.CanAccessCase(ctx, user, caseID, authz.ActionDocumentUpload)`
+— the exact same method `CanAccessCase` used for case read/update in
+System 5, just with a different `Action`. That one call already
+implements master prompt §10's "ACTION AND CASE ACCESS" requirement:
+`HasPermission` checks `document:upload` first (POLICE/FORENSICS/ADMIN
+per the seed data — LAWYER and JUDGE hold no `document:upload` grant at
+all, so they are denied before any resource lookup), then the ABAC
+relationship check confirms the caller is the case's creator, an active
+`case_members` row, or ADMIN. No new authorization code was added for
+System 6 — this is System 4's design paying off exactly as intended.
+
+Like `CaseService`, `DocumentService` performs this check itself (not
+just relying on `middleware.RequireCaseAccess` having already run) — see
+"Service-layer authorization is not optional here" above.
+
+### Download authorization: database before storage, always
+
+`DocumentService.DownloadDocument` calls
+`authz.Service.CanAccessDocument(ctx, user, documentID, authz.ActionDocumentDownload)`
+— unchanged from System 4, resolving the document's `case_id` and
+applying the identical case-relationship check. Critically, the sequence
+is always: authorize → load the document row under RLS → **only then**
+call `Storage.Get`. PostgreSQL RLS has no equivalent protection over
+MinIO objects, so a hypothetical "fetch the object, then decide" ordering
+would mean the object had already left the authorization boundary before
+any check ran. This is verified structurally (the code has no path that
+calls `Storage.Get` before `CanAccessDocument` returns `Allowed`) and
+behaviorally (`TestDocumentService_DownloadDocument_CrossCaseLawyerDenied`/
+`ForensicsCrossCaseDenied`/`GuessedUUIDDenied` never observe a storage
+call for a denied request).
+
+### Storage identity is entirely server-generated
+
+A document's object key — `cases/{case_id}/documents/{document_id}/original`
+— is built from two UUIDs the client never controls: `case_id` comes from
+the already-authorized route parameter, and `document_id` is generated
+fresh (`uuid.New()`) before the file is ever streamed. There is no
+request field for `bucket`, `object_key`, `uploader_id`, or `sha256_hash`
+in `UploadDocumentInput`/the multipart contract — a client cannot supply
+an authoritative value for any of them even if it tried, because no field
+exists to bind one into. The original filename is sanitized
+(`sanitizeFilename`) purely as DISPLAY metadata (`documents.filename`,
+and the `Content-Disposition` header on download) — path separators under
+both `/` and `\` conventions and control characters (including CR/LF,
+closing off `Content-Disposition` header injection) are stripped
+regardless, but even an unsanitized filename could not have affected
+storage addressing, since the object key never incorporates it.
+
+### Streaming, not buffering
+
+Both directions move bytes via `io.Reader` chains, never
+`io.ReadAll`/Gin's `ParseMultipartForm` buffer-then-forward behavior — see
+[STORAGE.md](./STORAGE.md#document-upload-pipeline-implemented--system-6)
+for the exact `io.TeeReader`/`limitedReader` construction. This keeps
+memory usage roughly independent of file size and lets the SHA-256 hash
+be computed in the same pass as the object-storage write, guaranteeing it
+represents exactly the bytes that were stored (never a second, possibly
+divergent read of the file).
+
+### Size limits: two independent guards, one response
+
+`middleware.BodyLimit(DocumentsConfig.MaxUploadSize)` caps the whole HTTP
+request (multipart overhead included) before the handler even starts
+parsing; `DocumentService`'s `limitedReader` separately caps just the
+`file` part's byte stream during hashing/storage. Either guard tripping
+produces the identical `413 REQUEST_ENTITY_TOO_LARGE` response
+(`internal/handlers/document/upload.go`'s `writeMultipartReadError`
+detects `*http.MaxBytesError` specifically so the coarse guard doesn't
+leak as a generic `400`) — a client cannot distinguish which layer caught
+an oversized upload, and neither guard alone is trusted as sufficient
+(defense in depth, matching this project's RLS-plus-application-ABAC
+posture elsewhere).
+
+### Upload atomicity and orphan handling
+
+PostgreSQL and MinIO do not share a transaction. `UploadDocument` writes
+to object storage FIRST, then persists the PostgreSQL row — never the
+reverse, so a committed document row always refers to bytes that
+genuinely exist. If the PostgreSQL insert fails after a successful
+object write, `cleanupOrphan` best-effort deletes the object; a deletion
+failure is logged operationally (ERROR, with the case/document ID and
+object key) for manual reconciliation rather than silently accepted. In
+every failure path — validation, authorization, streaming, storage, or
+database — the client sees a failure response and no `DOCUMENT_UPLOADED`
+audit event is recorded; there is no code path that reports success
+without a durable, retrievable document.
+
+### Content-type handling
+
+`http.DetectContentType` inspects the first 512 bytes of the actual
+upload stream; the client's declared `Content-Type` on the file part is
+read nowhere. The detected type becomes `documents.mime_type` and is
+later returned as the download response's `Content-Type` — paired
+unconditionally with `Content-Disposition: attachment` and
+`X-Content-Type-Options: nosniff`, so a browser is never invited to
+render or execute evidence content inline, regardless of what type it
+turns out to be.
+
+### Audit integration
+
+`DOCUMENT_UPLOADED` (on successful upload) and `DOCUMENT_DOWNLOADED` (once
+the object stream is confirmed retrievable, not after the client finishes
+reading it) are recorded through the same `internal/audit.Recorder`
+interface System 3/4/5 already use — metadata includes filename,
+document_type, file_size, mime_type, and the hex-encoded SHA-256 hash,
+and deliberately never document contents or storage credentials.
+
+### What System 6 does *not* do
+
+- **Hash verification/tamper detection** — System 6 computes and persists
+  the *initial* SHA-256 hash only; comparing a stored object's current
+  hash against `documents.sha256_hash` to detect tampering is System 7's
+  job (`POST /documents/:id/verify` remains a TODO stub).
+- **Redaction/derivative documents** — a future redaction system. This
+  system's storage layout (original object never overwritten,
+  `documents.parent_document_id` already present in the schema but
+  unused by any query System 6 added) is deliberately compatible with a
+  future redaction system creating a new document row + new object,
+  never modifying the original.
+- **The audit hash chain** — unchanged, still System 8's job (matching
+  the numbering already established throughout Systems 2-5's code and
+  the applied migration itself); `DOCUMENT_*` events go through the same
+  interface-based `Recorder` any future hash-chained writer will
+  implement, with no change required to `DocumentService`.
+- **Compliance certificates, document sharing** — Systems 10 and later;
+  `POST /documents/:id/share` and `GET /documents/:id/certificate` remain
+  TODO stubs.
 
 ## Cryptography
 

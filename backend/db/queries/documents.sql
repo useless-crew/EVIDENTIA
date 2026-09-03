@@ -6,7 +6,16 @@
 -- runtime role holds no DELETE grant on this table (see migration).
 
 -- name: CreateDocument :one
+-- id is passed explicitly (server-generated via uuid.New(), never
+-- client-supplied) rather than relying on the id column's DEFAULT
+-- gen_random_uuid(): the document's storage object key
+-- (cases/{case_id}/documents/{document_id}/original — see
+-- internal/service/document_service.go) must be known BEFORE this row is
+-- inserted, since the file is streamed to object storage first (System 6
+-- master prompt §16's upload ordering) and this INSERT records where it
+-- ended up.
 INSERT INTO documents (
+    id,
     case_id,
     parent_document_id,
     document_type,
@@ -20,7 +29,7 @@ INSERT INTO documents (
     metadata,
     uploaded_by
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 )
 RETURNING
     id, case_id, parent_document_id, document_type, filename, description,

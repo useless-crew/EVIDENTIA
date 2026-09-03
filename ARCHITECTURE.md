@@ -278,6 +278,95 @@ and their services remain TODO stubs. Full design:
 `backend/internal/httpserver/case_flow_integration_test.go`,
 `backend/tests/case_rls_test.go`.
 
+## System 6 — Document Management & Evidence Ingestion (Implemented)
+
+```text
+internal/handlers/document.Upload (multipart, streaming)
+    |
+    +--> http.Request.MultipartReader — true stream, never
+    |      ParseMultipartForm/FormFile's buffer-to-memory-or-tempfile
+    v
+internal/service.DocumentService.UploadDocument
+    |
+    +--> authz.Service.CanAccessCase(ctx, user, caseID, ActionDocumentUpload)
+    |      — RBAC (document:upload) + case ABAC in ONE existing call,
+    |        no new authorization code
+    +--> validate document_type/description; sanitize filename
+    +--> generate document UUID; build object key
+    |      cases/{case_id}/documents/{document_id}/original
+    +--> stream file: io.TeeReader -> pkg/hash.New() + Storage.Put
+    |      (limitedReader aborts past DocumentsConfig.MaxUploadSize)
+    +--> repository.WithTx: CreateDocument (id, hash, bucket, key, ...)
+    |      on failure: best-effort Storage.Delete (orphan cleanup),
+    |      logged operationally if that also fails
+    +--> audit.Recorder — DOCUMENT_UPLOADED
+
+internal/handlers/document.Download (streaming response)
+    |
+    v
+internal/service.DocumentService.DownloadDocument
+    |
+    +--> authz.Service.CanAccessDocument(ctx, user, docID, ActionDocumentDownload)
+    +--> repository.WithTx: GetDocumentByID (under RLS)
+    +--> Storage.Get  ← only after the above two succeed, never before
+    +--> audit.Recorder — DOCUMENT_DOWNLOADED
+    +--> gin DataFromReader — streams to HTTP response
+```
+
+`app.App` gained a `DocumentService *service.DocumentService` field
+(constructed in `app.New`, sharing `AuthzService`/`audit.Recorder` with
+`CaseService`, plus the existing `Storage` and a new
+`config.DocumentsConfig.MaxUploadSize` — `MAX_UPLOAD_SIZE`, default 50
+MiB, deliberately independent of `ServerConfig.MaxBodyBytes` since two
+`http.MaxBytesReader` wrappings on one request compose by taking the
+smaller limit). Routes registered in `internal/httpserver/router.go`:
+
+```text
+POST /api/v1/cases/:id/documents      Auth + RequireCaseAccess(document:upload, "id") + its own BodyLimit
+GET  /api/v1/documents/:id/download   Auth + RequireDocumentAccess(document:download, "id")
+```
+
+**No new authorization primitive was needed**: `CanAccessCase`/
+`CanAccessDocument` (System 4) already expressed exactly "RBAC permission
+AND resource relationship" — System 6 just supplies a different `Action`
+constant (`ActionDocumentUpload`/`ActionDocumentDownload`, both already
+defined in `internal/authz/action.go` since System 4). This is the
+"stable service/repository interfaces future systems can use" master
+prompt §47 asked System 5 to leave behind, now exercised by a second
+system.
+
+**sqlc**: one existing query changed (`CreateDocument` now takes an
+explicit `id` parameter, generated via `uuid.New()` in Go, rather than
+relying on the column's `DEFAULT gen_random_uuid()`) — necessary because
+the object key must be known before the row is inserted (the file is
+streamed to MinIO first). No migration: `documents`' schema, indexes, and
+RLS policies (System 2) were already sufficient.
+
+**What's genuinely new here**: `pkg/hash` (previously a TODO stub) now
+implements streaming/one-shot SHA-256; `internal/service.DocumentService`
+and `internal/handlers/document/{upload,download}.go` are the first live
+document business logic; `config.DocumentsConfig` and
+`internal/handlers/document/dto.go`'s `writeMultipartReadError` (mapping
+both the coarse body-size guard and the fine-grained streaming guard to
+the identical `413`) are new. `internal/service.DocumentSummary` (added
+in System 5 for case-detail's embedded document references) gained
+`case_id`/`description`/`sha256_hash` fields and is now also System 6's
+standalone upload-response shape — one DTO, two call sites, not a
+duplicate.
+
+**What's deliberately not here**: hash verification/tamper detection
+(System 7), redaction/derivative generation (a future redaction
+system), the audit hash chain (System 8), compliance certificates
+(System 10), and document
+share (`internal/handlers/document/{verify,redact,share,certificate}.go`
+remain TODO stubs). Full design: [docs/SECURITY.md](./docs/SECURITY.md)'s
+"Document Management" section and [docs/STORAGE.md](./docs/STORAGE.md);
+tests: `backend/pkg/hash/sha256_test.go`,
+`backend/internal/service/document_service_test.go` (pure unit tests:
+filename sanitization, object-key generation, streaming size guard, MIME
+sniffing), `backend/internal/service/document_service_integration_test.go`,
+`backend/internal/httpserver/document_flow_integration_test.go`.
+
 ## Request Flow (Intended, Later Systems)
 
 ```text
@@ -384,8 +473,12 @@ Realtime / SSE
 - **Cases** (implemented — System 5) — Case CRUD, role-scoped listing,
   status lifecycle, involved parties, case-user membership
   (`internal/service.CaseService`, `internal/handlers/case`).
-- **Documents** — Evidence documents, integrity hashing, redaction lineage,
-  compliance certificates.
+- **Documents** (upload/download implemented — System 6) — Evidence
+  document ingestion (streaming SHA-256 + MinIO storage + PostgreSQL
+  metadata) and authorized retrieval
+  (`internal/service.DocumentService`, `internal/handlers/document`).
+  Integrity *verification*, redaction lineage, and compliance
+  certificates remain later systems.
 - **Audit Chain** — Immutable, hash-chained audit log of security-sensitive
   actions.
 - **Crypto** — SHA-256 integrity hashing, AES-256 encryption, RSA/ECDSA
@@ -420,17 +513,21 @@ The eventual system will enforce:
 11. Secure refresh-token handling
 12. Audit logging of all security-sensitive actions
 
-As of System 4: **1** (JWT) and **11** (refresh-token rotation/revocation)
+As of System 6: **1** (JWT) and **11** (refresh-token rotation/revocation)
 were implemented in System 3; **4** (RLS) was implemented in System 2,
 enforced with policies and fail-closed behavior verified by integration
 tests; **2** (RBAC) and **3** (ABAC) are implemented in System 4
 (`internal/authz`), composed with RLS as defense-in-depth rather than
 replacing it. Audit entries have their hash/prev_hash storage and
 uniqueness invariants (**7**, **8**) in place, and failed/successful auth
-actions plus authorization denials are already recorded operationally
-(**12**, partial — see SECURITY.md), but *computing* the actual hash chain
-and verifying it (**9**) is System 8's job. SHA-256 document hashing
-(**5**), AES-256 (**6**), and TLS (**10**) remain unimplemented. See
+actions, authorization denials, and now document upload/download
+(**12**, partial — see SECURITY.md) are already recorded operationally,
+but *computing* the actual hash chain and verifying it (**9**) is System
+9's job. **5** (SHA-256 document integrity) is partial: System 6
+*computes and persists* the initial hash at ingestion
+(`pkg/hash`, `documents.sha256_hash`) — *verifying* a stored object
+against it to detect tampering is System 7's job, not yet implemented.
+AES-256 (**6**) and TLS (**10**) remain unimplemented. See
 [docs/SECURITY.md](./docs/SECURITY.md) and
 [docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md) for what each
 currently covers.

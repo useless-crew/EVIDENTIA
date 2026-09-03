@@ -26,6 +26,7 @@ func (q *Queries) CountDocumentsByCase(ctx context.Context, caseID uuid.UUID) (i
 const createDocument = `-- name: CreateDocument :one
 
 INSERT INTO documents (
+    id,
     case_id,
     parent_document_id,
     document_type,
@@ -39,7 +40,7 @@ INSERT INTO documents (
     metadata,
     uploaded_by
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 )
 RETURNING
     id, case_id, parent_document_id, document_type, filename, description,
@@ -48,6 +49,7 @@ RETURNING
 `
 
 type CreateDocumentParams struct {
+	ID               uuid.UUID       `json:"id"`
 	CaseID           uuid.UUID       `json:"case_id"`
 	ParentDocumentID *uuid.UUID      `json:"parent_document_id"`
 	DocumentType     string          `json:"document_type"`
@@ -68,8 +70,17 @@ type CreateDocumentParams struct {
 // API/JSON boundary (a later system's concern). Documents are never
 // deleted through these queries: there is no DeleteDocument query, and the
 // runtime role holds no DELETE grant on this table (see migration).
+// id is passed explicitly (server-generated via uuid.New(), never
+// client-supplied) rather than relying on the id column's DEFAULT
+// gen_random_uuid(): the document's storage object key
+// (cases/{case_id}/documents/{document_id}/original — see
+// internal/service/document_service.go) must be known BEFORE this row is
+// inserted, since the file is streamed to object storage first (System 6
+// master prompt §16's upload ordering) and this INSERT records where it
+// ended up.
 func (q *Queries) CreateDocument(ctx context.Context, arg CreateDocumentParams) (Document, error) {
 	row := q.db.QueryRow(ctx, createDocument,
+		arg.ID,
 		arg.CaseID,
 		arg.ParentDocumentID,
 		arg.DocumentType,
