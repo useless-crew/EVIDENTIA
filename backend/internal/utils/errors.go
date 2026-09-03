@@ -21,6 +21,7 @@ const (
 	CodeRequestEntityTooLarge = "REQUEST_ENTITY_TOO_LARGE"
 	CodeUnauthorized          = "UNAUTHORIZED"
 	CodeForbidden             = "FORBIDDEN"
+	CodeConflict              = "CONFLICT"
 )
 
 // AppError is the application-wide error type. Status and Code/Message are
@@ -85,6 +86,15 @@ func ErrUnauthorized(message string) *AppError {
 // instead.
 func ErrForbidden(message string) *AppError {
 	return NewAppError(http.StatusForbidden, CodeForbidden, message, nil)
+}
+
+// ErrConflict builds a 409 response: the request is well-formed and
+// authorized, but conflicts with existing state (e.g. a duplicate
+// case_number colliding with cases_case_number_unique). message must be
+// safe to show a client — never a raw database constraint name or driver
+// error text.
+func ErrConflict(message string) *AppError {
+	return NewAppError(http.StatusConflict, CodeConflict, message, nil)
 }
 
 // AsAppError unwraps err looking for an *AppError, so callers that receive a

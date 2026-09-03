@@ -48,6 +48,18 @@ func (r *CaseRepo) Update(ctx context.Context, arg generated.UpdateCaseParams) (
 	return r.q.UpdateCase(ctx, arg)
 }
 
+// ListFiltered and CountFiltered back GET /cases: every filter field in
+// arg is optional (its zero value means "no constraint"), and — like every
+// other method here — row visibility is still enforced by RLS underneath,
+// regardless of what arg narrows further. See db/queries/cases.sql.
+func (r *CaseRepo) ListFiltered(ctx context.Context, arg generated.ListCasesFilteredParams) ([]generated.Case, error) {
+	return r.q.ListCasesFiltered(ctx, arg)
+}
+
+func (r *CaseRepo) CountFiltered(ctx context.Context, arg generated.CountCasesFilteredParams) (int64, error) {
+	return r.q.CountCasesFiltered(ctx, arg)
+}
+
 // ---- Case members ----
 
 func (r *CaseRepo) AddMember(ctx context.Context, arg generated.AddCaseMemberParams) (generated.CaseMember, error) {

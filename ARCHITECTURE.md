@@ -193,6 +193,91 @@ spoofing): `backend/internal/authz/*_test.go`,
 `backend/internal/middleware/{rbac,abac}_middleware_test.go`,
 `backend/tests/{rbac,abac}_test.go`.
 
+## System 5 — Case Management & Case Lifecycle (Implemented)
+
+```text
+internal/handlers/case (package cases)
+    |
+    +--> Create/List/Get/Update — parse/validate request, read the
+    |      already-authenticated user, delegate to CaseService, shape the
+    |      response. No SQL, transaction, or audit write here.
+    v
+internal/service.CaseService
+    |
+    +--> independently re-checks authz.Service.HasPermission/CanAccessCase
+    |      (service-layer authorization — see docs/SECURITY.md; not just
+    |      trusting that HTTP middleware already ran)
+    +--> validates input (case_number/title/description length, status
+    |      enum, JSONB metadata shape/size — internal/utils.ValidateJSONMetadata)
+    +--> enforces its OWN documented status-transition model
+    |      (caseStatusTransitions) — System 2's schema only constrains the
+    |      value set, not a transition graph
+    +--> internal/repository.CaseRepo (ListFiltered/CountFiltered — new
+    |      sqlc queries; Create/GetByID/Update/AddMember — existing)
+    |      via repository.WithTx (transaction-local RLS identity)
+    +--> internal/audit.Recorder — CASE_CREATED / CASE_UPDATED /
+           CASE_STATUS_CHANGED events (never a false "success" event for a
+           failed/rolled-back mutation)
+```
+
+`app.App` gained a `CaseService *service.CaseService` field. Routes
+registered in `internal/httpserver/router.go` under `/api/v1/cases`:
+
+```text
+POST   /api/v1/cases      Auth + RequirePermission(case:create)
+GET    /api/v1/cases      Auth + RequirePermission(case:read)
+GET    /api/v1/cases/:id  Auth + RequireCaseAccess(case:read, "id")
+PUT    /api/v1/cases/:id  Auth + RequireCaseAccess(case:update, "id")
+```
+
+— exactly the wiring System 4's `router.go` comment already sketched.
+
+**Role-scoped listing** (`GET /cases`) is enforced entirely by PostgreSQL
+RLS (System 2's `cases_select` policy), not by Go-side filtering: a
+POLICE/LAWYER/FORENSICS/JUDGE caller's query only ever returns cases they
+created or hold an active `case_members` row for; ADMIN sees all. The two
+new sqlc queries (`ListCasesFiltered`/`CountCasesFiltered`,
+`db/queries/cases.sql`) add optional status/case_number/title/created_by/
+created_from/created_to filtering and pagination LIMIT/OFFSET entirely in
+SQL, on top of whatever RLS already narrowed the result set to — never
+"select everything, filter in Go". No docket table exists for JUDGE's
+"authorized scope" — the safest supported interpretation (the same
+`case_members` mechanism every other non-role uses) is implemented, with
+finer-grained docket enforcement explicitly deferred (see
+`docs/SECURITY.md`'s "Case-based ABAC").
+
+**Case detail** (`GET /cases/:id`) assembles metadata, status,
+witness-identity-sanitized involved parties (`authz.SanitizeInvolvedParty`
+— reused as-is from System 4, now finally wired into a live handler),
+document references (metadata only — never bytes, never MinIO), and a
+chronological timeline synthesized from already-loaded case/document/
+involved-party timestamps. It deliberately does NOT read `audit_log`: no
+system populates that table yet (`audit.SlogRecorder` still writes only to
+the operational log — System 8 owns the durable, hash-chained writer), so
+building a timeline from it would either be empty or require this system
+to invent chain-writing logic explicitly out of scope.
+
+**IDOR posture** matches System 4's existing middleware exactly:
+`CaseService.GetCase`/`UpdateCase` return the identical `403 FORBIDDEN`
+generic-message error for a case that doesn't exist and a case the caller
+has no relationship to (verified by `TestCaseFlow_EndToEnd`'s guessed-UUID
+and malformed-UUID assertions).
+
+**What's genuinely new here** vs. System 4: the first live case/document
+handler package, the first `CaseService`, two new sqlc queries, no new
+migration (System 2's `cases`/`case_members`/`case_involved_parties`/
+`documents` schema and indexes were already sufficient), and no change to
+any RLS policy or `evidentia_app` grant.
+
+**What's deliberately not here**: document upload/download/verify/redact/
+share, audit-chain computation/verification, and admin user management
+remain later systems' scope — `internal/handlers/{document,audit,user}`
+and their services remain TODO stubs. Full design:
+[docs/SECURITY.md](./docs/SECURITY.md); tests:
+`backend/internal/service/case_service_integration_test.go`,
+`backend/internal/httpserver/case_flow_integration_test.go`,
+`backend/tests/case_rls_test.go`.
+
 ## Request Flow (Intended, Later Systems)
 
 ```text
@@ -296,7 +381,9 @@ Realtime / SSE
   authorization (`internal/authz`), enforced above the database and
   reinforced by PostgreSQL RLS. The HTTP routes it will guard (cases,
   documents, audit, admin) are a later system's scope.
-- **Cases** — Case lifecycle and case-user membership.
+- **Cases** (implemented — System 5) — Case CRUD, role-scoped listing,
+  status lifecycle, involved parties, case-user membership
+  (`internal/service.CaseService`, `internal/handlers/case`).
 - **Documents** — Evidence documents, integrity hashing, redaction lineage,
   compliance certificates.
 - **Audit Chain** — Immutable, hash-chained audit log of security-sensitive

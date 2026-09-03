@@ -9,7 +9,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"evidentia/backend/internal/app"
+	"evidentia/backend/internal/authz"
 	authhandlers "evidentia/backend/internal/handlers/auth"
+	casehandlers "evidentia/backend/internal/handlers/case"
 	"evidentia/backend/internal/handlers/health"
 	"evidentia/backend/internal/middleware"
 	"evidentia/backend/internal/utils"
@@ -57,17 +59,27 @@ func NewRouter(a *app.App) *gin.Engine {
 	authGroup.POST("/refresh", authhandlers.Refresh(a.AuthService))
 	authGroup.POST("/logout", middleware.Auth(a.JWTManager, a.AuthService, a.Logger), authhandlers.Logout(a.AuthService))
 
-	// Case/document/audit/admin routes (internal/handlers/{case,document,
-	// audit,user}) are not yet implemented — see those packages' TODOs;
-	// their business logic is a later system's scope, not System 4's.
+	// Cases (System 5): every route requires authentication; POST/GET
+	// (collection) additionally require the RBAC case:{create,read}
+	// permission (middleware.RequirePermission), while the two
+	// resource-scoped routes require the ABAC case-relationship check
+	// (middleware.RequireCaseAccess) — see docs/API_ENDPOINTS.md's Cases
+	// section and docs/SECURITY.md's Authorization section for the full
+	// per-route mapping this mirrors exactly.
+	authMW := middleware.Auth(a.JWTManager, a.AuthService, a.Logger)
+	caseGroup := r.Group("/api/v1/cases")
+	caseGroup.POST("", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionCaseCreate), casehandlers.Create(a.CaseService))
+	caseGroup.GET("", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionCaseRead), casehandlers.List(a.CaseService))
+	caseGroup.GET("/:id", authMW, middleware.RequireCaseAccess(a.AuthzService, authz.ActionCaseRead, "id"), casehandlers.Get(a.CaseService))
+	caseGroup.PUT("/:id", authMW, middleware.RequireCaseAccess(a.AuthzService, authz.ActionCaseUpdate, "id"), casehandlers.Update(a.CaseService))
+
+	// Document/audit/admin routes (internal/handlers/{document,audit,user})
+	// remain not yet implemented — later systems' scope, not System 5's.
 	// System 4 (internal/authz, internal/middleware.RequirePermission/
-	// RequireCaseAccess/RequireDocumentAccess) provides the authorization
-	// primitives those routes will be guarded with once they exist, e.g.:
-	//
-	//   caseGroup.POST("", middleware.Auth(...), middleware.RequirePermission(a.AuthzService, authz.ActionCaseCreate), handler)
-	//   caseGroup.GET("/:id", middleware.Auth(...), middleware.RequireCaseAccess(a.AuthzService, authz.ActionCaseRead, "id"), handler)
-	//
-	// See docs/API_ENDPOINTS.md for the full intended per-route mapping.
+	// RequireCaseAccess/RequireDocumentAccess) already provides the
+	// authorization primitives those routes will be guarded with, exactly
+	// as used above for cases; see docs/API_ENDPOINTS.md for the full
+	// intended per-route mapping.
 
 	return r
 }

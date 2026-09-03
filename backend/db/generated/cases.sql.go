@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const countCases = `-- name: CountCases :one
@@ -18,6 +19,41 @@ SELECT count(*) FROM cases
 
 func (q *Queries) CountCases(ctx context.Context) (int64, error) {
 	row := q.db.QueryRow(ctx, countCases)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countCasesFiltered = `-- name: CountCasesFiltered :one
+SELECT count(*) FROM cases
+WHERE ($1::text IS NULL OR status = $1)
+  AND ($2::text IS NULL OR case_number ILIKE '%' || $2::text || '%')
+  AND ($3::text IS NULL OR title ILIKE '%' || $3::text || '%')
+  AND ($4::uuid IS NULL OR created_by = $4)
+  AND ($5::timestamptz IS NULL OR created_at >= $5)
+  AND ($6::timestamptz IS NULL OR created_at < $6)
+`
+
+type CountCasesFilteredParams struct {
+	Status      *string            `json:"status"`
+	CaseNumber  *string            `json:"case_number"`
+	Title       *string            `json:"title"`
+	CreatedBy   *uuid.UUID         `json:"created_by"`
+	CreatedFrom pgtype.Timestamptz `json:"created_from"`
+	CreatedTo   pgtype.Timestamptz `json:"created_to"`
+}
+
+// Same filters as ListCasesFiltered — the caller's authorized, filtered
+// total for pagination metadata, not an unfiltered table count.
+func (q *Queries) CountCasesFiltered(ctx context.Context, arg CountCasesFilteredParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countCasesFiltered,
+		arg.Status,
+		arg.CaseNumber,
+		arg.Title,
+		arg.CreatedBy,
+		arg.CreatedFrom,
+		arg.CreatedTo,
+	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -172,6 +208,75 @@ type ListCasesByStatusParams struct {
 
 func (q *Queries) ListCasesByStatus(ctx context.Context, arg ListCasesByStatusParams) ([]Case, error) {
 	rows, err := q.db.Query(ctx, listCasesByStatus, arg.Status, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Case
+	for rows.Next() {
+		var i Case
+		if err := rows.Scan(
+			&i.ID,
+			&i.CaseNumber,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Metadata,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCasesFiltered = `-- name: ListCasesFiltered :many
+SELECT id, case_number, title, description, status, metadata, created_by, created_at, updated_at
+FROM cases
+WHERE ($1::text IS NULL OR status = $1)
+  AND ($2::text IS NULL OR case_number ILIKE '%' || $2::text || '%')
+  AND ($3::text IS NULL OR title ILIKE '%' || $3::text || '%')
+  AND ($4::uuid IS NULL OR created_by = $4)
+  AND ($5::timestamptz IS NULL OR created_at >= $5)
+  AND ($6::timestamptz IS NULL OR created_at < $6)
+ORDER BY created_at DESC
+LIMIT $8 OFFSET $7
+`
+
+type ListCasesFilteredParams struct {
+	Status      *string            `json:"status"`
+	CaseNumber  *string            `json:"case_number"`
+	Title       *string            `json:"title"`
+	CreatedBy   *uuid.UUID         `json:"created_by"`
+	CreatedFrom pgtype.Timestamptz `json:"created_from"`
+	CreatedTo   pgtype.Timestamptz `json:"created_to"`
+	OffsetVal   int32              `json:"offset_val"`
+	LimitVal    int32              `json:"limit_val"`
+}
+
+// Every filter is optional (NULL = "no constraint on this field") so a
+// single query serves GET /cases whether the caller passed zero or every
+// filter — parameterized throughout, never string-concatenated. Combined
+// with RLS (FORCE'd on this table), the WHERE clause below and the
+// caller's row-visibility policy both apply: this query can only ever
+// narrow what RLS already allows, never widen it.
+func (q *Queries) ListCasesFiltered(ctx context.Context, arg ListCasesFilteredParams) ([]Case, error) {
+	rows, err := q.db.Query(ctx, listCasesFiltered,
+		arg.Status,
+		arg.CaseNumber,
+		arg.Title,
+		arg.CreatedBy,
+		arg.CreatedFrom,
+		arg.CreatedTo,
+		arg.OffsetVal,
+		arg.LimitVal,
+	)
 	if err != nil {
 		return nil, err
 	}

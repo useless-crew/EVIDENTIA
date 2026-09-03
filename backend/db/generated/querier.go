@@ -23,6 +23,9 @@ type Querier interface {
 	AssignRoleToUser(ctx context.Context, arg AssignRoleToUserParams) error
 	CountAuditEntries(ctx context.Context) (int64, error)
 	CountCases(ctx context.Context) (int64, error)
+	// Same filters as ListCasesFiltered — the caller's authorized, filtered
+	// total for pagination metadata, not an unfiltered table count.
+	CountCasesFiltered(ctx context.Context, arg CountCasesFilteredParams) (int64, error)
 	CountDocumentsByCase(ctx context.Context, caseID uuid.UUID) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	// Evidentia — Auth Session (Refresh Token) Queries
@@ -110,6 +113,13 @@ type Querier interface {
 	ListCaseMembers(ctx context.Context, caseID uuid.UUID) ([]CaseMember, error)
 	ListCases(ctx context.Context, arg ListCasesParams) ([]Case, error)
 	ListCasesByStatus(ctx context.Context, arg ListCasesByStatusParams) ([]Case, error)
+	// Every filter is optional (NULL = "no constraint on this field") so a
+	// single query serves GET /cases whether the caller passed zero or every
+	// filter — parameterized throughout, never string-concatenated. Combined
+	// with RLS (FORCE'd on this table), the WHERE clause below and the
+	// caller's row-visibility policy both apply: this query can only ever
+	// narrow what RLS already allows, never widen it.
+	ListCasesFiltered(ctx context.Context, arg ListCasesFilteredParams) ([]Case, error)
 	ListCertificatesByDocument(ctx context.Context, documentID uuid.UUID) ([]ComplianceCertificate, error)
 	// Derivative (e.g. redacted) documents produced from a given source.
 	ListDocumentDerivatives(ctx context.Context, parentDocumentID *uuid.UUID) ([]Document, error)

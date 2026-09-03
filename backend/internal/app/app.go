@@ -42,6 +42,13 @@ type App struct {
 	// internal/middleware.RequirePermission/RequireCaseAccess/
 	// RequireDocumentAccess.
 	AuthzService *authz.Service
+
+	// CaseService is System 5's case-management business logic (see
+	// internal/service.CaseService) — owns validation, transactional
+	// persistence, status-transition rules, and audit integration for
+	// POST/GET/PUT /cases. Depends on AuthzService for its own
+	// service-layer authorization re-check (see that type's doc comment).
+	CaseService *service.CaseService
 }
 
 // New loads configuration and connects every infrastructure dependency in
@@ -82,6 +89,7 @@ func New(ctx context.Context) (*App, error) {
 	jwtManager := auth.NewJWTManager(cfg.JWT.SigningKey, cfg.JWT.Issuer, cfg.JWT.Audience, cfg.JWT.AccessTTL)
 	authService := service.NewAuthService(db.Pool(), jwtManager, cfg.JWT.BcryptCost, cfg.JWT.RefreshTTL, recorder)
 	authzService := authz.NewService(db.Pool(), recorder)
+	caseService := service.NewCaseService(db.Pool(), authzService, recorder)
 
 	return &App{
 		Config:       cfg,
@@ -92,6 +100,7 @@ func New(ctx context.Context) (*App, error) {
 		JWTManager:   jwtManager,
 		AuthService:  authService,
 		AuthzService: authzService,
+		CaseService:  caseService,
 	}, nil
 }
 

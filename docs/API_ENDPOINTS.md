@@ -2,10 +2,10 @@
 
 ## Purpose
 
-TODO: Document the full REST API surface for Evidentia. The domain
-endpoints below (Cases, Documents, Audit, Admin) are not implemented yet —
-this section documents the intended surface. Authentication (below),
-Health, and Readiness (at the bottom) are implemented today.
+TODO: Document the full REST API surface for Evidentia. Cases (below),
+Authentication, Health, and Readiness are implemented today. Documents,
+Audit, and Admin are not implemented yet — those sections document the
+intended surface only.
 
 ## Authentication (implemented)
 
@@ -80,26 +80,132 @@ expired, or the account has been deactivated since the token was issued.
 {"success": true, "data": null}
 ```
 
-## Cases
+## Cases (implemented — System 5)
 
 ```text
-POST   /cases
-GET    /cases
-GET    /cases/:id
-PUT    /cases/:id
+POST   /api/v1/cases
+GET    /api/v1/cases
+GET    /api/v1/cases/:id
+PUT    /api/v1/cases/:id
 ```
 
-TODO (business logic — not implemented). Required authorization, per
-System 4 (`docs/SECURITY.md`'s Authorization section) — to be wired with
-`middleware.RequirePermission`/`RequireCaseAccess` once these routes and
-their handlers exist:
+All four require `Authorization: Bearer <access_token>`. Required
+authorization, per System 4 (`docs/SECURITY.md`'s Authorization section),
+wired via `middleware.RequirePermission`/`RequireCaseAccess`:
 
 | Route | Permission (RBAC) | Resource check (ABAC) |
 |---|---|---|
-| `POST /cases` | `case:create` | — (no resource yet; the creator becomes `cases.created_by`) |
-| `GET /cases` | `case:read` | list is scoped by the caller's own case relationships, not a per-item check here |
+| `POST /cases` | `case:create` | — (no resource yet; the creator becomes `cases.created_by`, never a client-supplied value) |
+| `GET /cases` | `case:read` | list is scoped by PostgreSQL RLS (the caller's own case relationships), not a per-item check here |
 | `GET /cases/:id` | `case:read` | `CanAccessCase` — caller must be ADMIN, the case's creator, or an active `case_members` row |
 | `PUT /cases/:id` | `case:update` | `CanAccessCase` (same relationship check) |
+
+`internal/service.CaseService` independently re-checks the same
+authorization internally (not just the HTTP middleware) — see
+`ARCHITECTURE.md`'s System 5 section.
+
+### `POST /cases`
+
+```json
+{"case_number": "FIR-2026-001", "title": "Theft investigation", "description": "...", "status": "OPEN", "metadata": {}}
+```
+
+`status`/`description`/`metadata` are all optional (`status` defaults to
+`OPEN`). `id`/`created_by`/`created_at`/`updated_at` are server-controlled
+— there is no request field for any of them, so a client cannot supply
+one even accidentally. On success (`201`), the response is the same
+shape `GET /cases/:id` returns (see below). The creator is also added as
+an `OWNER` `case_members` row in the same transaction.
+
+- `400` — missing/invalid `case_number`/`title`, invalid `status`, or
+  malformed/oversized `metadata` (see `internal/utils.ValidateJSONMetadata`
+  — max 32KB, must be a JSON object).
+- `409` — `case_number` already exists (`cases_case_number_unique`).
+
+### `GET /cases`
+
+Query parameters (all optional): `status`, `case_number` (substring
+match), `title` (substring match), `created_by` (UUID), `created_from`/
+`created_to` (RFC3339 timestamps), `page` (default 1), `page_size`
+(default 20, max 100 — larger values are silently clamped, not rejected).
+Filtering and pagination both happen in SQL
+(`db/queries/cases.sql`'s `ListCasesFiltered`/`CountCasesFiltered`), on
+top of whatever PostgreSQL RLS already narrowed the row set to — never an
+unfiltered `SELECT *` followed by in-memory filtering.
+
+```json
+{
+  "success": true,
+  "data": {
+    "cases": [{"id": "...", "case_number": "...", "title": "...", "status": "OPEN", "created_by": "...", "created_at": "...", "updated_at": "..."}],
+    "meta": {"page": 1, "page_size": 20, "total": 1, "total_pages": 1}
+  }
+}
+```
+
+### `GET /cases/:id`
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "...", "case_number": "...", "title": "...", "description": "...",
+    "status": "OPEN", "metadata": {}, "created_by": "...", "created_at": "...", "updated_at": "...",
+    "involved_parties": [{"id": "...", "party_type": "WITNESS", "display_name": "[REDACTED]", "metadata": {}, "created_at": "..."}],
+    "documents": [{"id": "...", "document_type": "OTHER", "filename": "...", "mime_type": "...", "file_size": 0, "status": "ACTIVE", "uploaded_by": "...", "uploaded_at": "..."}],
+    "timeline": [{"type": "CASE_CREATED", "timestamp": "...", "summary": "...", "related_id": "..."}],
+    "relationship": {"is_owner": true, "is_member": true, "membership_type": "OWNER"}
+  }
+}
+```
+
+`involved_parties[].display_name`/`metadata` are redacted to `"[REDACTED]"`/
+`{}` for a `WITNESS`-type party when the caller is not JUDGE/POLICE/ADMIN
+— see `internal/authz.SanitizeInvolvedParty`. `documents` is metadata/
+references only (never file bytes; capped at 50 rows — full paginated
+document listing is System 6's scope). `timeline` is synthesized from
+case/document/involved-party timestamps, not read from `audit_log` (see
+`ARCHITECTURE.md`'s System 5 section for why).
+
+- `403` — no relationship to this case, OR the case doesn't exist, OR the
+  `:id` isn't a valid UUID. All three produce the byte-identical response
+  (same status, same generic message) — never a `404` that would confirm
+  a specific case ID's existence to an unauthorized caller.
+
+### `PUT /cases/:id`
+
+Full replacement — `title`, `status`, and `metadata` are always required
+in the body (`description` optional); this mirrors the existing
+`UpdateCase` SQL query, which was already an unconditional 4-column
+`UPDATE`, not a partial-patch contract.
+
+```json
+{"title": "Updated title", "description": "...", "status": "UNDER_INVESTIGATION", "metadata": {}}
+```
+
+Response: same shape as `GET /cases/:id`. `id`/`created_by`/`created_at`
+cannot be changed — the request body has no field for any of them.
+
+- `400` — invalid `status` value, OR a status transition not in
+  `CaseService`'s documented transition map (`OPEN` → `UNDER_INVESTIGATION`
+  → `SUBMITTED` → `UNDER_REVIEW` → `CLOSED` → `ARCHIVED`, with
+  `SUBMITTED`/`UNDER_REVIEW` allowed to fall back one step and `ARCHIVED`
+  reachable directly from any non-terminal status). This is System 5's own
+  conservative starting model — System 2's schema only constrains the
+  value set, not a transition graph.
+- `403` — same anti-enumeration behavior as `GET /cases/:id`.
+
+### Audit integration
+
+Every successful `POST`/`PUT` records an event via `internal/audit.Recorder`
+(the same interface System 3/4 already use — operational log today, System
+8's durable hash-chained writer later, no change required here):
+`CASE_CREATED` on create; `CASE_UPDATED` on every successful update, plus a
+separate `CASE_STATUS_CHANGED` event when `status` actually changed. A
+failed/rejected mutation (validation error, authorization denial, invalid
+transition, duplicate `case_number`) never produces one of these — see
+`case_service_integration_test.go`'s `TestCaseService_*_Denied`/
+`*Rejected`/`*Conflict` tests, which assert exactly that.
 
 ## Case Documents
 
@@ -222,13 +328,13 @@ the JWT's role claim alone — see SECURITY.md) — this establishes
 System 4 (`internal/authz`) provides the RBAC (`middleware.RequirePermission`)
 and ABAC (`middleware.RequireCaseAccess`/`RequireDocumentAccess`) checks
 layered on top of it, and the per-route requirements are documented inline
-above (Cases/Case Documents/Documents/Audit/Admin) — but no case/document/
-audit/admin route is registered in `internal/httpserver/router.go` yet
-(their handlers are still TODO stubs), so none of that middleware is wired
-into a live route today. Today's only non-health routes are
-`/api/v1/auth/{login,refresh,logout}`, which need no RBAC/ABAC (see
-"Authentication" above). Full authorization design: `docs/SECURITY.md`'s
-Authorization section.
+above (Cases/Case Documents/Documents/Audit/Admin). As of System 5, the
+Cases routes are live and wired with exactly that middleware (see
+`internal/httpserver/router.go`); Case Documents/Documents/Audit/Admin
+routes remain unregistered (their handlers are still TODO stubs). Today's
+non-health routes are `/api/v1/auth/{login,refresh,logout}` (no RBAC/ABAC
+— see "Authentication" above) and `/api/v1/cases`/`/api/v1/cases/:id`.
+Full authorization design: `docs/SECURITY.md`'s Authorization section.
 
 `401` vs `403`: a request with no/invalid/expired authentication is
 always `401 UNAUTHORIZED`; an authenticated request denied by RBAC or ABAC

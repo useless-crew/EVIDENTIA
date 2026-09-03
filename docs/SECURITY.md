@@ -155,6 +155,49 @@ Full detail in the Authorization section below; summary here:
   actor, action, resource type/ID, and an internal (never client-facing)
   reason code.
 
+## Implemented in System 5 (Case Management & Case Lifecycle)
+
+Full detail in "Case Management" below; summary here:
+
+- **Case creation restricted at both layers**: `case:create` (RBAC, POLICE/
+  ADMIN per the seed data) is checked by `middleware.RequirePermission` AND
+  independently re-checked inside `CaseService.CreateCase` — a future
+  caller of the service that bypasses HTTP entirely gets the same
+  guarantee (see "Service-layer authorization" above, now exercised by a
+  concrete caller for the first time).
+- **`created_by` is never client-controlled**: `CreateCaseInput` has no
+  field for it — the authenticated caller's own ID is the only value ever
+  written, structurally, not just by convention. Verified by
+  `TestCaseService_CreateCase_ClientSuppliedCreatedByIgnored` and
+  `TestCaseFlow_EndToEnd`'s header/body-spoofing assertions.
+- **Role-scoped case listing enforced by RLS, not Go-side filtering**:
+  `GET /cases` runs `ListCasesFiltered` under the caller's own
+  transaction-local RLS identity — the `cases_select` policy (System 2)
+  already restricts the row set before any status/search/pagination filter
+  in this query is even applied. Verified against real PostgreSQL by
+  `TestCaseService_ListCases_RoleScoping` (POLICE/LAWYER/FORENSICS/JUDGE/
+  ADMIN) and `backend/tests/case_rls_test.go`.
+- **IDOR prevention extended to case detail/update**: `CaseService.GetCase`/
+  `UpdateCase` return the identical `403` for a nonexistent case ID, an
+  unrelated case, and a malformed UUID — never a `404` that would confirm
+  existence. Verified by `TestCaseFlow_EndToEnd`.
+- **Witness-identity redaction now actually wired into a live response**:
+  `authz.SanitizeInvolvedParty` (built, unit-tested, but unused by any
+  handler as of System 4) is now called by `CaseService`'s case-detail
+  assembly before every involved-party record is serialized. Verified by
+  `TestCaseService_GetCase_WitnessRedactedForForensics`.
+- **Validated status-transition model**: `CaseService`'s own
+  `caseStatusTransitions` map (not a System 2 schema feature — see "Case
+  Management" below) rejects transitions like `OPEN` → `CLOSED` directly,
+  inside the same transaction as the update, so a rejected transition
+  never partially applies.
+- **Audit integration without a false success event**: `CASE_CREATED`/
+  `CASE_UPDATED`/`CASE_STATUS_CHANGED` are recorded only after their
+  transaction commits; a validation failure, authorization denial, invalid
+  transition, or duplicate `case_number` records none of them. Verified by
+  every `TestCaseService_*_Denied`/`*Rejected`/`*Conflict` test asserting
+  on a `spyRecorder`.
+
 ## Principles
 
 The eventual system will enforce all twelve of these. Implemented so far:
@@ -477,15 +520,13 @@ restricts a `WITNESS`-type record's identity-revealing fields (`display_name`,
 `SanitizeInvolvedParty` performs the actual redaction and must be called
 *before* serializing an involved-party record into any HTTP response.
 
-**Deferred**: no handler in the repository today reads/returns
-`case_involved_parties` (that table's HTTP surface belongs to a later
-system) — this policy exists as a ready-made, unit-tested enforcement
-point (`internal/authz/protected_info_test.go`) for that future handler to
-call, rather than being wired into a live endpoint today. The schema also
-has no classification finer than `party_type`, so this can only redact at
-the "is this a WITNESS record" granularity — a finer-grained
-classification would need a schema change owned by whichever system needs
-it.
+As of System 5, `GET /cases/:id` (`CaseService`'s case-detail assembly) is
+the first live caller — every involved-party record is passed through
+`SanitizeInvolvedParty` before being added to the response, never after.
+The schema still has no classification finer than `party_type`, so this
+can only redact at the "is this a WITNESS record" granularity — a
+finer-grained classification would need a schema change owned by whichever
+system needs it.
 
 ### Privilege escalation / admin boundaries
 
@@ -601,20 +642,99 @@ with no change required here.
 
 ### What System 4 does *not* do
 
-- **Business logic for cases/documents/audit/admin** — `internal/handlers/
-  {case,document,audit,user}` and `internal/service/{case,document,audit,
-  user}_service.go` remain the TODO stubs later systems will implement.
-  Because those routes are not yet registered in `internal/httpserver/
-  router.go`, there is nothing to attach `RequirePermission`/
-  `RequireCaseAccess`/`RequireDocumentAccess` to yet — this system
-  provides the primitives (and `app.App.AuthzService`) ready for the
-  system that adds those routes, per `internal/httpserver/router.go`'s
-  comment showing the intended wiring.
+- **Business logic for documents/audit/admin** — `internal/handlers/
+  {document,audit,user}` and `internal/service/{document,audit,
+  user}_service.go` remain TODO stubs for later systems. Cases
+  (`internal/handlers/case`, `internal/service.CaseService`) were System 5
+  — see "Implemented in System 5" above and "Case Management" below; that
+  system used exactly the primitives (`app.App.AuthzService`,
+  `RequirePermission`/`RequireCaseAccess`) this one built, with no changes
+  to `internal/authz` itself.
 - **Membership-type-specific action gating** — see "Case-based ABAC"
   above.
 - **Finer-grained protected-information classification** beyond
   `party_type = 'WITNESS'` — see "Protected information" above.
 - **The audit hash chain** — unchanged, still System 8's job.
+
+## Case Management
+
+System 5 (`internal/service.CaseService`, `internal/handlers/case`)
+implements `POST /cases`, `GET /cases`, `GET /cases/:id`, `PUT /cases/:id`
+— see [API_ENDPOINTS.md](./API_ENDPOINTS.md)'s Cases section for the full
+request/response contract. This section covers the security-relevant
+design decisions; business/API detail lives there.
+
+### Service-layer authorization is not optional here
+
+`CaseService` takes `*authz.Service` as a dependency and calls
+`HasPermission`/`CanAccessCase` itself, in addition to (not instead of) the
+HTTP-layer `RequirePermission`/`RequireCaseAccess` middleware already
+guarding these routes. This is System 4's own documented design ("Service-
+layer authorization" above) exercised for the first time by a real caller:
+if a future background job or another service calls `CaseService` directly
+without going through HTTP, it gets the identical authorization guarantee
+a request would — there is no "internal, trusted" code path that skips the
+check.
+
+### Role-scoped listing: RLS does the work, not Go
+
+`GET /cases` never runs an unscoped `SELECT` and filters in application
+code. `ListCasesFiltered`/`CountCasesFiltered` (`db/queries/cases.sql`) run
+inside `repository.WithTx` under the caller's own `app.user_id`/`app.role`
+— System 2's `cases_select` RLS policy has already restricted the visible
+row set (ADMIN: all; everyone else: `created_by = self` OR an active
+`case_members` row) before the query's own status/search/date filters are
+applied on top. POLICE/LAWYER/FORENSICS/JUDGE all resolve to the identical
+policy — a police officer does not see "all cases" merely by holding the
+POLICE role, only cases they created or are an active member of (the
+specification's "police: own/all" is interpreted as "own, plus whatever
+they're assigned to" — there is no separate agency/jurisdiction concept in
+this schema to draw a wider "all" boundary from, and inventing one was
+explicitly out of this system's scope). JUDGE has no dedicated docket
+table either — it uses the same `case_members` mechanism, documented here
+as a deliberately conservative placeholder for a future docket-specific
+scope.
+
+### Status transitions
+
+`cases_status_check` (System 2) constrains `status` to a fixed set of
+values but encodes no transition graph. `CaseService.caseStatusTransitions`
+is this system's own conservative model:
+
+```text
+OPEN -> UNDER_INVESTIGATION -> SUBMITTED -> UNDER_REVIEW -> CLOSED -> ARCHIVED
+```
+
+with `SUBMITTED`/`UNDER_REVIEW` allowed one step back (a review can return
+a case for further investigation) and `ARCHIVED` reachable directly from
+any non-terminal status. Re-asserting a case's current status (no status
+change, only e.g. a title edit) is always allowed. An invalid transition
+is rejected with `400` inside the same transaction as the rest of the
+update — it can never partially apply. This is explicitly a starting
+point, not the final investigative workflow (see `ARCHITECTURE.md`'s
+System 5 section).
+
+### Case timeline is not a second audit system
+
+`GET /cases/:id`'s `timeline` field is synthesized, at request time, from
+already-loaded `cases.created_at`/`updated_at`, `documents.uploaded_at`,
+and `case_involved_parties.created_at` — never read from `audit_log`,
+which no system populates yet (`audit.SlogRecorder` still writes only to
+the operational log; System 8 owns the durable, hash-chained writer). This
+avoids exactly the situation master-prompt-driven design explicitly warns
+against: a second, competing "audit-like" table maintained by this system.
+
+### Case creation transaction
+
+`CaseService.CreateCase` runs entirely inside one `repository.WithTx` call:
+insert the case row, insert the creator's `OWNER` `case_members` row (so
+later reads/updates resolve through the same relationship mechanism every
+other case member uses, not a `created_by`-only special case forever), and
+only after that transaction commits does it call `audit.Recorder.Record`
+for `CASE_CREATED`. A duplicate `case_number` (unique-constraint violation)
+or any other database error rolls the whole transaction back and produces
+no audit event at all — verified by
+`TestCaseService_CreateCase_DuplicateCaseNumberConflict`.
 
 ## Cryptography
 
