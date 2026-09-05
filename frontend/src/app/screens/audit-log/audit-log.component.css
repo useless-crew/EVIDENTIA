@@ -180,30 +180,6 @@
   background: #ffffff;
 }
 
-.filter-pill {
-  height: 30px;
-  padding: 0 10px;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-}
-
-.filter-pill:hover {
-  background: var(--color-section-alt);
-  color: var(--color-navy-primary);
-}
-
-.caret {
-  font-size: 8px;
-  color: var(--color-text-muted);
-}
-
 .filter-spacer {
   flex: 1;
 }
@@ -568,6 +544,53 @@
 
 .integrity-history-status.status-failed {
   color: var(--color-warning);
+}
+
+/* Pagination Footer (Ledger Table tab) */
+.pagination-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  background: #ffffff;
+  border-top: 1px solid var(--color-border);
+}
+
+.page-count {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.page-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-page {
+  height: 28px;
+  min-width: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: #ffffff;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-page:hover:not(.disabled) {
+  background: var(--color-section-alt);
+  border-color: var(--color-accent-blue);
+}
+
+.btn-page.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .integrity-history-status.status-running {

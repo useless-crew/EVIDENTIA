@@ -34,21 +34,6 @@ export interface StatItem {
   deltaColor: string;
 }
 
-export interface AuditRow {
-  id: number;
-  ts: string;
-  user: string;
-  role: string;
-  action: string;
-  resource: string;
-  actionType: 'upload' | 'hash' | 'status' | 'view' | 'redact' | 'denied' | 'verify';
-  hash: string;
-  prev: string;
-  ip: string;
-  session: string;
-  open?: boolean;
-}
-
 const BACKEND_TO_UI_ROLE: Record<BackendRole, Role> = {
   ADMIN: 'Admin',
   POLICE: 'Police',
@@ -80,11 +65,12 @@ const BACKEND_TO_UI_ROLE: Record<BackendRole, Role> = {
  * Blockchain Graph tab's fake chain-verify sweep (chainRunning/
  * chainDone/chainCount/chainRows/verifyChain) — AuditLogComponent now
  * drives that tab from AuditVerificationService's real backend calls.
- * What REMAINS mock (dashboardInfo stats, activityFeed, auditRows,
- * accessFields) has no backend equivalent yet (a general dashboard-stats
- * endpoint and the audit EVENT-listing table's own frontend wiring are
- * not implemented by any system yet — see ARCHITECTURE.md) and is left
- * as clearly-illustrative content, per master prompt's explicit "do not
+ * Also gone (System 16): auditRows — AuditLogComponent's Ledger Table tab
+ * now fetches real data directly from AuditService (GET /audit).
+ * What REMAINS mock (dashboardInfo stats, activityFeed, accessFields) has
+ * no backend equivalent yet (a general dashboard-stats/activity-feed
+ * endpoint is not implemented by any system) and is left as
+ * clearly-illustrative content, per master prompt's explicit "do not
  * implement functionality belonging to a later system".
  */
 @Injectable({
@@ -497,127 +483,20 @@ export class DmsStateService {
     },
   ];
 
-  // Audit Rows (Ledger Table tab) — illustrative only. GET /audit is now
-  // real (System 10) but wiring this specific table to it is a separate
-  // concern from chain VERIFICATION (System 11's actual mandate — see
-  // AuditVerificationService/the Blockchain Graph tab below) and remains
-  // unimplemented.
-  readonly auditRows: AuditRow[] = [
-    {
-      id: 1,
-      ts: '18 Feb 10:14:07',
-      user: 'Dr. A. Iyer',
-      role: 'Forensics',
-      action: 'DOCUMENT_UPLOAD',
-      resource: 'Forensic_Report_UPI_4521.pdf',
-      actionType: 'upload',
-      hash: 'd41f9a3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58',
-      prev: '7b2e4c91a08df365c4a17e0b92d5f83a6c1e074bd39f52a8e6c0b74132fd9e05',
-      ip: '10.14.6.21',
-      session: 's-8107',
-    },
-    {
-      id: 2,
-      ts: '18 Feb 10:14:09',
-      user: 'system',
-      role: 'System',
-      action: 'HASH_RECORDED',
-      resource: 'sha256:d41f9a3c…',
-      actionType: 'hash',
-      hash: '1f9a3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d4',
-      prev: 'd41f9a3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58',
-      ip: '127.0.0.1',
-      session: 'daemon-sys',
-    },
-    {
-      id: 3,
-      ts: '18 Feb 11:02:41',
-      user: 'SI R. Mehra',
-      role: 'Police',
-      action: 'CASE_STATUS_CHANGE',
-      resource: 'FIR/2026/4521',
-      actionType: 'status',
-      hash: '9a3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f',
-      prev: '1f9a3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d4',
-      ip: '10.14.6.22',
-      session: 's-8114',
-    },
-    {
-      id: 4,
-      ts: '18 Feb 12:33:18',
-      user: 'Adv. S. Bhat',
-      role: 'Lawyer',
-      action: 'DOCUMENT_VIEW',
-      resource: 'Witness_statement_02.pdf',
-      actionType: 'view',
-      hash: '3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f9a',
-      prev: '9a3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f',
-      ip: '10.14.6.23',
-      session: 's-8121',
-    },
-    {
-      id: 5,
-      ts: '18 Feb 12:41:55',
-      user: 'SI R. Mehra',
-      role: 'Police',
-      action: 'REDACTION_APPLIED',
-      resource: 'Witness_statement_02.pdf',
-      actionType: 'redact',
-      hash: '7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f9a3c',
-      prev: '3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f9a',
-      ip: '10.14.6.24',
-      session: 's-8128',
-    },
-    {
-      id: 6,
-      ts: '18 Feb 13:07:02',
-      user: 'Adv. M. Qureshi',
-      role: 'Lawyer',
-      action: 'ACCESS_DENIED',
-      resource: 'Exhibit E-04 (police-only)',
-      actionType: 'denied',
-      hash: '208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f9a3c7b',
-      prev: '7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f9a3c',
-      ip: '10.14.6.25',
-      session: 's-8135',
-    },
-    {
-      id: 7,
-      ts: '18 Feb 13:58:20',
-      user: 'Hon. K. Mahadevan',
-      role: 'Judge',
-      action: 'DOCUMENT_VIEW',
-      resource: 'FIR_4521_scan.pdf',
-      actionType: 'view',
-      hash: '8e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f9a3c7b20',
-      prev: '208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f9a3c7b',
-      ip: '10.14.6.26',
-      session: 's-8142',
-    },
-    {
-      id: 8,
-      ts: '18 Feb 14:02:00',
-      user: 'system',
-      role: 'System',
-      action: 'CHAIN_VERIFY',
-      resource: '1,204 entries — intact',
-      actionType: 'verify',
-      hash: '5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f9a3c7b208e',
-      prev: '8e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f9a3c7b20',
-      ip: '127.0.0.1',
-      session: 'daemon-sys',
-    },
-  ];
-
   // Ledger Table tab state only — the Blockchain Graph tab's illustrative
   // sweep animation (chainRunning/chainDone/chainCount/chainRows/
   // verifyChain) has been REMOVED: System 11 replaced it with a real
-  // POST/SSE-driven verification flow — see
-  // AuditVerificationService and AuditLogComponent.
+  // POST/SSE-driven verification flow — see AuditVerificationService and
+  // AuditLogComponent. The Ledger Table itself (System 16) now fetches
+  // real GET /audit data directly via AuditService, exactly like
+  // CasesComponent/AdminComponent fetch their own list data — see
+  // AuditLogComponent's auditEntries/auditEntriesLoading/
+  // auditEntriesError signals and its fetchAuditEntries() method.
+  // expandedAuditId is a real audit_log.id (UUID), not an array index.
   readonly auditTab = signal<'table' | 'graph'>('table');
-  readonly expandedAuditId = signal<number | null>(null);
+  readonly expandedAuditId = signal<string | null>(null);
 
-  toggleAuditRow(id: number) {
+  toggleAuditRow(id: string) {
     this.expandedAuditId.set(this.expandedAuditId() === id ? null : id);
   }
 

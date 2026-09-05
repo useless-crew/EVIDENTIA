@@ -4,7 +4,8 @@
     <div>
       <h1 class="audit-title">Cryptographic Audit Trail</h1>
       <p class="audit-subtitle">
-        Append-only, hash-linked ledger. Every system event carries the SHA-256 digest of the preceding block.
+        Append-only, hash-linked ledger. Every system event carries the SHA-256 digest of the
+        preceding block.
       </p>
     </div>
 
@@ -15,7 +16,15 @@
       (click)="onVerifyClick()"
       [disabled]="isRunning()"
     >
-      <svg *ngIf="!isRunning()" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <svg
+        *ngIf="!isRunning()"
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+      >
         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
       </svg>
       <span *ngIf="isRunning()" class="spinner-dot"></span>
@@ -48,73 +57,118 @@
     </button>
   </div>
 
-  <!-- TAB 1: Ledger Table View -->
+  <!-- TAB 1: Ledger Table View (System 16 — real GET /audit data) -->
   <div *ngIf="dms.auditTab() === 'table'" class="audit-card animate-fade-in">
-    <!-- Filter Bar -->
     <div class="audit-filter-bar">
-      <div class="filter-pill"><span>User: Any</span><span class="caret">▼</span></div>
-      <div class="filter-pill"><span>Action: Any</span><span class="caret">▼</span></div>
-      <div class="filter-pill"><span>Case: Any</span><span class="caret">▼</span></div>
-      <div class="filter-pill"><span>Date: Last 7 days</span><span class="caret">▼</span></div>
       <div class="filter-spacer"></div>
-      <span class="entries-count font-mono">1,204 entries logged</span>
+      <span *ngIf="auditResult() as r" class="entries-count font-mono">
+        {{ r.meta.total.toLocaleString() }} {{ r.meta.total === 1 ? 'entry' : 'entries' }} logged
+      </span>
     </div>
 
-    <!-- Table Header -->
-    <div class="audit-table-header font-mono">
-      <span class="col-ts">TIMESTAMP ↓</span>
-      <span class="col-user">USER</span>
-      <span class="col-role">ROLE</span>
-      <span class="col-action">ACTION</span>
-      <span class="col-resource">TARGET RESOURCE</span>
+    <div *ngIf="auditLoading()" class="integrity-loading">Loading audit entries…</div>
+    <div *ngIf="auditError()" class="chain-result-card tampered">
+      <div class="result-title">Could not load the audit ledger</div>
+      <div class="result-sub">{{ auditError() }}</div>
     </div>
 
-    <!-- Table Body -->
-    <div class="audit-table-body">
-      <div *ngFor="let row of dms.auditRows" class="audit-row-group">
-        <div
-          class="audit-row"
-          [class.expanded]="dms.expandedAuditId() === row.id"
-          (click)="toggleRow(row.id)"
-        >
-          <span class="col-ts font-mono">{{ row.ts }}</span>
-          <span class="col-user">{{ row.user }}</span>
-          <span class="col-role font-mono role-tag">{{ row.role }}</span>
-          <span class="col-action">
-            <span class="action-tag font-mono" [ngClass]="getActionBadgeClass(row.actionType)">
-              {{ row.action }}
-            </span>
-          </span>
-          <span class="col-resource" [title]="row.resource">{{ row.resource }}</span>
-        </div>
-
-        <!-- Expandable Cryptographic Details Drawer -->
-        <div *ngIf="dms.expandedAuditId() === row.id" class="audit-details-drawer animate-fade-in">
-          <div class="drawer-grid">
-            <div class="drawer-field">
-              <div class="drawer-label">BLOCK ENTRY HASH (SHA-256)</div>
-              <div class="drawer-hash font-mono">{{ row.hash }}</div>
-            </div>
-            <div class="drawer-field">
-              <div class="drawer-label">PREVIOUS BLOCK HASH (PARENT LINK)</div>
-              <div class="drawer-hash font-mono prev-hash">{{ row.prev }}</div>
-            </div>
-          </div>
-          <div class="drawer-meta font-mono">
-            IP {{ row.ip }} · Session {{ row.session }} · Cryptographically sealed by Node NCRB-DMS-02 · Signed ED25519-01
-          </div>
-        </div>
+    <ng-container *ngIf="!auditLoading() && !auditError() && auditResult() as r">
+      <div *ngIf="r.entries.length === 0" class="integrity-history-empty">
+        No audit entries are visible to your account yet.
       </div>
-    </div>
+
+      <ng-container *ngIf="r.entries.length > 0">
+        <!-- Table Header -->
+        <div class="audit-table-header font-mono">
+          <span class="col-ts">TIMESTAMP ↓</span>
+          <span class="col-user">USER</span>
+          <span class="col-role">ROLE</span>
+          <span class="col-action">ACTION</span>
+          <span class="col-resource">TARGET RESOURCE</span>
+        </div>
+
+        <!-- Table Body -->
+        <div class="audit-table-body">
+          <div *ngFor="let row of r.entries" class="audit-row-group">
+            <div
+              class="audit-row"
+              [class.expanded]="dms.expandedAuditId() === row.id"
+              (click)="toggleRow(row.id)"
+            >
+              <span class="col-ts font-mono">{{ row.timestamp | date: 'medium' }}</span>
+              <span class="col-user font-mono" [title]="row.user_id || ''">{{
+                actorLabel(row)
+              }}</span>
+              <span class="col-role font-mono role-tag">{{ row.role || '—' }}</span>
+              <span class="col-action">
+                <span class="action-tag font-mono" [ngClass]="auditActionBadgeClass(row.action)">
+                  {{ formatAction(row.action) }}
+                </span>
+              </span>
+              <span class="col-resource" [title]="resourceLabel(row)">{{
+                resourceLabel(row)
+              }}</span>
+            </div>
+
+            <!-- Expandable Cryptographic Details Drawer -->
+            <div
+              *ngIf="dms.expandedAuditId() === row.id"
+              class="audit-details-drawer animate-fade-in"
+            >
+              <div class="drawer-grid">
+                <div class="drawer-field">
+                  <div class="drawer-label">BLOCK ENTRY HASH (SHA-256)</div>
+                  <div class="drawer-hash font-mono">{{ row.hash }}</div>
+                </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">PREVIOUS BLOCK HASH (PARENT LINK)</div>
+                  <div class="drawer-hash font-mono prev-hash">
+                    {{ row.prev_hash || '(genesis entry)' }}
+                  </div>
+                </div>
+              </div>
+              <div class="drawer-meta font-mono">
+                Sequence #{{ row.seq }} · {{ row.resource_type
+                }}<span *ngIf="row.case_id"> · Case {{ row.case_id.slice(0, 8) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pagination Footer -->
+        <div class="pagination-footer" *ngIf="r.meta.total_pages > 1">
+          <span class="page-count">Page {{ r.meta.page }} of {{ r.meta.total_pages }}</span>
+          <div class="page-buttons">
+            <button
+              type="button"
+              class="btn-page"
+              [class.disabled]="auditPage() <= 1"
+              (click)="goToAuditPage(auditPage() - 1)"
+            >
+              Prev
+            </button>
+            <button
+              type="button"
+              class="btn-page"
+              [class.disabled]="auditPage() >= r.meta.total_pages"
+              (click)="goToAuditPage(auditPage() + 1)"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      </ng-container>
+    </ng-container>
   </div>
 
   <!-- TAB 2: Audit Integrity Dashboard (System 11 — real backend, no simulation) -->
   <div *ngIf="dms.auditTab() === 'graph'" class="integrity-view animate-fade-in">
-
     <!-- Non-admin: explain why controls are hidden, not a blank/broken screen -->
     <div *ngIf="!isAdmin()" class="audit-card integrity-restricted">
       <p>Audit-chain verification and the integrity dashboard require ADMIN access.</p>
-      <p class="integrity-restricted-sub">Contact an administrator if you believe the audit chain needs to be verified.</p>
+      <p class="integrity-restricted-sub">
+        Contact an administrator if you believe the audit chain needs to be verified.
+      </p>
     </div>
 
     <ng-container *ngIf="isAdmin()">
@@ -139,7 +193,7 @@
             <span class="chain-spinner"></span>
             <span class="progress-text font-mono">{{ progressLabel(running) }}</span>
             <span *ngIf="running.progress_percent !== undefined" class="progress-pct font-mono">
-              {{ running.progress_percent | number:'1.0-0' }}%
+              {{ running.progress_percent | number: '1.0-0' }}%
             </span>
           </div>
           <div class="chain-track">
@@ -154,14 +208,36 @@
           </div>
 
           <div *ngIf="done.status === 'INTEGRITY_FAILURE'" class="failure-detail">
-            <div class="failure-row"><span class="failure-label">Verification stopped at entry</span><span class="failure-value font-mono">{{ done.failed_entry_id || '—' }}</span></div>
-            <div class="failure-row"><span class="failure-label">Failure</span><span class="failure-value font-mono">{{ done.failure_type || 'UNKNOWN' }}</span></div>
-            <div class="failure-row"><span class="failure-label">Entries checked</span><span class="failure-value font-mono">{{ done.entries_checked.toLocaleString() }}</span></div>
+            <div class="failure-row">
+              <span class="failure-label">Verification stopped at entry</span
+              ><span class="failure-value font-mono">{{ done.failed_entry_id || '—' }}</span>
+            </div>
+            <div class="failure-row">
+              <span class="failure-label">Failure</span
+              ><span class="failure-value font-mono">{{ done.failure_type || 'UNKNOWN' }}</span>
+            </div>
+            <div class="failure-row">
+              <span class="failure-label">Entries checked</span
+              ><span class="failure-value font-mono">{{
+                done.entries_checked.toLocaleString()
+              }}</span>
+            </div>
           </div>
 
           <div *ngIf="done.status === 'FAILED'" class="failure-detail">
-            <div class="failure-row"><span class="failure-label">Reason</span><span class="failure-value">{{ done.failure_reason || 'An operational error prevented verification from completing.' }}</span></div>
-            <div class="failure-row"><span class="failure-label">Entries checked before failure</span><span class="failure-value font-mono">{{ done.entries_checked.toLocaleString() }}</span></div>
+            <div class="failure-row">
+              <span class="failure-label">Reason</span
+              ><span class="failure-value">{{
+                done.failure_reason ||
+                  'An operational error prevented verification from completing.'
+              }}</span>
+            </div>
+            <div class="failure-row">
+              <span class="failure-label">Entries checked before failure</span
+              ><span class="failure-value font-mono">{{
+                done.entries_checked.toLocaleString()
+              }}</span>
+            </div>
           </div>
         </ng-container>
       </div>
@@ -184,7 +260,7 @@
         </div>
         <div class="integrity-stat" *ngIf="s.last_verification?.completed_at as completedAt">
           <div class="integrity-stat-label">Completed</div>
-          <div class="integrity-stat-value font-mono">{{ completedAt | date:'medium' }}</div>
+          <div class="integrity-stat-value font-mono">{{ completedAt | date: 'medium' }}</div>
         </div>
       </div>
 
@@ -217,9 +293,15 @@
               <span>ENTRIES CHECKED</span>
             </div>
             <div class="integrity-history-row" *ngFor="let v of h.verifications">
-              <span class="integrity-history-status" [ngClass]="statusClass(v.status)">{{ statusLabel(v.status) }}</span>
-              <span class="font-mono">{{ v.started_at ? (v.started_at | date:'short') : '—' }}</span>
-              <span class="font-mono">{{ v.completed_at ? (v.completed_at | date:'short') : '—' }}</span>
+              <span class="integrity-history-status" [ngClass]="statusClass(v.status)">{{
+                statusLabel(v.status)
+              }}</span>
+              <span class="font-mono">{{
+                v.started_at ? (v.started_at | date: 'short') : '—'
+              }}</span>
+              <span class="font-mono">{{
+                v.completed_at ? (v.completed_at | date: 'short') : '—'
+              }}</span>
               <span class="font-mono">{{ v.entries_checked.toLocaleString() }}</span>
             </div>
           </div>

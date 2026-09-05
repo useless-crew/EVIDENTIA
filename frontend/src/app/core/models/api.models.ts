@@ -454,6 +454,50 @@ export interface IntegritySummary {
   last_verification?: VerificationDetail;
 }
 
+/** GET /audit's filter/query params (internal/handlers/audit/list.go's
+ * parseAuditListFilter). Every field only NARROWS what the caller's own
+ * RLS-visible rows already are (audit_log_select) — it can never widen
+ * them, so an unprivileged value here simply yields zero rows, never
+ * another user's entries. */
+export interface AuditListFilter {
+  user_id?: string;
+  role?: string;
+  action?: string;
+  resource_type?: string;
+  resource_id?: string;
+  case_id?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+  page_size?: number;
+}
+
+/** One row of GET /audit (internal/service.AuditEntrySummary) — a single
+ * hash-chained ledger entry, distinct from a chain-VERIFICATION run
+ * (VerificationDetail above). `metadata` is a free-form, action-specific
+ * JSON object (e.g. a login failure's `reason`) — never rendered as HTML,
+ * only as inert text. */
+export interface AuditEntry {
+  id: string;
+  seq: number;
+  timestamp: string;
+  user_id?: string;
+  role?: string;
+  action: string;
+  resource_type: string;
+  resource_id?: string;
+  case_id?: string;
+  metadata: Record<string, unknown>;
+  prev_hash?: string;
+  hash: string;
+}
+
+/** GET /audit's response data (internal/service.AuditListResult). */
+export interface AuditListResult {
+  entries: AuditEntry[];
+  meta: PageMeta;
+}
+
 // ---- System 13: Real-Time Events & Server-Sent Events ----
 // See docs/REALTIME_EVENTS.md for the full architecture these types
 // mirror. internal/events.Event is the ONE envelope every SSE event this

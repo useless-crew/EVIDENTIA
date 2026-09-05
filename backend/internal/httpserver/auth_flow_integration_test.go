@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
@@ -96,7 +97,14 @@ func TestAuthFlow_EndToEnd(t *testing.T) {
 	require.NoError(t, err)
 	defer migrator.Close()
 
-	const email = "e2e-flow@example.com"
+	// A unique email per run, not a fixed literal: audit_log.user_id is
+	// ON DELETE RESTRICT (by design — a user's audit trail must never be
+	// silently erasable, see docs/AUDIT_CHAIN.md), so the very first
+	// successful run of this test against a given database durably
+	// blocks the best-effort DELETE below on every later run, which
+	// would otherwise fail this test forever after with a duplicate-key
+	// error on INSERT rather than a login/auth assertion.
+	email := "e2e-flow-" + uuid.New().String()[:8] + "@example.com"
 	const password = "correct horse battery staple"
 	hash, err := auth.HashPassword(password, 4)
 	require.NoError(t, err)
