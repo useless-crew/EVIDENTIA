@@ -9,8 +9,11 @@ System 7's verification/tamper-detection pipeline built on top of it
 (compliance certificates reuse the same recompute-and-compare read path —
 see [SECURITY.md](./SECURITY.md)'s "Document Verification & Compliance
 Certificates" for the certificate-specific design). Redaction/derivative
-generation (a future redaction system) is explicitly NOT covered here —
-it builds on what this document describes, but is not implemented yet.
+generation is now implemented on top of exactly this storage layout (a
+new document row + a new object, original never overwritten) — see
+[SECURITY.md](./SECURITY.md)'s "Document Redaction" for that system's own
+design; this document's storage-mechanics description below still
+applies unchanged to a redacted derivative's object.
 
 ## Storage Interface (Implemented)
 
@@ -112,10 +115,10 @@ implementation of this pipeline. Key properties:
   ID and object key for manual reconciliation — the upload is still
   reported as failed to the client either way, never a false "success".
 - **Original bytes are immutable**: there is no `PUT /documents/:id/file`
-  and no code path that overwrites an existing object. A future redaction
-  system producing a derivative must create a new document row and a new
-  object — this system's storage layout does not require, and must never
-  be made to require, modifying the original.
+  and no code path that overwrites an existing object. Redaction (now
+  implemented — see [SECURITY.md](./SECURITY.md)'s "Document Redaction")
+  produces a derivative by creating a new document row and a new object;
+  it never modifies the original, and could not have been made to.
 
 ## Document Download Pipeline (Implemented — System 6)
 
@@ -194,9 +197,8 @@ the resulting hash, already computed by this pipeline, is persisted.
 
 ## Future Systems (Not Implemented Here)
 
-- A future **redaction system** — a new document row + new object derived from
-  an original, never modifying the original in place.
-- **System 8** — the audit hash chain itself (`audit_log.hash`/
-  `prev_hash`); System 6/7's `DOCUMENT_*`/`CERTIFICATE_*` events go
-  through the same `audit.Recorder` interface System 3/4/5 already use
-  (today: the operational log only).
+- The audit hash chain itself (`audit_log.hash`/`prev_hash`); System 6/7's
+  `DOCUMENT_*`/`CERTIFICATE_*` events, and redaction's own
+  `DOCUMENT_REDACTED`/`DOCUMENT_INTEGRITY_FAILURE` events, go through the
+  same `audit.Recorder` interface System 3/4/5 already use (today: the
+  operational log only).

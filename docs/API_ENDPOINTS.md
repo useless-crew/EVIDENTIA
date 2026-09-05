@@ -3,9 +3,9 @@
 ## Purpose
 
 TODO: Document the full REST API surface for Evidentia. Cases, Case
-Documents (upload/download/verify/certificate), Authentication, Admin
-(user management), and Health/Readiness are implemented today. Document
-redaction/share and Audit are not implemented yet — that section documents
+Documents (upload/download/verify/certificate/redact), Authentication,
+Admin (user management), and Health/Readiness are implemented today.
+Document share and Audit are not implemented yet — that section documents
 the intended surface only.
 
 ## Authentication (implemented)
@@ -278,7 +278,7 @@ section above):
 GET  /api/v1/documents/:id/download
 GET  /documents/:id                    (not implemented — see below)
 POST /api/v1/documents/:id/verify      (implemented — System 7)
-POST /documents/:id/redact             (not implemented — a future redaction system)
+POST /api/v1/documents/:id/redact      (implemented)
 POST /documents/:id/share              (not implemented)
 GET  /api/v1/documents/:id/certificate (implemented — System 7)
 ```
@@ -441,20 +441,112 @@ Every certificate generation records a `CERTIFICATE_CREATED` audit event;
 a discovered mismatch during generation records `DOCUMENT_INTEGRITY_FAILURE`
 (same as verification) instead — see "Audit" in `docs/SECURITY.md`.
 
+### `POST /api/v1/documents/:id/redact` (implemented)
+
+Requires `Authorization: Bearer <access_token>` plus `document:redact`
+(RBAC) and `CanAccessDocument` (ABAC) — the same document-scoped
+authorization pattern as verify/download, re-checked independently at the
+service layer (`DocumentService.RedactDocument`). Per the seed data,
+**only ADMIN** holds `document:redact` today — a deliberate, existing
+System 4 policy decision (see `backend/tests/rbac_test.go`'s
+`TestRBAC_PolicePermissions`), not something this endpoint expands.
+
+```json
+{
+  "reason": "Protect witness identity",
+  "regions": [
+    { "page": 1, "x": 100, "y": 200, "width": 150, "height": 40 }
+  ]
+}
+```
+
+`:id` is the **source** document. `reason` is required (3-2000 UTF-8
+characters). `regions` is required (1-50 entries); each region's
+coordinates are in the source image's own pixel space and are validated
+both structurally (non-negative, finite, positive area, `page == 1`) and,
+once the source is decoded, against its **actual** pixel dimensions.
+
+Produces a brand-new, independent `documents` row (`parent_document_id`
+pointing at the source) plus a linked `redactions` row — **never**
+modifies the source document's row, object, `sha256_hash`, or any existing
+certificate. Supported formats: `image/png` and `image/jpeg` only — every
+region is destructively overwritten (opaque black, a straight pixel
+replace, never an alpha-blended overlay) in the derivative's re-encoded
+bytes before it is hashed and stored, so the "redacted" content is not
+recoverable through normal viewing/extraction of the derivative. Any other
+stored `mime_type` (including `application/pdf`) is refused with `422` —
+this project has no verified, safe way to strip underlying content from
+those formats yet, and a fake redaction (a box drawn merely on top of
+unmodified content) would be strictly worse than refusing outright.
+
+Before processing, the source document's *current* bytes are recomputed
+and compared against its canonical hash — the same anti-tamper check
+`GET /documents/:id/certificate`'s generation path performs — refusing
+with `409` on a mismatch rather than deriving a "redacted" copy from
+unknown/corrupted bytes.
+
+```json
+{
+  "success": true,
+  "data": {
+    "redaction_id": "...",
+    "source_document_id": "...",
+    "reason": "Protect witness identity",
+    "created_at": "2026-01-01T00:00:00Z",
+    "document": {
+      "id": "...",
+      "case_id": "...",
+      "document_type": "WITNESS_STATEMENT",
+      "filename": "redacted_witness.png",
+      "mime_type": "image/png",
+      "file_size": 4096,
+      "sha256_hash": "64-hex-chars... (H2 — always different from the source's H1)",
+      "status": "ACTIVE",
+      "parent_document_id": "...(the source document's ID)",
+      "uploaded_by": "...",
+      "uploaded_at": "2026-01-01T00:00:00Z"
+    }
+  }
+}
+```
+
+The derivative is a completely ordinary document from every other route's
+perspective: `POST /documents/{derivative_id}/verify` and
+`GET /documents/{derivative_id}/certificate` work unmodified, bound to the
+derivative's own hash, independent of the source's. Access to the
+derivative is controlled by the **same** case-relationship rule as any
+document — it never becomes more broadly accessible merely because it was
+produced by a redaction.
+
+- `400` — missing/too-short/too-long `reason`, no regions, too many
+  regions, or a region with negative/non-finite/non-positive/
+  out-of-bounds coordinates.
+- `403` — no relationship to the document's case, OR the document doesn't
+  exist, OR the `:id` isn't a valid UUID, OR the caller lacks
+  `document:redact` — identical response in every case.
+- `409` — the source document failed integrity verification.
+- `422` — the source document's `mime_type` has no supported redaction
+  implementation.
+- `503` — the source object could not be retrieved from storage.
+
+Every successful redaction records a `DOCUMENT_REDACTED` audit event
+(source/result document IDs, reason, region count, both hashes — never
+raw file bytes); a discovered mismatch during the pre-processing integrity
+check records `DOCUMENT_INTEGRITY_FAILURE` instead — see "Audit" in
+`docs/SECURITY.md`.
+
 ### Not yet implemented
 
 `GET /documents/:id` (standalone metadata — today's only exposure of
 document metadata is via `GET /cases/:id`'s `documents` array, per master
 prompt §27's fallback: "otherwise expose document metadata through the
-existing case detail flow"), `POST /documents/:id/redact` (a future
-redaction system), and `POST /documents/:id/share` remain TODO stubs
-(`internal/handlers/document/{redact,share}.go`). Required authorization
-for each, once implemented:
+existing case detail flow") and `POST /documents/:id/share` remain TODO
+stubs (`internal/handlers/document/share.go`). Required authorization for
+each, once implemented:
 
 | Route | Permission (RBAC) | Resource check (ABAC) |
 |---|---|---|
 | `GET /documents/:id` | `document:read` | `CanAccessDocument` |
-| `POST /documents/:id/redact` | `document:redact` | `CanAccessDocument` |
 | `POST /documents/:id/share` | `document:share` | `CanAccessDocument` |
 
 `CanAccessDocument` resolves the document's case and applies the same

@@ -469,6 +469,89 @@ Compliance Certificates" section and [docs/STORAGE.md](./docs/STORAGE.md)'s
 `backend/internal/service/certificate_service_integration_test.go`,
 `backend/internal/httpserver/document_verify_certificate_flow_integration_test.go`.
 
+## Document Redaction (Implemented)
+
+```text
+internal/handlers/document.Redact (POST, JSON body: reason + regions)
+    |
+    v
+internal/service.DocumentService.RedactDocument
+    |
+    +--> authz.Service.CanAccessDocument(ctx, user, sourceID, ActionDocumentRedact)
+    |      (document:redact — ADMIN-only per seed data; no new grant added)
+    +--> validateRedactionReason / validateRedactionRegions — request shape only
+    +--> repository.WithTx: GetDocumentByID (under RLS) — the SOURCE row, read-only
+    +--> supportedRedactionFormats[doc.MimeType] — else 422 (image/png, image/jpeg ONLY)
+    +--> readAllLimited(storage, doc.StorageObjectKey, maxUploadSize)
+    +--> recomputeDocumentHash-equivalent (sha256Sum) + reconcileTamperStatus
+    |      mismatch -> audit DOCUMENT_INTEGRITY_FAILURE, 409, no derivative created
+    +--> image.Decode -> validate regions against REAL bounds -> 400 if out of bounds
+    +--> applyRedactions — draw.Draw(..., draw.Src) destructive pixel replace, in memory
+    +--> re-encode (png.Encode / jpeg.Encode) -> sha256Sum -> H2 (server-computed only)
+    +--> documentObjectKey(caseID, NEW derivativeID) -> storage.Put (new object, new key)
+    +--> repository.WithTx:
+    |      CreateDocument (parent_document_id = source.ID, Sha256Hash = H2)
+    |      CreateRedaction (source_document_id, result_document_id, region_data, reason)
+    |      (transaction failure -> cleanupOrphan, same pattern UploadDocument uses)
+    +--> audit.Recorder — DOCUMENT_REDACTED (both hashes, region count, reason)
+```
+
+The source document (`A`) is only ever read in this flow — never
+UPDATEd, never re-hashed-and-written, never deleted. The derivative (`B`)
+is a completely ordinary `documents` row from the perspective of every
+other System 7 route: `POST /documents/{B}/verify` and
+`GET /documents/{B}/certificate` work unmodified, with zero code changes
+to either `DocumentService.VerifyDocument` or `CertificateService` — the
+independence those two already guaranteed between any two documents'
+hashes/certificates is exactly what makes a redacted derivative safe to
+introduce without touching them.
+
+Routes registered in `internal/httpserver/router.go`:
+
+```text
+POST /api/v1/documents/:id/redact  Auth + RequireDocumentAccess(document:redact, "id") + jsonBodyLimit
+```
+
+**No new authorization primitive was needed**: `CanAccessDocument`
+(System 4) already expressed exactly "RBAC permission AND resource
+relationship"; this system reuses the existing `ActionDocumentRedact`
+constant and `document:redact` seed row (both already present since
+System 2/4, unused by any route until now) rather than adding either.
+`document:redact` remains ADMIN-only — `backend/tests/rbac_test.go`'s
+`TestRBAC_PolicePermissions` already asserted this, and this system does
+not touch `role_permissions`.
+
+**sqlc/migration**: none. `redactions` (table, RLS policies, sqlc
+queries `CreateRedaction`/`GetRedactionByResultDocument`/
+`ListRedactionsBySourceDocument`) and `documents.parent_document_id`
+were already fully in place since System 2 — this system is the first to
+actually call them. The only schema-adjacent change is a new
+`DocumentSummary.parent_document_id` field (Go/JSON only, no migration)
+so API responses that already return document metadata now also surface
+lineage.
+
+**What's genuinely new here**: `internal/service/document_redact.go`
+(image decode/mask/re-encode pipeline, using only Go's standard library
+`image`/`image/draw`/`image/png`/`image/jpeg` — no new dependency beyond
+`TECH_STACK.md`'s existing stack) and
+`internal/handlers/document/redact.go` (previously a TODO stub) are the
+first live redaction business logic; `utils.ErrUnprocessableEntity`
+(422) is a new, small addition to the shared `AppError` helpers for
+"well-formed and authorized, but no safe implementation exists for this
+resource" — distinct from both 400 (malformed request) and 409 (state
+conflict).
+
+**What's deliberately not here**: redaction of any non-raster-image
+format (PDF included) — refused with 422 rather than faked, since no
+approved library in this project's stack can safely strip underlying
+content from those formats yet; the audit hash chain (unchanged); document
+share; expanding `document:redact` beyond ADMIN. Full design:
+[docs/SECURITY.md](./docs/SECURITY.md)'s "Document Redaction" section and
+[docs/STORAGE.md](./docs/STORAGE.md); tests:
+`backend/internal/service/document_redact_test.go`,
+`backend/internal/service/document_redact_integration_test.go`,
+`backend/internal/httpserver/document_redact_flow_integration_test.go`.
+
 ## Request Flow (Intended, Later Systems)
 
 ```text

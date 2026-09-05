@@ -48,23 +48,13 @@ export interface ChainNode {
   flex: string;
 }
 
-export interface RedactionRegion {
-  id: number;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  dims: string;
-  reason: string;
-}
-
-// Fixed demo hash used ONLY by the redact-studio mock (no redaction
-// backend exists yet — a future system's scope, see docs/SECURITY.md's
-// "What System 7 does not do"). Document verification/certificates no
-// longer use a hardcoded hash anywhere — see document-viewer.component.ts,
-// which now displays the real sha256_hash/stored_hash/computed_hash
-// values POST /documents/:id/verify and GET /documents/:id/certificate
-// actually return.
+// Fixed demo hash used ONLY by the still-mock chain-verify sweep
+// visualization below (chainRows) — the audit hash-chain itself remains
+// unimplemented (see docs/AUDIT_CHAIN.md), so there is no real chain to
+// display. Redaction is REAL — see document.service.ts's redact() and
+// RedactStudioComponent, which display only server-returned hashes, never
+// this constant. Document verification/certificates also use only real
+// values — see document-viewer.component.ts.
 export const H_RED = 'a09c73e51bd82f460a7e3c19d54b06f2837ea1c9b0d64f5382e17ca09bd435f6';
 
 const BACKEND_TO_UI_ROLE: Record<BackendRole, Role> = {
@@ -475,57 +465,5 @@ export class DmsStateService {
   private clearTimers() {
     this.activeTimers.forEach(t => clearInterval(t));
     this.activeTimers = [];
-  }
-
-  // ---- Redaction Canvas State (mock — redaction has no backend yet) ----
-  readonly redactions = signal<RedactionRegion[]>([]);
-  readonly draft = signal<{ x: number; y: number; w: number; h: number } | null>(null);
-  readonly redactSaved = signal<boolean>(false);
-
-  startDraft(x: number, y: number) {
-    this.draft.set({ x, y, w: 0, h: 0 });
-  }
-
-  updateDraft(currentX: number, currentY: number) {
-    const d = this.draft();
-    if (!d) return;
-    const originX = d.x;
-    const originY = d.y;
-    const x = Math.min(currentX, originX);
-    const y = Math.min(currentY, originY);
-    const w = Math.abs(currentX - originX);
-    const h = Math.abs(currentY - originY);
-    this.draft.set({ x, y, w, h });
-  }
-
-  endDraft() {
-    const d = this.draft();
-    if (d && d.w > 12 && d.h > 10) {
-      const currentList = this.redactions();
-      const id = currentList.length + 1;
-      const dims = `${Math.round(d.w)}×${Math.round(d.h)} px @ ${Math.round(d.x)},${Math.round(d.y)}`;
-      this.redactions.set([
-        ...currentList,
-        {
-          id,
-          x: d.x,
-          y: d.y,
-          w: d.w,
-          h: d.h,
-          dims,
-          reason: 'Witness identity — §228A IPC / §72 BNS'
-        }
-      ]);
-      this.redactSaved.set(false);
-    }
-    this.draft.set(null);
-  }
-
-  removeRedaction(id: number) {
-    this.redactions.set(this.redactions().filter(r => r.id !== id));
-  }
-
-  saveRedactedCopy() {
-    this.redactSaved.set(true);
   }
 }

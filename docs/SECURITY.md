@@ -742,16 +742,18 @@ with no change required here.
 
 ### What System 4 does *not* do
 
-- **Business logic for audit/admin, and most of documents** —
-  `internal/handlers/{audit,user}` and `internal/service/{audit,
-  user}_service.go` remain TODO stubs for later systems, as do
-  `internal/handlers/document/{verify,redact,share,certificate}.go`.
-  Cases (System 5) and document upload/download (System 6) are
-  implemented — see "Implemented in System 5"/"Implemented in System 6"
-  above and "Case Management"/"Document Management" below; both systems
-  used exactly the primitives (`app.App.AuthzService`,
+- **Business logic for audit/admin, and document sharing** —
+  `internal/handlers/audit` and `internal/service/audit_service.go` remain
+  TODO stubs for a later system, as does
+  `internal/handlers/document/share.go`. Cases (System 5), document
+  upload/download (System 6), verify/certificate (System 7), and redact
+  are all implemented today — see "Implemented in System 5"/"Implemented
+  in System 6" above and "Case Management"/"Document Management"/
+  "Document Verification & Compliance Certificates"/"Document Redaction"
+  below; every one of these used exactly the primitives
+  (`app.App.AuthzService`,
   `RequirePermission`/`RequireCaseAccess`/`RequireDocumentAccess`) this
-  one built, with no changes to `internal/authz` itself.
+  system built, with no changes to `internal/authz` itself.
 - **Membership-type-specific action gating** — see "Case-based ABAC"
   above.
 - **Finer-grained protected-information classification** beyond
@@ -965,12 +967,13 @@ and deliberately never document contents or storage credentials.
   object's current hash against `documents.sha256_hash` to detect
   tampering is System 7's job (`POST /documents/:id/verify` — see
   "Document Verification & Compliance Certificates" below).
-- **Redaction/derivative documents** — a future redaction system. This
-  system's storage layout (original object never overwritten,
-  `documents.parent_document_id` already present in the schema but
-  unused by any query System 6 added) is deliberately compatible with a
-  future redaction system creating a new document row + new object,
-  never modifying the original.
+- **Redaction/derivative documents** — this system's storage layout
+  (original object never overwritten, `documents.parent_document_id`
+  already present in the schema but unused by any query System 6 added)
+  was deliberately left compatible with a later redaction system creating
+  a new document row + new object without modifying the original — see
+  "Document Redaction" below for that system, now implemented on exactly
+  this foundation.
 - **The audit hash chain** — unchanged, still System 8's job (matching
   the numbering already established throughout Systems 2-5's code and
   the applied migration itself); `DOCUMENT_*` events go through the same
@@ -1164,9 +1167,13 @@ logic was introduced (still System 8's job).
 - **The audit hash chain** — `DOCUMENT_*`/`CERTIFICATE_*` events go
   through the existing interface-based `Recorder`; computing or verifying
   a hash chain over `audit_log` remains System 8's job.
-- **Redaction, document sharing** — a future redaction system and
-  `POST /documents/:id/share` remain out of scope; System 7 preserves the
-  original object/hash exactly as System 6 left them.
+- **Redaction, document sharing** — `POST /documents/:id/share` remains
+  out of scope; redaction is now implemented (see "Document Redaction"
+  below), built on top of exactly the verify/certificate independence
+  this system established — a redacted derivative gets its own
+  certificate, bound to its own hash, with no change to this system's
+  code. System 7 itself preserves the original object/hash exactly as
+  System 6 left them.
 - **A public certificate-verification HTTP endpoint** —
   `CertificateService.VerifyCertificateIntegrity` provides the capability
   (used directly by this system's own tests), but no route exposes it
@@ -1176,6 +1183,167 @@ logic was introduced (still System 8's job).
 - **AES-256 encryption at rest, PDF/legal-format certificate rendering,
   a blockchain, or any output format beyond the JSON API response** — all
   explicitly out of this system's scope.
+
+## Document Redaction
+
+`internal/service.DocumentService.RedactDocument`,
+`internal/handlers/document/redact.go` implement
+`POST /documents/:id/redact` — see [API_ENDPOINTS.md](./API_ENDPOINTS.md)'s
+Documents section for the request/response contract. This section covers
+the security-relevant design decisions. The core guarantee this system
+provides:
+
+> A redaction is never an edit to the original evidence. It is a new,
+> cryptographically independent derivative — the original's row, object,
+> hash, and any existing certificate are never modified.
+
+```text
+source document (documents row A, hash H1, object at cases/.../A/original)
+        |
+        | 1. authz.CanAccessDocument(user, A, document:redact)
+        | 2. recompute A's hash from its CURRENT stored object,
+        |    compare to H1 — refuse (409) on mismatch, exactly the
+        |    same anti-tamper check certificate generation performs
+        | 3. decode A's bytes as an image (refuse, 422, if the
+        |    mime_type has no supported redaction implementation)
+        | 4. destructively overwrite each requested region's pixels
+        |    (opaque black, draw.Src — a straight replace, never an
+        |    alpha-blended overlay) on an IN-MEMORY COPY
+        | 5. re-encode, compute H2 (server-side only — never
+        |    client-supplied), upload as a NEW object
+        v
+derivative document (documents row B, hash H2, parent_document_id = A,
+                      object at cases/.../B/original)
+        |
+        +── redactions row: source_document_id=A, result_document_id=B,
+             region_data, reason, created_by
+```
+
+`A` is never touched by any step above — not read-modify-written, not
+even its `status`/`metadata`. `POST /documents/{A}/verify` and
+`GET /documents/{A}/certificate` behave identically before and after the
+redaction; so do the equivalent calls against `B`, which is a completely
+ordinary `documents` row from every other route's perspective.
+
+### Authorization: no new permission granted
+
+`document:redact` was already seeded (System 2/4) but held by **no
+role except ADMIN** until this system existed to exercise it — this
+system reuses that existing grant rather than expanding it.
+`backend/tests/rbac_test.go`'s `TestRBAC_PolicePermissions` explicitly
+asserts POLICE does **not** hold `document:redact`, matching master
+prompt guidance for this system: "do not grant new permissions merely
+because redaction requires it." `RedactDocument` calls
+`authz.Service.CanAccessDocument(user, sourceID, authz.ActionDocumentRedact)`
+— the identical RBAC-permission-AND-case-relationship pattern
+verify/download/certificate already use, independently re-checked at the
+service layer regardless of what HTTP middleware already decided.
+
+### Only two formats get REAL redaction — everything else is refused
+
+The single most important constraint on this system: a "redacted"
+document must not merely *look* redacted. `RedactDocument` supports
+**exactly** `image/png` and `image/jpeg` (the document's server-detected
+`mime_type` from upload — System 6 never trusts a client-declared
+Content-Type). For these, `image/draw`'s `draw.Src` compositing operator
+performs a genuine pixel REPLACE (not an alpha blend) on a decoded,
+in-memory copy before re-encoding — the original pixel values are
+provably gone from the derivative's bytes, verified directly by
+`TestRedactDocument_ContentActuallyRemoved` (decodes the derivative's
+actual re-encoded bytes and asserts the redacted region reads back as
+pure black, never the original color).
+
+Every other `mime_type` — including `application/pdf`, the format most
+real-world "redaction" tooling actually targets — is refused with `422`.
+This project has no library in its approved stack (see
+`TECH_STACK.md`) capable of safely stripping underlying text/vector
+content from a PDF; drawing a black box merely on top of an
+otherwise-unmodified PDF would still leak the "redacted" content to
+anyone who extracts its underlying text, which is **worse** than
+refusing the request outright — master prompt guidance is explicit that
+a fake/incomplete redaction must never be presented as a real one.
+Extending this list to another format requires actually implementing
+(and testing, the same way) genuine content removal for it, never adding
+a permissive map entry.
+
+### Integrity is re-verified before every redaction
+
+Before processing, `RedactDocument` retrieves the source's *current*
+stored object and recomputes its SHA-256, comparing it against the
+canonical `documents.sha256_hash` — the identical check
+`CertificateService.generateCertificate` performs before issuing a
+certificate, shared via the same `reconcileTamperStatus`/
+`recomputeDocumentHash` helpers. A mismatch refuses with `409` rather
+than silently deriving a "redacted" copy from bytes that no longer match
+what was actually ingested — laundering an undetected tampering event
+into a seemingly-clean new document would be far worse than simply
+verifying the document first, which System 7 already made cheap to do.
+
+### The derivative's hash is always server-computed, always different
+
+`H2` (the derivative's `sha256_hash`) is computed by this system, in
+memory, from the actual re-encoded bytes it is about to upload — there is
+no request field for a client-supplied hash anywhere in
+`POST /documents/:id/redact`'s contract. As a final defense-in-depth
+check, `RedactDocument` explicitly refuses (rather than silently
+persisting) the pathological case where `H2` would equal `H1` — not
+reachable given regions are validated as non-empty with positive area,
+but never assumed safe by omission.
+
+### Storage: a new object, never an overwrite
+
+The derivative is written to a brand-new object key
+(`documentObjectKey(caseID, derivativeID)` — the exact same
+System-6 helper/convention every original upload already uses, just with
+a fresh, server-generated document ID) — never the source's key. A
+storage write that succeeds followed by a failed PostgreSQL transaction
+triggers the same best-effort orphan-object cleanup `UploadDocument`
+already established (`DocumentService.cleanupOrphan`); a transaction that
+never runs because storage failed leaves no document/redaction row
+pointing at a nonexistent object.
+
+### Derivative access control and lineage
+
+The derivative inherits the **same** case as its source (`case_id` is
+copied, never re-derived from anything client-supplied), so
+`CanAccessDocument` applies the identical case-relationship rule to it as
+to any other document in that case — "the derivative exists" never
+implies "everyone can now read it"
+(`TestRedactDocument_DerivativeAccessIndependentlyControlled`). Lineage is
+explicit and queryable both directions: `documents.parent_document_id`
+(now also surfaced as `DocumentSummary.parent_document_id` in every API
+response that returns document metadata) points from derivative to
+source; `redactions.source_document_id`/`result_document_id` (with a
+database-level `UNIQUE` constraint on `result_document_id` — a document
+row is the output of at most one redaction) link them the other way,
+alongside `reason`, `created_by`, and `region_data`.
+
+### Audit
+
+Every successful redaction records a `DOCUMENT_REDACTED` event (source/
+result document IDs, reason, region count, both hashes hex-encoded —
+never raw file bytes) through the same `internal/audit.Recorder`
+interface every prior system uses; a mismatch discovered during the
+pre-processing integrity check records `DOCUMENT_INTEGRITY_FAILURE`
+instead, identically to a direct verify call. No cryptographic audit-chain
+logic was introduced here — that remains a separate, later system's job,
+exactly as System 6/7 already established for their own `DOCUMENT_*`/
+`CERTIFICATE_*` events.
+
+### What this system does *not* do
+
+- **PDF or any non-raster-image redaction** — see above; refused safely,
+  never faked.
+- **The audit hash chain** — unchanged.
+- **Document sharing, a standalone `GET /documents/:id`** — remain out of
+  scope; see API_ENDPOINTS.md's "Not yet implemented".
+- **Expanding who may redact** — `document:redact` remains ADMIN-only,
+  per existing System 4 policy; this system does not touch
+  `role_permissions`.
+- **Asynchronous/background processing** — redaction here is synchronous,
+  bounded by the same `MAX_UPLOAD_SIZE` originals are (an in-memory
+  decode/re-encode is unavoidable for real pixel-level content removal);
+  Asynq remains unintroduced, per `TECH_STACK.md`.
 
 ## Cryptography
 

@@ -14,6 +14,12 @@
         <p class="doc-subtitle">
           {{ d.mime_type }} · {{ d.file_size | number }} bytes · Uploaded {{ d.uploaded_at | date: 'medium' }}
         </p>
+        <!-- Never let a viewer mistake a redacted derivative for the
+             original — the original itself was never edited. -->
+        <p class="doc-lineage-badge" *ngIf="d.parent_document_id">
+          Redacted derivative · original document ID:
+          <span class="font-mono">{{ d.parent_document_id }}</span>
+        </p>
       </div>
 
       <div class="doc-actions">
@@ -26,12 +32,12 @@
           {{ downloading() ? 'Downloading…' : 'Download' }}
         </button>
 
-        <button type="button" class="btn-secondary" (click)="goToRedact()">
+        <button type="button" class="btn-secondary" (click)="goToRedact()" title="Creates a new, independent redacted copy — never edits this document">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 20h9"></path>
             <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
           </svg>
-          Redact
+          Create Redacted Copy
         </button>
 
         <button type="button" class="btn-primary" disabled title="Document sharing is not available yet">

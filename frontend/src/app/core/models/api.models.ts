@@ -92,6 +92,10 @@ export interface DocumentSummary {
   file_size: number;
   sha256_hash: string;
   status: DocumentStatus;
+  /** Set only for a REDACTED DERIVATIVE — the document it was produced
+   * FROM. Absent for an original upload. Use its presence as
+   * "is_derivative" rather than a separate flag. */
+  parent_document_id?: string;
   uploaded_by: string;
   uploaded_at: string;
 }
@@ -174,6 +178,37 @@ export interface VerificationResult {
   stored_hash: string;
   computed_hash: string;
   verified_at: string;
+}
+
+/** One rectangular region to redact, in the SOURCE image's own pixel
+ * coordinate space (internal/service.RedactRegion) — never a rendered/
+ * zoomed on-screen coordinate; the caller must convert before sending
+ * this (see RedactStudioComponent). page must be 1 — every currently
+ * supported redaction format is single-page raster. */
+export interface RedactRegion {
+  page: 1;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** POST /documents/:id/redact's request body. */
+export interface RedactRequest {
+  reason: string;
+  regions: RedactRegion[];
+}
+
+/** POST /documents/:id/redact's response data (service.RedactionSummary).
+ * `document` is the newly created DERIVATIVE's own summary — never the
+ * source's, and never the raw redacted bytes. The source document's own
+ * row/hash/object/certificate are completely unaffected by this call. */
+export interface RedactionSummary {
+  redaction_id: string;
+  source_document_id: string;
+  reason: string;
+  created_at: string;
+  document: DocumentSummary;
 }
 
 /** GET /documents/:id/certificate's response data (service.CertificateSummary). */

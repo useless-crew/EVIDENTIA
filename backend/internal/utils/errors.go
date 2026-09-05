@@ -22,6 +22,7 @@ const (
 	CodeUnauthorized          = "UNAUTHORIZED"
 	CodeForbidden             = "FORBIDDEN"
 	CodeConflict              = "CONFLICT"
+	CodeUnprocessableEntity   = "UNPROCESSABLE_ENTITY"
 )
 
 // AppError is the application-wide error type. Status and Code/Message are
@@ -95,6 +96,18 @@ func ErrForbidden(message string) *AppError {
 // error text.
 func ErrConflict(message string) *AppError {
 	return NewAppError(http.StatusConflict, CodeConflict, message, nil)
+}
+
+// ErrUnprocessableEntity builds a 422 response: the request is well-formed
+// and authorized, but the operation cannot be safely carried out on THIS
+// resource as it stands (e.g. a document whose file type has no safe
+// content-redaction implementation). Distinct from ErrBadRequest (a
+// malformed request) and ErrConflict (a state collision) — this is neither:
+// the request itself is fine, but honoring it would require an
+// implementation that does not exist. message must be safe to show a
+// client.
+func ErrUnprocessableEntity(message string) *AppError {
+	return NewAppError(http.StatusUnprocessableEntity, CodeUnprocessableEntity, message, nil)
 }
 
 // AsAppError unwraps err looking for an *AppError, so callers that receive a

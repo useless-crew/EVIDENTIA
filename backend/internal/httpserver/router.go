@@ -107,6 +107,14 @@ func NewRouter(a *app.App) *gin.Engine {
 	r.POST("/api/v1/documents/:id/verify", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentVerify, "id"), documenthandlers.Verify(a.DocumentService))
 	r.GET("/api/v1/documents/:id/certificate", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionCertificateRead, "id"), documenthandlers.Certificate(a.CertificateService))
 
+	// Redaction: document-scoped (:id is the SOURCE document ID), same
+	// RequireDocumentAccess pattern as verify/certificate above, with
+	// authz.ActionDocumentRedact. Takes a small JSON body (reason +
+	// regions), so — unlike verify (no body) — it needs jsonBodyLimit, the
+	// same limit auth/case/admin routes already share (a redaction
+	// request's region list is nowhere near upload-sized).
+	r.POST("/api/v1/documents/:id/redact", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentRedact, "id"), jsonBodyLimit, documenthandlers.Redact(a.DocumentService))
+
 	// Admin user management (System 8): every route requires
 	// authentication; POST/GET/GET-by-id/PUT/status/password additionally
 	// require the matching RBAC user:* permission

@@ -56,52 +56,53 @@
 
 .redact-canvas {
   position: relative;
-  height: 600px;
+  display: inline-block;
+  max-height: 600px;
   border: 1px solid var(--color-border);
   border-radius: 4px;
   cursor: crosshair;
   user-select: none;
-  overflow: hidden;
+  overflow: auto;
 }
 
-.canvas-watermark {
-  position: absolute;
-  top: 14px;
-  left: 50%;
-  transform: translateX(-50%);
+.doc-image {
+  display: block;
+  max-width: 100%;
+  user-select: none;
   pointer-events: none;
-  z-index: 5;
 }
 
-.watermark-pill {
-  background: #ffffff;
+.unsupported-notice {
+  padding: 16px 18px;
   border: 1px solid var(--color-border);
-  padding: 6px 12px;
-  border-radius: 4px;
-  font-size: 11px;
+  border-radius: 6px;
+  background: var(--color-section-alt);
+  font-size: 13px;
   color: var(--color-text-secondary);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  line-height: 1.5;
 }
 
-.mock-statement-text {
-  padding: 56px 40px 30px;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  pointer-events: none;
-}
-
-.doc-line {
-  font-size: 13.5px;
-  color: #1e293b;
-  line-height: 1.6;
-}
-
-.doc-line.bold {
-  font-weight: 700;
+.unsupported-notice strong {
   color: var(--color-navy-primary);
-  border-bottom: 1.5px solid var(--color-border);
-  padding-bottom: 6px;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.error-notice {
+  margin-top: 10px;
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.reason-input {
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  box-sizing: border-box;
 }
 
 /* Redaction Mask Overlay */

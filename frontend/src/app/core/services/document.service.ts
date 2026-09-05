@@ -3,6 +3,8 @@ import { Observable, map } from 'rxjs';
 import {
   CertificateSummary,
   DocumentType,
+  RedactRegion,
+  RedactionSummary,
   UploadDocumentResponse,
   VerificationResult,
 } from '../models/api.models';
@@ -76,6 +78,16 @@ export class DocumentService {
    * ApiError if the document fails integrity verification. */
   getCertificate(documentId: string): Observable<CertificateSummary> {
     return this.api.get<CertificateSummary>(`/documents/${documentId}/certificate`);
+  }
+
+  /** POST /documents/:id/redact — produces a brand-new, independent
+   * derivative document with the given regions' pixel content genuinely
+   * removed (opaque black, never an overlay) for supported image formats
+   * only (image/png, image/jpeg — a 422 ApiError otherwise). The backend
+   * computes the derivative's hash; this method never touches hashing.
+   * The original document is never modified by this call. */
+  redact(documentId: string, reason: string, regions: RedactRegion[]): Observable<RedactionSummary> {
+    return this.api.post<RedactionSummary>(`/documents/${documentId}/redact`, { reason, regions });
   }
 
   private filenameFromContentDisposition(header: string | null): string | null {

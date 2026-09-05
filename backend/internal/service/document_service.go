@@ -651,16 +651,17 @@ func (l *limitedReader) Read(p []byte) (int, error) {
 
 func toDocumentSummary(d generated.Document) DocumentSummary {
 	return DocumentSummary{
-		ID:           d.ID,
-		CaseID:       d.CaseID,
-		DocumentType: d.DocumentType,
-		Filename:     d.Filename,
-		Description:  d.Description,
-		MimeType:     d.MimeType,
-		FileSize:     d.FileSize,
-		Sha256Hash:   hex.EncodeToString(d.Sha256Hash),
-		Status:       d.Status,
-		UploadedBy:   d.UploadedBy,
-		UploadedAt:   d.UploadedAt,
+		ID:               d.ID,
+		CaseID:           d.CaseID,
+		DocumentType:     d.DocumentType,
+		Filename:         d.Filename,
+		Description:      d.Description,
+		MimeType:         d.MimeType,
+		FileSize:         d.FileSize,
+		Sha256Hash:       hex.EncodeToString(d.Sha256Hash),
+		Status:           d.Status,
+		ParentDocumentID: d.ParentDocumentID,
+		UploadedBy:       d.UploadedBy,
+		UploadedAt:       d.UploadedAt,
 	}
 }

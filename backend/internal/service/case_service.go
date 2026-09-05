@@ -149,8 +149,15 @@ type DocumentSummary struct {
 	FileSize     int64     `json:"file_size"`
 	Sha256Hash   string    `json:"sha256_hash"`
 	Status       string    `json:"status"`
-	UploadedBy   uuid.UUID `json:"uploaded_by"`
-	UploadedAt   time.Time `json:"uploaded_at"`
+	// ParentDocumentID is set only for a REDACTED DERIVATIVE — the document
+	// it was produced FROM (documents.parent_document_id). nil for an
+	// original upload. A client can use its presence as "is_derivative"
+	// without a separate field — see internal/service/document_redact.go
+	// for how a derivative is created and docs/API_ENDPOINTS.md's Documents
+	// section for the lineage this exposes.
+	ParentDocumentID *uuid.UUID `json:"parent_document_id,omitempty"`
+	UploadedBy       uuid.UUID  `json:"uploaded_by"`
+	UploadedAt       time.Time  `json:"uploaded_at"`
 }
 
 // TimelineEvent is one entry in a case's chronological timeline (master
@@ -660,17 +667,18 @@ func (s *CaseService) loadCaseDetail(ctx context.Context, user auth.Authenticate
 	docSummaries := make([]DocumentSummary, len(documents))
 	for i, d := range documents {
 		docSummaries[i] = DocumentSummary{
-			ID:           d.ID,
-			CaseID:       d.CaseID,
-			DocumentType: d.DocumentType,
-			Filename:     d.Filename,
-			Description:  d.Description,
-			MimeType:     d.MimeType,
-			FileSize:     d.FileSize,
-			Sha256Hash:   hex.EncodeToString(d.Sha256Hash),
-			Status:       d.Status,
-			UploadedBy:   d.UploadedBy,
-			UploadedAt:   d.UploadedAt,
+			ID:               d.ID,
+			CaseID:           d.CaseID,
+			DocumentType:     d.DocumentType,
+			Filename:         d.Filename,
+			Description:      d.Description,
+			MimeType:         d.MimeType,
+			FileSize:         d.FileSize,
+			Sha256Hash:       hex.EncodeToString(d.Sha256Hash),
+			Status:           d.Status,
+			ParentDocumentID: d.ParentDocumentID,
+			UploadedBy:       d.UploadedBy,
+			UploadedAt:       d.UploadedAt,
 		}
 	}
 
