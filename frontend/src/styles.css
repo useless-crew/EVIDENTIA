@@ -67,12 +67,41 @@
   /* Typography */
   --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'IBM Plex Mono', 'JetBrains Mono', 'Consolas', monospace;
+  --font-display: 'Instrument Serif', 'Iowan Old Style', Georgia, 'Times New Roman', serif;
+
+  /* Fluid Display Type Scale — editorial headline sizing */
+  --type-display-xl: clamp(3.25rem, 7.4vw, 6.75rem);
+  --type-display-lg: clamp(2.5rem, 5.2vw, 4.5rem);
+  --type-display-md: clamp(2rem, 3.6vw, 3.125rem);
+  --type-display-sm: clamp(1.6rem, 2.6vw, 2.25rem);
+
+  /* Motion — shared easing curves so every transition feels related */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-in-out-soft: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 0.18s;
+  --dur-base: 0.32s;
+  --dur-slow: 0.6s;
 
   /* Shadows */
   --shadow-sm: 0 1px 2px 0 rgba(19, 42, 73, 0.05);
   --shadow-md: 0 4px 6px -1px rgba(19, 42, 73, 0.08), 0 2px 4px -2px rgba(19, 42, 73, 0.05);
   --shadow-lg: 0 10px 15px -3px rgba(19, 42, 73, 0.1), 0 4px 6px -4px rgba(19, 42, 73, 0.05);
   --shadow-modal: 0 20px 25px -5px rgba(14, 32, 56, 0.25), 0 8px 10px -6px rgba(14, 32, 56, 0.15);
+  --shadow-lift: 0 18px 40px -14px rgba(19, 42, 73, 0.22), 0 2px 8px -2px rgba(19, 42, 73, 0.08);
+
+  /* Depth & Atmosphere — used on dark surfaces instead of flat navy fills */
+  --gradient-navy-mesh:
+    radial-gradient(90ch 60ch at 12% -10%, rgba(66, 109, 155, 0.42) 0%, transparent 62%),
+    radial-gradient(70ch 50ch at 88% 6%, rgba(255, 153, 51, 0.14) 0%, transparent 58%),
+    radial-gradient(80ch 60ch at 72% 108%, rgba(19, 136, 8, 0.14) 0%, transparent 60%),
+    linear-gradient(168deg, #0e2038 0%, #132a49 46%, #0b1a2e 100%);
+  --glow-saffron: 0 0 0 1px rgba(255, 153, 51, 0.32), 0 0 28px -6px rgba(255, 153, 51, 0.4);
+  --glow-accent: 0 0 0 1px rgba(66, 109, 155, 0.35), 0 0 30px -8px rgba(66, 109, 155, 0.45);
+
+  /* Layout */
+  --container-max: 1240px;
+  --gutter: clamp(20px, 4vw, 48px);
 }
 
 *,
@@ -126,18 +155,50 @@ body {
 
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
-  width: 7px;
-  height: 7px;
+  width: 10px;
+  height: 10px;
 }
 ::-webkit-scrollbar-track {
-  background: #e2e8f0;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #94a3b8;
-  border-radius: 4px;
+  background: rgba(19, 42, 73, 0.28);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+  transition: background-color 0.2s ease;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #64748b;
+  background: rgba(19, 42, 73, 0.55);
+  background-clip: content-box;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(19, 42, 73, 0.3) transparent;
+}
+
+/* Custom cursor: hide the native one, but keep the I-beam where text is edited
+   so typing into a field never loses its caret affordance. */
+html.has-custom-cursor,
+html.has-custom-cursor *:not(input):not(textarea):not([contenteditable='true']) {
+  cursor: none;
+}
+
+/* Selection & Focus — deliberate states rather than browser defaults */
+::selection {
+  background: rgba(66, 109, 155, 0.24);
+  color: var(--color-navy-active);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent-blue);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.on-dark :focus-visible,
+.cta-section :focus-visible {
+  outline-color: var(--tricolor-saffron);
 }
 
 /* Base Typography */
@@ -387,4 +448,234 @@ button {
     #0f1722 9px,
     #0f1722 18px
   );
+}
+
+/* ==========================================================================
+   Display Typography — editorial serif reserved for headline moments
+   ========================================================================== */
+.display-xl,
+.display-lg,
+.display-md,
+.display-sm {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: -0.018em;
+  line-height: 1.02;
+  text-wrap: balance;
+}
+
+.display-xl { font-size: var(--type-display-xl); }
+.display-lg { font-size: var(--type-display-lg); line-height: 1.05; }
+.display-md { font-size: var(--type-display-md); line-height: 1.1; }
+.display-sm { font-size: var(--type-display-sm); line-height: 1.15; }
+
+/* Italic serif fragment used to accent one phrase inside a headline */
+.display-accent {
+  font-style: italic;
+  color: var(--color-accent-blue);
+}
+
+.on-dark .display-accent {
+  color: var(--tricolor-saffron);
+}
+
+/* Eyebrow / section label — mono, tracked out, with a rule */
+.label-mono {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-accent-blue);
+}
+
+.label-mono::before {
+  content: '';
+  width: 28px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.6;
+}
+
+.on-dark .label-mono {
+  color: rgba(255, 255, 255, 0.66);
+}
+
+/* Marginalia — oversized section index, like a legal exhibit marker */
+.section-index {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  color: var(--color-text-muted);
+}
+
+/* ==========================================================================
+   Texture & Atmosphere
+   ========================================================================== */
+/* Film grain overlay — softens flat fills, reads as "designed" on dark areas */
+.grain::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.5;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.32'/%3E%3C/svg%3E");
+}
+
+/* Evidence grid — the doc-canvas motif reused as a recurring signature */
+.evidence-grid::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: radial-gradient(120ch 70ch at 50% 0%, #000 0%, transparent 78%);
+  -webkit-mask-image: radial-gradient(120ch 70ch at 50% 0%, #000 0%, transparent 78%);
+}
+
+.evidence-grid-light::before {
+  background-image:
+    linear-gradient(to right, rgba(19, 42, 73, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(19, 42, 73, 0.05) 1px, transparent 1px);
+}
+
+/* Hairline divider that fades at both ends */
+.rule-fade {
+  height: 1px;
+  border: 0;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--color-border) 12%,
+    var(--color-border) 88%,
+    transparent
+  );
+}
+
+.on-dark .rule-fade {
+  background: linear-gradient(
+    to right,
+    transparent,
+    rgba(255, 255, 255, 0.16) 12%,
+    rgba(255, 255, 255, 0.16) 88%,
+    transparent
+  );
+}
+
+/* ==========================================================================
+   Scroll Reveal — paired with the appReveal directive (GSAP ScrollTrigger).
+   The directive sets .is-revealed; these rules define the resting state so
+   content is never invisible if JS fails or motion is reduced.
+   ========================================================================== */
+[data-reveal] {
+  will-change: transform, opacity;
+}
+
+html.no-js [data-reveal],
+[data-reveal].is-revealed {
+  opacity: 1;
+  transform: none;
+}
+
+/* ==========================================================================
+   Interaction — buttons get a wipe fill instead of a flat color swap
+   ========================================================================== */
+.btn-primary,
+.btn-secondary,
+.btn-white,
+.btn-outline-white,
+.btn-outline-navy {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  transition:
+    color var(--dur-base) var(--ease-out-expo),
+    border-color var(--dur-base) var(--ease-out-expo),
+    transform var(--dur-base) var(--ease-out-expo),
+    box-shadow var(--dur-base) var(--ease-out-expo);
+}
+
+.btn-primary::before,
+.btn-secondary::before,
+.btn-white::before,
+.btn-outline-white::before,
+.btn-outline-navy::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  transform: scaleY(0);
+  transform-origin: bottom;
+  transition: transform var(--dur-base) var(--ease-out-expo);
+}
+
+.btn-primary::before { background: var(--color-accent-blue); }
+.btn-secondary::before,
+.btn-outline-navy::before { background: var(--color-accent-blue-light); }
+.btn-white::before { background: var(--tricolor-saffron); }
+.btn-outline-white::before { background: rgba(255, 255, 255, 0.12); }
+
+.btn-primary:hover::before,
+.btn-secondary:hover::before,
+.btn-white:hover::before,
+.btn-outline-white:hover::before,
+.btn-outline-navy:hover::before {
+  transform: scaleY(1);
+}
+
+/* Underline that draws in from the left on hover */
+.link-underline {
+  position: relative;
+  text-decoration: none;
+}
+
+.link-underline::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: -2px;
+  width: 100%;
+  height: 1px;
+  background: currentColor;
+  transform: scaleX(0);
+  transform-origin: right;
+  transition: transform var(--dur-base) var(--ease-out-expo);
+}
+
+.link-underline:hover {
+  text-decoration: none;
+}
+
+.link-underline:hover::after {
+  transform: scaleX(1);
+  transform-origin: left;
+}
+
+/* ==========================================================================
+   Accessibility — honour reduced-motion for every effect above
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  [data-reveal] {
+    opacity: 1 !important;
+    transform: none !important;
+  }
 }
