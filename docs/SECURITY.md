@@ -98,8 +98,8 @@ Full detail in the Authentication section below; summary here:
   only from a validated JWT plus the fresh database lookup. Verified by
   test.
 - **Failed authentication is recorded**: via the `internal/audit.Recorder`
-  interface — see "Audit integration" below for why this logs rather than
-  writes to the hash-chained `audit_log` table (that's System 8's job).
+  interface — see "Audit integration" below; System 8's `ChainWriter` now
+  durably persists this to the hash-chained `audit_log` table.
 
 ## Implemented in System 4 (Authorization — RBAC + ABAC + RLS Integration)
 
@@ -292,22 +292,81 @@ summary here:
   (RBAC) plus `CanAccessDocument` (ABAC), independently re-checked inside
   `DocumentService`/`CertificateService`, not just HTTP middleware.
 - **Audit integration reuses the existing `Recorder`**: `DOCUMENT_VERIFIED`,
-  `DOCUMENT_INTEGRITY_FAILURE`, `CERTIFICATE_CREATED` — no second logging
-  system, no audit hash-chain logic (still System 8's job).
+  `DOCUMENT_INTEGRITY_FAILURE`, `CERTIFICATE_CREATED` — every one of
+  these now durably persist through System 8's hash-chained
+  `audit.ChainWriter` (see below), with no change to this system's code.
+
+## Implemented in System 8 (Audit Trail & Cryptographic Audit Chain)
+
+Full detail in [AUDIT_CHAIN.md](./AUDIT_CHAIN.md); summary here:
+
+- **`audit.ChainWriter` replaces `audit.SlogRecorder`** as the
+  `internal/audit.Recorder` implementation wired into `app.New` — the
+  ENTIRE integration point. Every existing `recorder.Record` call across
+  Systems 3-7 (login/logout/refresh, authorization denials, case
+  create/update, document upload/download/verify/redact/share, admin user
+  management) starts durably, tamper-evidently persisting to `audit_log`
+  with no change to any of those call sites.
+- **One canonical hash function** (`internal/audit.ComputeEntryHash`)
+  computes SHA-256 over a fixed-field-order, labeled canonical string —
+  never Go struct layout, map iteration order, or `json.Marshal`'s
+  ordering on the entry itself — and is the ONLY function in the codebase
+  that computes an audit entry hash; both the writer (on insert) and the
+  verifier (on verification) call it, so the two can never drift apart.
+  JSONB metadata is separately canonicalized (`CanonicalizeMetadata`,
+  sorted keys, recursively) before being hashed or stored, since
+  PostgreSQL's `jsonb` storage does not preserve input byte layout.
+- **Genesis is the row with `prev_hash IS NULL`**, enforced unique by a
+  partial unique index (`idx_audit_log_single_genesis`) established back
+  in System 2's schema; every other entry's `prev_hash` equals its
+  predecessor's own `hash`, and `idx_audit_log_prev_hash_unique` (also
+  System 2) guarantees at most one entry may claim a given predecessor —
+  the database-level fork-prevention invariant, not merely an
+  application-level convention.
+- **Concurrency safety is a PostgreSQL transaction-scoped advisory lock**
+  (`pg_advisory_xact_lock`), acquired before reading the chain head and
+  held for the whole transaction: at most one writer at a time can be
+  "between" reading the current head and inserting the entry that claims
+  it as predecessor. Verified by a concurrent-writers test (40 goroutines,
+  run under `-race`) asserting the result is one unforked chain, not an
+  application-level mutex (which would do nothing across pooled
+  connections/processes anyway).
+- **The chain-head lookup runs under an internal ADMIN-equivalent RLS
+  identity**, not the acting user's own — `audit_log_select`'s RLS policy
+  restricts a non-ADMIN identity to rows it owns (or a shared case), so
+  reading the true chain head (which may belong to a different actor
+  entirely) needs the policy's own already-legitimate unrestricted-
+  visibility branch. This is not an RLS bypass: no other RLS-protected
+  table is touched inside this transaction, and the row's own stored
+  `role`/`user_id` columns still record the real actor, untouched.
+- **Append-only at the database level**: `evidentia_app` holds `SELECT`,
+  `INSERT` only on `audit_log` — no `UPDATE`, no `DELETE`, no
+  `BYPASSRLS`, and does not own the table (verified by
+  `backend/tests/db_audit_privileges_test.go`).
+- **Chain verification streams in bounded-size batches**
+  (`internal/audit.VerifyBatch`, called once per page from
+  `AuditService.VerifyChain`), never loading the whole chain into memory,
+  and is resumable (`next_seq`) across HTTP calls for very large chains.
+- **`GET /audit`/`POST /audit/verify-chain`** are gated by
+  `audit:read`/`audit:verify` RBAC, with row-level visibility beyond that
+  left entirely to `audit_log_select` RLS — a filter can only narrow what
+  RLS already permits, never widen it (verified against IDOR: an
+  arbitrary `user_id`/`case_id` filter never returns another actor's
+  rows). `GET /audit` records its own `AUDIT_ACCESSED` event once the
+  query has already run, which cannot recurse (`Recorder.Record` only
+  ever inserts one row and never calls back into `AuditService`).
 
 ## Principles
 
 The eventual system will enforce all twelve of these. Implemented so far:
-**1** (System 3), **2**/**3** (System 4), **4** (System 2), **11**
-(System 3). Partial: **5** (System 6 computes/persists the initial hash;
-System 7 adds recompute-and-compare verification and tamper detection —
-AES-256 encryption at rest, the other half of principle **6**'s
-neighbor, remains unstarted); **12** (failed/successful auth actions, and
-now authorization denials plus document/certificate events, are recorded
-via `internal/audit.Recorder`, but only to the operational log — see
-"Audit integration" above — not the durable table); **7**/**8**
-(audit_log's storage invariants exist — System 2 — but nothing computes a
-hash chain yet). Not started: 6, 9, 10.
+**1** (System 3), **2**/**3** (System 4), **4** (System 2), **7**/**8**/
+**9** (System 8 — see above), **11** (System 3), **12** (every
+security-sensitive action listed in "Audit integration" throughout this
+document now durably records through System 8's hash chain, not only the
+operational log). Partial: **5** (System 6 computes/persists the initial
+hash; System 7 adds recompute-and-compare verification and tamper
+detection — AES-256 encryption at rest, the other half of principle
+**6**'s neighbor, remains unstarted). Not started: 6, 10.
 
 1. JWT authentication
 2. RBAC (Role-Based Access Control)
@@ -434,15 +493,12 @@ Failed authentication (`AUTH_LOGIN_FAILED`, `AUTH_REFRESH_FAILED`,
 (`AUTH_LOGIN_SUCCESS`, `AUTH_REFRESH_SUCCESS`, `AUTH_LOGOUT`) are recorded
 through `internal/audit.Recorder` — an interface, not System 3's own
 implementation of the durable audit trail. The concrete implementation
-today, `audit.SlogRecorder`, writes to the structured operational log, not
-to the hash-chained `audit_log` table: actually computing `hash`/
-`prev_hash` correctly is System 8's job (see DATABASE_SCHEMA.md's
-"Audit-chain storage invariants"), and writing *unchained* rows into that
-table now would risk breaking System 8's eventual chain verification over
-historical data. `AuthService` depends only on the `Recorder` interface,
-so swapping in System 8's real writer later requires no change to
-authentication code. `Recorder.Record` never returns an error: a login or
-refresh must not fail merely because audit logging had a hiccup (see
+today, `audit.ChainWriter` (System 8), durably persists these to the
+hash-chained `audit_log` table with correctly-computed `hash`/`prev_hash`
+(see [AUDIT_CHAIN.md](./AUDIT_CHAIN.md)) — `AuthService` depended only on
+the `Recorder` interface throughout, so wiring in the real writer required
+no change to authentication code. `Recorder.Record` never returns an
+error: a login or refresh must not fail merely because audit logging had a hiccup (see
 master prompt §49) — this also means audit failures are currently
 invisible to the caller by design, a tradeoff explicitly made here rather
 than silently.
@@ -736,9 +792,9 @@ denial), and an internal reason code (`permission_denied`,
 `self_role_modification_forbidden`). As with System 3, `Recorder.Record`
 never returns an error and a recording failure never blocks or alters the
 authorization decision itself (master prompt: audit failures must never
-become an authorization bypass). `audit.SlogRecorder` remains the only
-implementation today — System 8 provides the durable, hash-chained writer
-with no change required here.
+become an authorization bypass). `audit.ChainWriter` (System 8) is the
+`Recorder` implementation today, durably persisting these denials to the
+hash-chained `audit_log` table with no change required here.
 
 ### What System 4 does *not* do
 
@@ -760,7 +816,8 @@ with no change required here.
   above.
 - **Finer-grained protected-information classification** beyond
   `party_type = 'WITNESS'` — see "Protected information" above.
-- **The audit hash chain** — unchanged, still System 8's job.
+- **The audit hash chain** — now implemented; see "Implemented in
+  System 8" above and [AUDIT_CHAIN.md](./AUDIT_CHAIN.md).
 
 ## Case Management
 
@@ -824,11 +881,13 @@ System 5 section).
 
 `GET /cases/:id`'s `timeline` field is synthesized, at request time, from
 already-loaded `cases.created_at`/`updated_at`, `documents.uploaded_at`,
-and `case_involved_parties.created_at` — never read from `audit_log`,
-which no system populates yet (`audit.SlogRecorder` still writes only to
-the operational log; System 8 owns the durable, hash-chained writer). This
+and `case_involved_parties.created_at` — never read from `audit_log`, even
+though System 8's `ChainWriter` now durably populates that table. This
 avoids exactly the situation master-prompt-driven design explicitly warns
-against: a second, competing "audit-like" table maintained by this system.
+against: a second, competing "audit-like" table maintained by this
+system — the real, authoritative security audit trail for this case is
+`GET /audit?case_id=...` (see [AUDIT_CHAIN.md](./AUDIT_CHAIN.md)), and this
+field never attempts to duplicate or replace it.
 
 ### Case creation transaction
 
@@ -976,11 +1035,11 @@ and deliberately never document contents or storage credentials.
   a new document row + new object without modifying the original — see
   "Document Redaction" below for that system, now implemented on exactly
   this foundation.
-- **The audit hash chain** — unchanged, still System 8's job (matching
-  the numbering already established throughout Systems 2-5's code and
-  the applied migration itself); `DOCUMENT_*` events go through the same
-  interface-based `Recorder` any future hash-chained writer will
-  implement, with no change required to `DocumentService`.
+- **The audit hash chain** — now implemented (System 8, see
+  [AUDIT_CHAIN.md](./AUDIT_CHAIN.md)); `DOCUMENT_*` events went through
+  the same interface-based `Recorder` all along, so no change was
+  required to `DocumentService` when the real hash-chained writer was
+  wired in.
 - **Compliance certificates, document sharing** — certificates are now
   System 7's job (below); document sharing is now also implemented (see
   "Document Sharing" below), built on the storage layout this system
@@ -1163,14 +1222,15 @@ discovered during generation records `DOCUMENT_INTEGRITY_FAILURE`
 instead, identically to a direct verify call) go through the same
 `internal/audit.Recorder` interface every prior system uses — event
 metadata carries the hex-encoded hashes involved, never raw file bytes or
-storage credentials, and no second logging system or audit hash-chain
-logic was introduced (still System 8's job).
+storage credentials, and no second logging system was introduced; the
+hash-chain logic itself lives entirely in System 8 (see below).
 
 ### What System 7 does *not* do
 
 - **The audit hash chain** — `DOCUMENT_*`/`CERTIFICATE_*` events go
-  through the existing interface-based `Recorder`; computing or verifying
-  a hash chain over `audit_log` remains System 8's job.
+  through the existing interface-based `Recorder`; computing and verifying
+  the hash chain over `audit_log` is System 8's job (see "Implemented in
+  System 8" above and [AUDIT_CHAIN.md](./AUDIT_CHAIN.md)).
 - **Redaction, document sharing** — both are now implemented (see
   "Document Redaction" and "Document Sharing" below), built on top of
   exactly the verify/certificate independence this system established —

@@ -11,6 +11,20 @@ import (
 )
 
 type Querier interface {
+	// A PostgreSQL transaction-scoped advisory lock (automatically released
+	// at COMMIT/ROLLBACK, never leaked across a pooled connection) —
+	// internal/audit.ChainWriter takes this BEFORE reading the current chain
+	// head, so at most one transaction at a time can be "between" reading
+	// the head and inserting the entry that claims it as its predecessor.
+	// This is the authoritative, database-level guarantee that concurrent
+	// writers cannot fork the chain (master prompt: "the authoritative
+	// concurrency guarantee must exist at the database/transaction level",
+	// not an application-level mutex, which would do nothing across
+	// multiple backend processes/pooled connections anyway). The key is an
+	// arbitrary, fixed constant (see chain.go's auditChainLockKey) reserved
+	// solely for this purpose — it names no row and touches no other lock
+	// table.
+	AcquireAuditChainLock(ctx context.Context, lockKey int64) error
 	// Evidentia — Case Membership Queries
 	//
 	// See case_members_select's policy comment in the migration: a caller can
@@ -25,7 +39,14 @@ type Querier interface {
 	AdminUserExists(ctx context.Context) (bool, error)
 	AssignPermissionToRole(ctx context.Context, arg AssignPermissionToRoleParams) error
 	AssignRoleToUser(ctx context.Context, arg AssignRoleToUserParams) error
+	// The chain's total row count — used by chain verification to report
+	// total_entries alongside entries_checked, and cheap (a single index/
+	// heap estimate-free count) since it is only ever called once per
+	// verification request, never per-row.
 	CountAuditEntries(ctx context.Context) (int64, error)
+	// Same filters as ListAuditEntriesFiltered — the caller's authorized,
+	// filtered total for pagination metadata, not an unfiltered table count.
+	CountAuditEntriesFiltered(ctx context.Context, arg CountAuditEntriesFilteredParams) (int64, error)
 	CountCases(ctx context.Context) (int64, error)
 	// Same filters as ListCasesFiltered — the caller's authorized, filtered
 	// total for pagination metadata, not an unfiltered table count.
@@ -142,8 +163,11 @@ type Querier interface {
 	// document must not even resolve the row).
 	GetDocumentShareByID(ctx context.Context, arg GetDocumentShareByIDParams) (DocumentShare, error)
 	GetInvolvedPartyByID(ctx context.Context, id uuid.UUID) (CaseInvolvedParty, error)
-	// The current chain head — System 8's writer reads this to learn the
-	// prev_hash for the next entry it constructs.
+	// The current chain head — the writer reads this (AFTER acquiring the
+	// advisory lock above, within the same transaction) to learn the
+	// prev_hash for the next entry it constructs. Backed by
+	// audit_log_seq_unique's implicit index — an index-only backward scan
+	// for LIMIT 1, never a full table scan.
 	GetLatestAuditEntry(ctx context.Context) (AuditLog, error)
 	GetPermissionByID(ctx context.Context, id uuid.UUID) (Permission, error)
 	GetPermissionByName(ctx context.Context, name string) (Permission, error)
@@ -158,16 +182,37 @@ type Querier interface {
 	// No update/delete query exists here, and none ever should: the runtime
 	// role holds SELECT + INSERT only on audit_log (see migration and
 	// backend/tests/audit_privileges_test.go). Hash-chain computation itself
-	// (deriving hash from prev_hash + entry content) is System 8's job — these
-	// queries only store/retrieve whatever the caller already computed.
+	// (canonicalizing an entry, deriving hash from prev_hash + content) is
+	// internal/audit's job (see chain.go/writer.go) — these queries only
+	// store/retrieve whatever the caller already computed.
+	// id and "timestamp" are supplied explicitly by the caller (internal/
+	// audit.ChainWriter), NOT left to their column DEFAULTs
+	// (gen_random_uuid()/now()) — the writer must know both values BEFORE
+	// this INSERT runs, since they are themselves inputs to the entry's hash
+	// (you cannot hash a value you haven't decided yet). This mirrors
+	// exactly how CertificateService already generates certID/issuedAt in Go
+	// before signing, for the identical reason. seq is the one field that
+	// genuinely cannot be supplied this way (GENERATED ALWAYS AS IDENTITY
+	// rejects an explicit value) — it is deliberately excluded from the hash
+	// input for that reason; see chain.go's doc comment.
 	InsertAuditEntry(ctx context.Context, arg InsertAuditEntryParams) (AuditLog, error)
 	ListActiveCasesForUser(ctx context.Context, userID uuid.UUID) ([]ListActiveCasesForUserRow, error)
 	ListAuditEntriesByAction(ctx context.Context, arg ListAuditEntriesByActionParams) ([]AuditLog, error)
 	ListAuditEntriesByCase(ctx context.Context, arg ListAuditEntriesByCaseParams) ([]AuditLog, error)
 	ListAuditEntriesByDateRange(ctx context.Context, arg ListAuditEntriesByDateRangeParams) ([]AuditLog, error)
 	ListAuditEntriesByUser(ctx context.Context, arg ListAuditEntriesByUserParams) ([]AuditLog, error)
+	// GET /audit's real query: every filter optional (NULL = "no constraint
+	// on this field") — same convention as ListCasesFiltered/
+	// ListUsersFiltered. This runs under the CALLER's own RLS identity (see
+	// internal/service.AuditService.List) — audit_log_select's policy
+	// (ADMIN, or own user_id, or a case the caller is a member of) narrows
+	// the result set independently of, and beneath, these filters: a filter
+	// can never widen what RLS already restricts, only narrow it further.
+	ListAuditEntriesFiltered(ctx context.Context, arg ListAuditEntriesFilteredParams) ([]AuditLog, error)
 	// Chronological chain traversal starting just after fromSeq (pass 0 to
-	// start from the genesis entry) — for chain verification (System 8).
+	// start from the genesis entry) — the batched read chain verification
+	// uses, so verifying a multi-million-row chain never requires loading it
+	// all into memory at once.
 	ListAuditEntriesFromSeq(ctx context.Context, arg ListAuditEntriesFromSeqParams) ([]AuditLog, error)
 	ListCaseMembers(ctx context.Context, caseID uuid.UUID) ([]CaseMember, error)
 	ListCases(ctx context.Context, arg ListCasesParams) ([]Case, error)

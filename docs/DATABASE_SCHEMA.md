@@ -236,9 +236,11 @@ asserted) in
 - No two rows may claim the same non-null `prev_hash`
   (`idx_audit_log_prev_hash_unique`) — "one canonical predecessor → one new
   entry."
-- Computing `hash`/`prev_hash` from entry content is **System 8's**
-  responsibility; this migration only guarantees the storage can't
-  represent a malformed chain.
+- Computing `hash`/`prev_hash` from entry content is System 8's
+  responsibility (`internal/audit.ComputeEntryHash` — see
+  [AUDIT_CHAIN.md](./AUDIT_CHAIN.md)); this migration only guarantees the
+  storage can't represent a malformed chain regardless of what any writer
+  computes.
 
 ## JSONB Usage
 

@@ -10,6 +10,7 @@ import (
 
 	"evidentia/backend/internal/app"
 	"evidentia/backend/internal/authz"
+	audithandlers "evidentia/backend/internal/handlers/audit"
 	authhandlers "evidentia/backend/internal/handlers/auth"
 	casehandlers "evidentia/backend/internal/handlers/case"
 	documenthandlers "evidentia/backend/internal/handlers/document"
@@ -165,10 +166,17 @@ func NewRouter(a *app.App) *gin.Engine {
 	// GET /admin/users/:id does.
 	r.GET("/api/v1/users/me", authMW, userhandlers.Profile(a.UserService))
 
-	// Audit routes (internal/handlers/audit) remain not yet implemented —
-	// a later system's scope. System 4's authorization primitives are
-	// already available for whichever system adds them; see
-	// docs/API_ENDPOINTS.md for the full intended per-route mapping.
+	// Audit trail: GET /audit is a filtered LISTING with no single case/
+	// document ID in its URL (like GET /cases), so it is gated by
+	// RequirePermission (RBAC only) here — row-level visibility beyond
+	// that is PostgreSQL RLS's job (audit_log_select), re-checked
+	// independently by AuditService.List. POST /audit/verify-chain is
+	// ADMIN-only per the seed data (audit:verify) and needs the JSON
+	// body limit even though its own body is just two optional query
+	// params — no request body at all, actually, so no body limit is
+	// applied, matching verify/redact-with-no-body's own convention.
+	r.GET("/api/v1/audit", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditRead), audithandlers.List(a.AuditService))
+	r.POST("/api/v1/audit/verify-chain", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditVerify), audithandlers.VerifyChain(a.AuditService))
 
 	return r
 }

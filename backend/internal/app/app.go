@@ -81,6 +81,13 @@ type App struct {
 	// delegated-access-check logic with CanAccessDocument itself (see
 	// internal/authz/share_policy.go) — no separate authorization engine.
 	ShareService *service.ShareService
+
+	// AuditService owns audit-trail retrieval and cryptographic chain
+	// verification (see internal/service.AuditService) for GET /audit and
+	// POST /audit/verify-chain. Audit event RECORDING is not this field's
+	// job — every other service already records through the shared
+	// audit.Recorder (see the ChainWriter constructed below).
+	AuditService *service.AuditService
 }
 
 // New loads configuration and connects every infrastructure dependency in
@@ -116,7 +123,15 @@ func New(ctx context.Context) (*App, error) {
 		return nil, fmt.Errorf("app: connect storage: %w", err)
 	}
 
-	recorder := audit.NewSlogRecorder(log)
+	// ChainWriter is the authoritative, cryptographically hash-chained
+	// audit.Recorder (internal/audit/writer.go) — replacing
+	// audit.SlogRecorder (System 3's original operational-log-only
+	// placeholder) here is the ENTIRE integration point that makes every
+	// existing recorder.Record call across Systems 3-9 (auth/case/
+	// document/certificate/redact/share services) start durably,
+	// tamper-evidently persisting to audit_log instead of only the
+	// structured operational log — none of those call sites change.
+	recorder := audit.NewChainWriter(db.Pool(), log)
 
 	jwtManager := auth.NewJWTManager(cfg.JWT.SigningKey, cfg.JWT.Issuer, cfg.JWT.Audience, cfg.JWT.AccessTTL)
 	authService := service.NewAuthService(db.Pool(), jwtManager, cfg.JWT.BcryptCost, cfg.JWT.RefreshTTL, recorder)
@@ -131,6 +146,7 @@ func New(ctx context.Context) (*App, error) {
 	}
 	userService := service.NewUserService(db.Pool(), authzService, recorder, cfg.JWT.BcryptCost)
 	shareService := service.NewShareService(db.Pool(), authzService, recorder)
+	auditService := service.NewAuditService(db.Pool(), authzService, recorder)
 
 	return &App{
 		Config:             cfg,
@@ -146,6 +162,7 @@ func New(ctx context.Context) (*App, error) {
 		CertificateService: certificateService,
 		UserService:        userService,
 		ShareService:       shareService,
+		AuditService:       auditService,
 	}, nil
 }
 

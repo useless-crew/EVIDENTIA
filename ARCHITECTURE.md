@@ -766,11 +766,14 @@ Realtime / SSE
   one-time initial-admin bootstrap (`internal/bootstrap`). Every other
   user is created by an existing ADMIN through `POST /admin/users` — see
   [docs/API_ENDPOINTS.md](./docs/API_ENDPOINTS.md)'s Admin section.
-- **Audit Chain** — Immutable, hash-chained audit log of security-sensitive
-  actions. Not yet implemented (`internal/audit/{writer,chain}.go` remain
-  TODO stubs) — user-management actions are still recorded through the
-  same operational-log `audit.SlogRecorder` every other system uses, not
-  yet a durable hash-chained table.
+- **Audit Chain** (implemented) — Immutable, hash-chained audit log of
+  security-sensitive actions (`internal/audit/{writer,chain,verifier}.go`,
+  `internal/service.AuditService`, `internal/handlers/audit`). Every
+  existing `audit.Recorder` call site across every other system now
+  durably persists through `audit.ChainWriter`'s SHA-256 hash chain,
+  rather than the operational-log-only `audit.SlogRecorder` placeholder
+  used until this system landed — see
+  [docs/AUDIT_CHAIN.md](./docs/AUDIT_CHAIN.md) for the full design.
 - **Crypto** — SHA-256 integrity hashing (implemented — System 6/7) and
   ECDSA compliance-certificate signing (implemented — System 7,
   `pkg/crypto`); AES-256 encryption and RSA signing remain future.
@@ -804,22 +807,23 @@ The eventual system will enforce:
 11. Secure refresh-token handling
 12. Audit logging of all security-sensitive actions
 
-As of System 7: **1** (JWT) and **11** (refresh-token rotation/revocation)
-were implemented in System 3; **4** (RLS) was implemented in System 2,
-enforced with policies and fail-closed behavior verified by integration
-tests; **2** (RBAC) and **3** (ABAC) are implemented in System 4
+**1** (JWT) and **11** (refresh-token rotation/revocation) were
+implemented in System 3; **4** (RLS) was implemented in System 2, enforced
+with policies and fail-closed behavior verified by integration tests;
+**2** (RBAC) and **3** (ABAC) are implemented in System 4
 (`internal/authz`), composed with RLS as defense-in-depth rather than
-replacing it. Audit entries have their hash/prev_hash storage and
-uniqueness invariants (**7**, **8**) in place, and failed/successful auth
-actions, authorization denials, and now document upload/download/verify
-and certificate generation (**12**, partial — see SECURITY.md) are
-already recorded operationally, but *computing* the actual hash chain and
-verifying it (**9**) is System 8's job. **5** (SHA-256 document
-integrity) is now complete end-to-end: System 6 *computes and persists*
-the initial hash at ingestion (`pkg/hash`, `documents.sha256_hash`), and
-System 7 *recomputes and compares* a stored object's current hash against
-it to detect tampering (`DocumentService.VerifyDocument`), never
-rewriting the canonical value on a mismatch. AES-256 (**6**) and TLS
-(**10**) remain unimplemented. See [docs/SECURITY.md](./docs/SECURITY.md)
-and [docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md) for what each
+replacing it. **7**/**8**/**9** (immutable append-only audit logs,
+hash-chained entries, transactional/concurrency-safe writing) are now
+fully implemented — see [docs/AUDIT_CHAIN.md](./docs/AUDIT_CHAIN.md).
+**12** (audit logging of all security-sensitive actions) now durably
+records through that same hash chain, not just the operational log — see
+SECURITY.md. **5** (SHA-256 document integrity) is complete end-to-end:
+System 6 *computes and persists* the initial hash at ingestion
+(`pkg/hash`, `documents.sha256_hash`), and System 7 *recomputes and
+compares* a stored object's current hash against it to detect tampering
+(`DocumentService.VerifyDocument`), never rewriting the canonical value on
+a mismatch. AES-256 (**6**) and TLS (**10**) remain unimplemented. See
+[docs/SECURITY.md](./docs/SECURITY.md),
+[docs/AUDIT_CHAIN.md](./docs/AUDIT_CHAIN.md), and
+[docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md) for what each
 currently covers.

@@ -4,9 +4,8 @@
 
 TODO: Document the full REST API surface for Evidentia. Cases, Case
 Documents (upload/download/verify/certificate/redact/share/shared-with-me),
-Authentication, Admin (user management), and Health/Readiness are
-implemented today. Audit is not implemented yet — that section documents
-the intended surface only.
+Authentication, Admin (user management), Audit, and Health/Readiness are
+implemented today.
 
 ## Authentication (implemented)
 
@@ -704,19 +703,45 @@ authorization, once implemented:
 case-relationship check as `CanAccessCase` — see `docs/SECURITY.md`'s
 "Document-based ABAC".
 
-## Audit
+## Audit (implemented — System 8)
 
 ```text
 GET  /audit
 POST /audit/verify-chain
 ```
 
-TODO (business logic — not implemented). Required authorization:
+See [AUDIT_CHAIN.md](./AUDIT_CHAIN.md) for the full hash-chain
+architecture; this section covers the HTTP contract.
+
 `GET /audit` needs `audit:read`; `POST /audit/verify-chain` needs
-`audit:verify`. Per the seed data, only ADMIN and POLICE hold `audit:read`
-today (POLICE at case scope, once a future system adds `GET /audit`'s own
-case filtering — this endpoint has no resource ID of its own to run ABAC
-against), and only ADMIN holds `audit:verify`.
+`audit:verify`. Per the seed data, ADMIN, POLICE, LAWYER, and JUDGE hold
+`audit:read` — but row-level visibility beyond that permission check is
+entirely PostgreSQL RLS's job (`audit_log_select`, see AUDIT_CHAIN.md's
+"Row-Level Security"), not a route-level ABAC middleware: this route has
+no single case/document ID in its URL to check against the way
+`RequireCaseAccess`/`RequireDocumentAccess` do for other resources, since
+it's a filtered LISTING (like `GET /cases`). ADMIN sees every entry;
+every other role sees only its own actions plus entries tied to a case it
+is an active member of — a query filter can only narrow this further,
+never widen it. Only ADMIN holds `audit:verify`.
+
+`GET /audit` query parameters (all optional; a filter can only narrow
+what RLS already permits): `user_id`, `role`, `action`, `resource_type`,
+`resource_id`, `case_id` (UUIDs/exact strings), `from`/`to` (RFC3339
+timestamps, half-open range), `page`/`page_size` (pagination, required —
+this endpoint never returns the whole table). Response: the standard
+envelope wrapping `{entries: [...], meta: {...}}`, where each entry's
+`hash`/`prev_hash` are lowercase-hex-encoded (`prev_hash` empty only for
+the genesis entry).
+
+`POST /audit/verify-chain` query parameters: `from_seq` (resume just
+after this `seq`; default `0` = start from genesis), `max_entries`
+(maximum entries to check in this call; a large internal default/cap
+applies otherwise). Response: `{status: "VERIFIED" | "INTEGRITY_FAILURE",
+entries_checked, total_entries, next_seq?, failed_entry_id?, failed_seq?,
+reason?, expected_prev_hash?, actual_prev_hash?, expected_hash?,
+actual_hash?, verified_at}` — always `200`; `next_seq` present means more
+of the chain remains to be checked in a follow-up call.
 
 ## Admin (implemented)
 
@@ -813,16 +838,17 @@ System 4 (`internal/authz`) provides the RBAC (`middleware.RequirePermission`)
 and ABAC (`middleware.RequireCaseAccess`/`RequireDocumentAccess`) checks
 layered on top of it, and the per-route requirements are documented inline
 above (Cases/Case Documents/Documents/Audit/Admin). Cases, Case Documents
-(upload/download), document verify/certificate, and Admin (user
-management) routes are all live and wired with exactly that middleware
-(see `internal/httpserver/router.go`); the remaining Documents endpoints
-(redact/share) and Audit routes remain unregistered (their handlers are
-still TODO stubs). Today's non-health routes are
-`/api/v1/auth/{login,refresh,logout}` (no RBAC/ABAC — see "Authentication"
-above), `/api/v1/cases`/`/api/v1/cases/:id`,
+(upload/download/redact/share), document verify/certificate, Admin (user
+management), and Audit routes are all live and wired with exactly that
+middleware (see `internal/httpserver/router.go`). Today's non-health
+routes are `/api/v1/auth/{login,refresh,logout}` (no RBAC/ABAC — see
+"Authentication" above), `/api/v1/cases`/`/api/v1/cases/:id`,
 `/api/v1/cases/:id/documents`, `/api/v1/documents/:id/download`,
 `/api/v1/documents/:id/verify`, `/api/v1/documents/:id/certificate`,
-`/api/v1/admin/users*`, `/api/v1/admin/roles`, and `/api/v1/users/me`.
+`/api/v1/documents/:id/redact`, `/api/v1/documents/:id/share`,
+`/api/v1/documents/:id/shares*`, `/api/v1/shared/documents`,
+`/api/v1/audit`, `/api/v1/audit/verify-chain`, `/api/v1/admin/users*`,
+`/api/v1/admin/roles`, and `/api/v1/users/me`.
 Full authorization design: `docs/SECURITY.md`'s Authorization section.
 
 `401` vs `403`: a request with no/invalid/expired authentication is
