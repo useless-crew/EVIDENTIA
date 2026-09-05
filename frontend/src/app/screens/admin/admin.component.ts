@@ -1,8 +1,9 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { AdminUserService } from '../../core/services/admin-user.service';
 import { AuthService } from '../../core/services/auth.service';
 import { ApiError } from '../../core/services/api-client.service';
+import { EventStreamService } from '../../core/services/event-stream.service';
 import { AdminUser, AdminUserListResult, Role, UserStatus } from '../../core/models/api.models';
 import { CreateUserModalComponent } from '../../components/create-user-modal/create-user-modal.component';
 import { ResetPasswordModalComponent } from '../../components/reset-password-modal/reset-password-modal.component';
@@ -19,6 +20,13 @@ const PAGE_SIZE = 20;
  * backend's own RBAC checks (see docs/API_ENDPOINTS.md's Admin section),
  * so a non-admin who somehow reaches this screen gets 403 ApiErrors, not
  * a working admin console.
+ *
+ * System 14 additionally subscribes to GET /admin/users/events (System
+ * 13's shared SSE infrastructure) so this list refreshes automatically
+ * when a DIFFERENT admin session creates/updates/changes a user — every
+ * event is treated identically here as a plain "refetch" signal (see
+ * docs/REALTIME_EVENTS.md); this component never renders an event's own
+ * payload as if it were current state.
  */
 @Component({
   selector: 'app-admin',
@@ -27,9 +35,11 @@ const PAGE_SIZE = 20;
   templateUrl: './admin.component.html',
   styleUrls: ['./admin.component.css'],
 })
-export class AdminComponent implements OnInit {
+export class AdminComponent implements OnInit, OnDestroy {
   private readonly adminUsers = inject(AdminUserService);
   private readonly auth = inject(AuthService);
+  private readonly eventStream = inject(EventStreamService);
+  private stopEventStream: (() => void) | null = null;
 
   readonly roles: Role[] = ['ADMIN', 'POLICE', 'FORENSICS', 'LAWYER', 'JUDGE'];
   readonly statuses: UserStatus[] = ['active', 'inactive', 'suspended'];
@@ -55,6 +65,11 @@ export class AdminComponent implements OnInit {
 
   ngOnInit() {
     this.fetch();
+    this.stopEventStream = this.eventStream.connect('/admin/users/events', () => this.fetch());
+  }
+
+  ngOnDestroy() {
+    this.stopEventStream?.();
   }
 
   fetch() {

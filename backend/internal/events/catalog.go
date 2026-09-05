@@ -73,12 +73,32 @@ const (
 	// internal/service.ShareService.CreateShare/RevokeShare.
 	TypeShareCreated = "SHARE_CREATED"
 	TypeShareRevoked = "SHARE_REVOKED"
+
+	// --- Admin & user management (System 14). ResourceType:
+	// ResourceTypeAdminUsers, always scoped to the fixed singleton ID
+	// "global" (see internal/service.adminUsersScopeID's own doc comment —
+	// admin user management has no per-case/per-agency instance to scope
+	// to; it is one global resource, gated entirely by RBAC user:read).
+	// Data: AdminUserEventData. Published by
+	// internal/service.UserService.CreateUser/UpdateUser/UpdateRole/
+	// UpdateStatus. Activated/Deactivated/Suspended are distinct event
+	// types (never one generic "USER_STATUS_CHANGED", which would force
+	// every subscriber to decode a from/to pair itself just to learn
+	// which direction the change went) — see
+	// internal/service.statusChangeEventType.
+	TypeUserCreated     = "USER_CREATED"
+	TypeUserUpdated     = "USER_UPDATED"
+	TypeUserRoleChanged = "USER_ROLE_CHANGED"
+	TypeUserActivated   = "USER_ACTIVATED"
+	TypeUserDeactivated = "USER_DEACTIVATED"
+	TypeUserSuspended   = "USER_SUSPENDED"
 )
 
 // Resource types — see this file's own package doc comment.
 const (
 	ResourceTypeAuditVerification = "audit_verification"
 	ResourceTypeCase              = "case"
+	ResourceTypeAdminUsers        = "admin_users"
 )
 
 // AuditVerificationData is every AUDIT_VERIFICATION_*/AUDIT_INTEGRITY_
@@ -162,4 +182,22 @@ type ShareEventData struct {
 	ShareID    string `json:"share_id"`
 	DocumentID string `json:"document_id"`
 	CaseID     string `json:"case_id"`
+}
+
+// AdminUserEventData is every USER_CREATED/USER_UPDATED/USER_ROLE_
+// CHANGED/USER_ACTIVATED/USER_DEACTIVATED/USER_SUSPENDED event's Data
+// payload — the same safe fields internal/service.AdminUserSummary
+// already exposes over GET /admin/users, never password, password_hash,
+// a token, or any other credential (none of which internal/service.
+// UserService ever holds in a form this package could even reach). Roles
+// is the user's full CURRENT role set (a single-element list in this
+// project's one-role-at-a-time model — see UserService.UpdateRole's own
+// doc comment) — a subscriber never needs to separately decode an old/new
+// role pair; it already knows to refetch GET /admin/users/:id for the
+// full, authoritative detail if it needs one.
+type AdminUserEventData struct {
+	UserID string   `json:"user_id"`
+	Email  string   `json:"email"`
+	Roles  []string `json:"roles"`
+	Status string   `json:"status"`
 }

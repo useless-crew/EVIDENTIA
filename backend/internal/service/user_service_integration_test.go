@@ -10,6 +10,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -17,17 +18,55 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"evidentia/backend/db/generated"
 	"evidentia/backend/internal/audit"
 	"evidentia/backend/internal/auth"
 	"evidentia/backend/internal/authz"
+	"evidentia/backend/internal/events"
 	"evidentia/backend/internal/models"
+	"evidentia/backend/internal/repository"
 	"evidentia/backend/internal/utils"
 )
 
+// spyPublisher records every event published during a test — mirrors
+// spyRecorder's own shape/convention exactly (case_service_integration_test.go).
+type spyPublisher struct {
+	mu     sync.Mutex
+	events []spyPublishedEvent
+}
+
+type spyPublishedEvent struct {
+	eventType    string
+	resourceType string
+	resourceID   string
+	data         any
+}
+
+func (p *spyPublisher) Publish(_ context.Context, eventType, resourceType, resourceID string, data any) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.events = append(p.events, spyPublishedEvent{eventType, resourceType, resourceID, data})
+}
+
+func (p *spyPublisher) types() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	types := make([]string, len(p.events))
+	for i, e := range p.events {
+		types[i] = e.eventType
+	}
+	return types
+}
+
 func newUserServiceForTest(t *testing.T, pool *pgxpool.Pool, recorder audit.Recorder) *UserService {
 	t.Helper()
+	return newUserServiceForTestWithPublisher(t, pool, recorder, events.NoopPublisher{})
+}
+
+func newUserServiceForTestWithPublisher(t *testing.T, pool *pgxpool.Pool, recorder audit.Recorder, publisher events.Publisher) *UserService {
+	t.Helper()
 	authzService := authz.NewService(pool, recorder)
-	return NewUserService(pool, authzService, recorder, 4) // bcrypt cost 4: test speed only
+	return NewUserService(pool, authzService, recorder, publisher, 4) // bcrypt cost 4: test speed only
 }
 
 const testInitialPassword = "initial-password-1"
@@ -359,4 +398,175 @@ func TestUserService_ListRoles_RequiresOnlyAuthentication(t *testing.T) {
 		names[i] = r.Name
 	}
 	assert.ElementsMatch(t, []string{models.RoleAdmin, models.RolePolice, models.RoleForensics, models.RoleLawyer, models.RoleJudge}, names)
+}
+
+// ---- Last-active-admin safeguard (System 14) ----
+
+// TestUserService_UpdateRole_DemotingOneOfTwoActiveAdminsSucceeds proves
+// the guard does NOT over-trigger: with two active admins, demoting one
+// is always safe (the other remains) — see this file's own doc comment
+// above ensureNotLastActiveAdmin for why NO valid, non-concurrent,
+// single-actor request can ever legitimately trigger a block (the actor
+// itself must hold ADMIN — RBAC — and can never target itself — the
+// self-modification block — so a solo request sequence can only ever
+// reduce the admin count down to exactly one, the actor, never zero).
+// The genuine trigger case is proven separately by the concurrency test
+// below and by TestEnsureNotLastActiveAdmin_BlocksAtExactlyOne, which
+// exercises the guard directly against a fixture with exactly one active
+// admin — a state no valid sequential request chain can itself produce.
+func TestUserService_UpdateRole_DemotingOneOfTwoActiveAdminsSucceeds(t *testing.T) {
+	migrator := migratorPool(t)
+	truncateCaseTables(t, migrator)
+	app := appPool(t)
+	svc := newUserServiceForTest(t, app, &spyRecorder{})
+
+	_, actorA := adminActor(t, migrator)
+	adminBID := newUserWithRole(t, migrator, "admin-b-"+uuid.NewString()+"@example.com", models.RoleAdmin)
+
+	summary, err := svc.UpdateRole(context.Background(), actorA(), adminBID, models.RolePolice)
+	require.NoError(t, err, "demoting one of two active admins must succeed, leaving one")
+	assert.Equal(t, []string{models.RolePolice}, summary.Roles)
+}
+
+// TestEnsureNotLastActiveAdmin_BlocksAtExactlyOne tests the guard
+// directly (same package: UserService's unexported method), against a
+// fixture with EXACTLY one active admin — the one state that matters and
+// that, per this file's own reasoning above, only a genuine concurrent
+// race (see the test below) or a direct fixture like this one can ever
+// produce for testing purposes.
+func TestEnsureNotLastActiveAdmin_BlocksAtExactlyOne(t *testing.T) {
+	migrator := migratorPool(t)
+	truncateCaseTables(t, migrator)
+	app := appPool(t)
+	svc := newUserServiceForTest(t, app, &spyRecorder{})
+
+	// Exactly one active admin.
+	adminActor(t, migrator)
+
+	ctx := context.Background()
+	err := repository.WithTx(ctx, app, repository.AppIdentity{}, func(ctx context.Context, q *generated.Queries) error {
+		return svc.ensureNotLastActiveAdmin(ctx, q)
+	})
+	require.Error(t, err, "with exactly one active admin, the guard must refuse")
+	appErr, ok := utilsAsAppError(err)
+	require.True(t, ok)
+	assert.Equal(t, 409, appErr.Status)
+
+	// Add a second active admin — the guard must now allow it.
+	newUserWithRole(t, migrator, "admin-b-"+uuid.NewString()+"@example.com", models.RoleAdmin)
+	err = repository.WithTx(ctx, app, repository.AppIdentity{}, func(ctx context.Context, q *generated.Queries) error {
+		return svc.ensureNotLastActiveAdmin(ctx, q)
+	})
+	require.NoError(t, err, "with two active admins, the guard must allow proceeding")
+}
+
+func TestUserService_UpdateRole_ConcurrentDemotionOfBothRemainingAdminsLeavesExactlyOne(t *testing.T) {
+	migrator := migratorPool(t)
+	truncateCaseTables(t, migrator)
+	app := appPool(t)
+	svc := newUserServiceForTest(t, app, &spyRecorder{})
+
+	adminAID, actorA := adminActor(t, migrator)
+	adminBID := newUserWithRole(t, migrator, "admin-b-"+uuid.NewString()+"@example.com", models.RoleAdmin)
+	actorB := func() auth.AuthenticatedUser { return authUser(adminBID, models.RoleAdmin) }
+
+	// adminA and adminB are the only two active admins. Concurrently:
+	// adminA demotes adminB, WHILE adminB (a separate, still-valid actor
+	// at the moment both requests are issued) demotes adminA. Without the
+	// database-level advisory-lock guard, both could independently
+	// observe "2 active admins, safe to proceed" and both commit,
+	// leaving zero — master prompt's exact "two Admins changing the same
+	// [pair of] user's role" concurrency concern.
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, errs[0] = svc.UpdateRole(context.Background(), actorA(), adminBID, models.RolePolice)
+	}()
+	go func() {
+		defer wg.Done()
+		_, errs[1] = svc.UpdateRole(context.Background(), actorB(), adminAID, models.RolePolice)
+	}()
+	wg.Wait()
+
+	succeeded, failed := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			succeeded++
+		default:
+			failed++
+			appErr, ok := utilsAsAppError(err)
+			require.True(t, ok)
+			assert.Equal(t, 409, appErr.Status)
+		}
+	}
+	assert.Equal(t, 1, succeeded, "exactly one of the two concurrent demotions must succeed")
+	assert.Equal(t, 1, failed, "the other must be rejected — never both, which would leave zero active admins")
+
+	stillAdmin := 0
+	for _, id := range []uuid.UUID{adminAID, adminBID} {
+		roles, err := svc.rolesForUser(context.Background(), id)
+		require.NoError(t, err)
+		if containsRole(roles, models.RoleAdmin) {
+			stillAdmin++
+		}
+	}
+	assert.Equal(t, 1, stillAdmin, "exactly one admin must remain — the system must never end up with zero")
+}
+
+// ---- Real-time event integration (System 13/14) ----
+
+func TestUserService_CreateUser_PublishesEventAfterCommitWithNoPassword(t *testing.T) {
+	migrator := migratorPool(t)
+	truncateCaseTables(t, migrator)
+	app := appPool(t)
+	publisher := &spyPublisher{}
+	svc := newUserServiceForTestWithPublisher(t, app, &spyRecorder{}, publisher)
+
+	_, actor := adminActor(t, migrator)
+	summary, err := svc.CreateUser(context.Background(), actor(), CreateUserInput{
+		Email: "event-created-" + uuid.NewString() + "@example.com", Password: testInitialPassword,
+		FirstName: "Test", LastName: "User", Role: models.RolePolice,
+	})
+	require.NoError(t, err)
+
+	require.Contains(t, publisher.types(), events.TypeUserCreated)
+	for _, e := range publisher.events {
+		if e.eventType != events.TypeUserCreated {
+			continue
+		}
+		assert.Equal(t, events.ResourceTypeAdminUsers, e.resourceType)
+		data, ok := e.data.(events.AdminUserEventData)
+		require.True(t, ok)
+		assert.Equal(t, summary.ID.String(), data.UserID)
+		assert.Equal(t, summary.Email, data.Email)
+		// Marshal/inspect as JSON too — the strongest possible guarantee
+		// that no password/password_hash field could ever leak through
+		// this payload, not just that this particular Go struct omits one.
+		raw, err := json.Marshal(data)
+		require.NoError(t, err)
+		assert.NotContains(t, string(raw), testInitialPassword)
+		assert.NotContains(t, string(raw), "password")
+	}
+}
+
+func TestUserService_UpdateStatus_PublishesActivatedOrDeactivatedEventType(t *testing.T) {
+	migrator := migratorPool(t)
+	truncateCaseTables(t, migrator)
+	app := appPool(t)
+	publisher := &spyPublisher{}
+	svc := newUserServiceForTestWithPublisher(t, app, &spyRecorder{}, publisher)
+
+	_, actor := adminActor(t, migrator)
+	targetID := newUserWithRole(t, migrator, "target-"+uuid.NewString()+"@example.com", models.RolePolice)
+
+	_, err := svc.UpdateStatus(context.Background(), actor(), targetID, models.UserStatusInactive)
+	require.NoError(t, err)
+	assert.Contains(t, publisher.types(), events.TypeUserDeactivated, "a transition AWAY from active must publish USER_DEACTIVATED, not a generic status-changed event")
+
+	_, err = svc.UpdateStatus(context.Background(), actor(), targetID, models.UserStatusActive)
+	require.NoError(t, err)
+	assert.Contains(t, publisher.types(), events.TypeUserActivated)
 }

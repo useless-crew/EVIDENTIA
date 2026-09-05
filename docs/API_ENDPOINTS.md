@@ -843,6 +843,7 @@ All under `/api/v1/admin`, plus `/api/v1/users/me`. See
 ```text
 POST /api/v1/admin/users
 GET  /api/v1/admin/users
+GET  /api/v1/admin/users/events   (SSE — System 14, on System 13's shared infrastructure)
 GET  /api/v1/admin/users/:id
 PUT  /api/v1/admin/users/:id
 PUT  /api/v1/admin/users/:id/role
@@ -861,16 +862,37 @@ explicit block on an actor modifying their own role — see
 /admin/users/:id/status` needs `user:deactivate` PLUS the same kind of
 block on an actor changing their own status; `PUT
 /admin/users/:id/password` reuses `user:update` (no separate password
-permission); `GET /admin/roles` and `GET /users/me` need no special
-permission beyond authentication — the roles route lists the fixed,
-non-sensitive role catalog, and every user may view their own profile
-regardless of role. Per the seed data, only ADMIN holds `user:create`/
-`user:read`/`user:update`/`user:deactivate`/`user:role` today.
+permission); `GET /admin/users/events` needs `user:read` (the same gate
+`GET /admin/users` itself requires); `GET /admin/roles` and `GET
+/users/me` need no special permission beyond authentication — the roles
+route lists the fixed, non-sensitive role catalog, and every user may
+view their own profile regardless of role. Per the seed data, only ADMIN
+holds `user:create`/`user:read`/`user:update`/`user:deactivate`/
+`user:role` today.
 
 `PUT /admin/users/:id/status` revokes every one of the target user's
 refresh sessions when the new status isn't `active`; `PUT
 /admin/users/:id/password` always revokes them. Neither route nor any
 other in this section ever returns a password or password hash.
+
+**Last-active-Administrator safeguard** (System 14): `PUT
+/admin/users/:id/role` and `PUT /admin/users/:id/status` both refuse
+(`409 Conflict`) a change that would leave zero active ADMIN accounts —
+enforced at the database level (a PostgreSQL advisory lock plus a
+transactional re-count, `internal/service.UserService.
+ensureNotLastActiveAdmin`), not merely an application-level check, so it
+holds even under two concurrent requests each targeting a different
+remaining admin — see `docs/SECURITY.md`'s System 14 section for the
+full concurrency argument.
+
+**Real-time events** (System 14, on System 13's shared infrastructure):
+`POST /admin/users`, `PUT /admin/users/:id`, `PUT /admin/users/:id/role`,
+and `PUT /admin/users/:id/status` each publish (after their own
+transaction commits) `USER_CREATED`/`USER_UPDATED`/`USER_ROLE_CHANGED`/
+`USER_ACTIVATED`/`USER_DEACTIVATED`/`USER_SUSPENDED` on `GET
+/admin/users/events` — see `docs/REALTIME_EVENTS.md`'s event catalog.
+Every event's payload carries only identifiers/role/status, never a
+password or password hash.
 
 The one account provisioned outside this flow is the initial bootstrap
 admin (`internal/bootstrap.EnsureBootstrapAdmin`, run once at server

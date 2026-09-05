@@ -111,6 +111,22 @@ Full catalog and Go/TS type definitions: `backend/internal/events/catalog.go`,
 | `DOCUMENT_REDACTION_COMPLETED` | `case` | `DocumentService.RedactDocument` | `DocumentRedactionData` |
 | `SHARE_CREATED` | `case` | `ShareService.CreateShare` | `ShareEventData` |
 | `SHARE_REVOKED` | `case` | `ShareService.RevokeShare` | `ShareEventData` |
+| `USER_CREATED` | `admin_users` (fixed ID `"global"`) | `UserService.CreateUser` | `AdminUserEventData` |
+| `USER_UPDATED` | `admin_users` | `UserService.UpdateUser` | `AdminUserEventData` |
+| `USER_ROLE_CHANGED` | `admin_users` | `UserService.UpdateRole` | `AdminUserEventData` |
+| `USER_ACTIVATED` | `admin_users` | `UserService.UpdateStatus` | `AdminUserEventData` |
+| `USER_DEACTIVATED` | `admin_users` | `UserService.UpdateStatus` | `AdminUserEventData` |
+| `USER_SUSPENDED` | `admin_users` | `UserService.UpdateStatus` | `AdminUserEventData` |
+
+Admin user-management events (System 14) are scoped to the fixed
+singleton ID `admin_users:global`, not a per-user ID — see
+`internal/service.adminUsersScopeID`'s own doc comment: admin user
+management has no per-case/per-agency instance to scope to (there is one
+global user directory, gated entirely by RBAC `user:read`), unlike a
+case or an audit verification, each of which has a real per-instance
+resource to scope to. `AdminUserEventData` never carries a password,
+password hash, or token — only `user_id`/`email`/`roles`/`status`, the
+same safe fields `GET /admin/users` itself already returns.
 
 `DOCUMENT_VERIFICATION_FAILED`/`CERTIFICATE_GENERATION_FAILED`/
 `DOCUMENT_REDACTION_FAILED` are defined constants (master prompt's own
@@ -132,7 +148,13 @@ violate master prompt's own "do not create event types without an actual
 consumer/use case." A generic `CASE_UPDATED`/`DOCUMENT_UPDATED` pair was
 also not added on top of the five specific case-scoped events above — a
 second, more generic layer over the same underlying facts would be
-redundant, not additive.
+redundant, not additive. Similarly, no `USER_PASSWORD_RESET` real-time
+event is published: master prompt's own admin-events list
+(`USER_CREATED`/`USER_UPDATED`/`USER_ROLE_CHANGED`/`USER_ACTIVATED`/
+`USER_DEACTIVATED`) never names one, and a password reset has no
+UI-relevant state for another connected admin to react to (the acted-on
+user's own sessions are already revoked server-side, regardless of any
+notification — see `docs/SECURITY.md`'s System 14 section).
 
 ## Event Scoping — Why `case`, Not `document`
 

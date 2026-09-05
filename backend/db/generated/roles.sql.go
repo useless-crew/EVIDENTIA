@@ -11,6 +11,30 @@ import (
 	"github.com/google/uuid"
 )
 
+const acquireAdminGuardLock = `-- name: AcquireAdminGuardLock :exec
+SELECT pg_advisory_xact_lock($1::bigint)
+`
+
+// System 14's "last active Administrator" safeguard
+// (internal/service.UserService.ensureNotLastActiveAdmin) — a
+// PostgreSQL transaction-scoped advisory lock (automatically released at
+// COMMIT/ROLLBACK, never leaked across a pooled connection), acquired
+// BEFORE CountActiveUsersWithRole below and held through the role/status
+// UPDATE that follows it in the SAME transaction. This is what makes the
+// guard correct under concurrency, not merely "correct for one caller at
+// a time": two admins concurrently demoting/deactivating two DIFFERENT
+// remaining admins would otherwise each independently observe "2 active
+// admins, safe to proceed" and both commit, leaving zero — this lock
+// serializes any such pair of operations so the second one to run
+// re-counts AFTER the first has already committed. The key is a fixed,
+// arbitrary constant distinct from internal/audit's own
+// auditChainLockKey (see that package's identical idiom) — it names no
+// row and touches no other lock table.
+func (q *Queries) AcquireAdminGuardLock(ctx context.Context, lockKey int64) error {
+	_, err := q.db.Exec(ctx, acquireAdminGuardLock, lockKey)
+	return err
+}
+
 const adminUserExists = `-- name: AdminUserExists :one
 SELECT EXISTS (
     SELECT 1 FROM user_roles ur
@@ -43,6 +67,29 @@ type AssignRoleToUserParams struct {
 func (q *Queries) AssignRoleToUser(ctx context.Context, arg AssignRoleToUserParams) error {
 	_, err := q.db.Exec(ctx, assignRoleToUser, arg.UserID, arg.RoleID)
 	return err
+}
+
+const countActiveUsersWithRole = `-- name: CountActiveUsersWithRole :one
+SELECT count(*) FROM users u
+JOIN user_roles ur ON ur.user_id = u.id
+WHERE ur.role_id = $1 AND u.status = 'active'
+`
+
+// The count internal/service.UserService.ensureNotLastActiveAdmin reads
+// (only after AcquireAdminGuardLock above) to decide whether a
+// role/status change may proceed — ACTIVE users only, since an already
+// INACTIVE/SUSPENDED admin was never a "usable" administrator to begin
+// with and removing THEIR admin status/further deactivating them cannot
+// newly cause a lockout. Note users.status's own established convention
+// is lowercase ('active'/'inactive'/'suspended' — see
+// users_status_check, models.UserStatusActive), unlike some other
+// status-bearing tables in this schema — matched exactly here, not
+// assumed.
+func (q *Queries) CountActiveUsersWithRole(ctx context.Context, roleID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveUsersWithRole, roleID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const createRole = `-- name: CreateRole :one

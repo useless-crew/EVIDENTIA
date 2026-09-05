@@ -555,6 +555,118 @@ review this system's own master prompt required, answered directly:
   establishes RLS context for the PostgreSQL writes that precede every
   publish call.
 
+## Implemented in System 14 (Admin & User Management)
+
+Admin user-management (`internal/service.UserService`,
+`internal/handlers/user`, `internal/bootstrap`) already existed and was
+already largely correct — this system's job was reviewing it against a
+fresh, exhaustive checklist, closing the one genuine gap found (below),
+and integrating it with Systems 13's real-time event infrastructure.
+Full detail in `docs/API_ENDPOINTS.md`'s "Admin" section and
+`docs/REALTIME_EVENTS.md`'s event catalog; the security review this
+system's own audit required, answered directly:
+
+- **Only ADMIN ever reaches a `/admin/*` route** — per the seed data,
+  none of POLICE/FORENSICS/LAWYER/JUDGE hold ANY `user:*` permission;
+  `middleware.RequirePermission`/`RequirePermission`-equivalent
+  service-layer checks (`authz.Service.HasPermission`/
+  `CanModifyUserRole`) gate every route, re-checked independently inside
+  `UserService` even where the router's own middleware already enforces
+  it (defense in depth, matching every other service in this codebase).
+- **A user can never assign themselves a role or change their own
+  account status** — `authz.Service.CanModifyUserRole` and
+  `UserService.UpdateStatus` both hard-block `actor.ID == targetID`
+  BEFORE any database write, independent of RBAC — even an ADMIN acting
+  on their own account is refused, logged as `AUTHZ_DENIED`.
+- **Non-admin roles can never be created as ADMIN through a generic
+  endpoint** — there is exactly one user-creation endpoint (`POST
+  /admin/users`), it requires `user:create` (ADMIN-only), and its request
+  DTO (`createUserRequest`) has no `password_hash`/`created_by`/`id`
+  field a client could even populate — every server-controlled value is
+  derived internally, never bound from client JSON (mass-assignment is
+  structurally impossible, not merely filtered).
+- **The last active Administrator account can never be removed — even
+  under a race between two concurrent requests** (NEW, System 14): master
+  prompt's own "an Admin must not accidentally remove the last usable
+  Admin account" was previously unenforced — `UpdateRole`/`UpdateStatus`
+  had no check at all preventing a role change or deactivation from
+  leaving zero active admins. Fixed with a genuine database-level
+  guarantee, not an application-only check:
+  `UserService.ensureNotLastActiveAdmin` acquires a dedicated PostgreSQL
+  advisory lock (`db/queries/roles.sql`'s `AcquireAdminGuardLock` — the
+  identical `pg_advisory_xact_lock` idiom `internal/audit.ChainWriter`
+  already established for chain-fork prevention, reused for an
+  unrelated invariant with its own distinct lock key) BEFORE counting
+  currently-active admins, and holds it through the role/status UPDATE
+  that follows in the SAME transaction — refusing (`409 Conflict`) if the
+  target is the only one. This is what makes the guard correct even when
+  two different admins concurrently target two DIFFERENT remaining
+  admins (each would otherwise independently observe "2 active admins,
+  safe to proceed" and both commit, reaching zero): the lock serializes
+  the pair, so whichever commits second re-counts against the FIRST
+  transaction's already-committed result. Verified by
+  `TestUserService_UpdateRole_ConcurrentDemotionOfBothRemainingAdminsLeavesExactlyOne`
+  (real concurrent goroutines against a live database, run under
+  `-race`) and `TestEnsureNotLastActiveAdmin_BlocksAtExactlyOne`.
+- **Role changes and account deactivation take effect on the very next
+  request — no stale-session window** — `middleware.Auth` re-resolves
+  the caller's CURRENT roles and status from PostgreSQL on every single
+  request (`AuthService.ResolveIdentity`), never trusting the JWT access
+  token's own embedded role claim; a deactivated/suspended account is
+  rejected the moment its status changes, even if its access token has
+  not yet expired, and a role change is visible to every subsequent
+  authorization check immediately. `UpdateStatus`/`ResetPassword`
+  additionally revoke every one of the target's refresh sessions
+  (`RevokeAllAuthSessionsForUser`) as defense in depth against a stolen
+  refresh token minting new access tokens after the fact — belt and
+  suspenders on top of the access-token-level protection that already
+  holds regardless.
+- **Passwords are never persisted, logged, or returned** —
+  `auth.HashPassword` (bcrypt, cost centrally configured) is the ONLY
+  path a plaintext password takes before becoming a hash; no service,
+  handler, audit `Metadata`, or real-time event payload ever carries one
+  (verified by `TestUserService_CreateUser_PasswordNeverInResponse` and,
+  for the new event-publishing path,
+  `TestUserService_CreateUser_PublishesEventAfterCommitWithNoPassword`,
+  which additionally marshals the published payload to JSON and asserts
+  the literal string `"password"` never appears in it).
+- **Duplicate email creation is a database-level guarantee, not an
+  application race** — `users_email_unique`; a concurrent duplicate
+  `CreateUser` is mapped to `409 Conflict`, never a raw constraint error
+  or a silent second row.
+- **The initial Admin bootstrap never appears in source, is idempotent,
+  and never logs its password** —
+  `internal/bootstrap.EnsureBootstrapAdmin`, driven entirely by
+  `EVIDENTIA_BOOTSTRAP_ADMIN_EMAIL`/`_PASSWORD`/`_NAME` (unset by
+  default; the root `.env.example`'s own values are documented
+  placeholders, never used in production), checked-and-created inside
+  ONE transaction (so two replicas starting simultaneously can never
+  create two bootstrap admins), and a permanent no-op once any ADMIN
+  already exists — it never resets an existing account's password.
+- **Admin user-management events integrate with, and never duplicate,**
+  **Systems 10/13** — every state change still goes through the SAME
+  `audit.Recorder`/cryptographic chain (`USER_CREATED`/`USER_UPDATED`/
+  `USER_ROLE_CHANGED`/`USER_STATUS_CHANGED`/`USER_PASSWORD_RESET`,
+  actor/role always server-derived from the authenticated caller, never
+  client input) and the SAME `internal/events.Publisher`/
+  `internal/sse.Manager` real-time infrastructure (`USER_CREATED`/
+  `USER_UPDATED`/`USER_ROLE_CHANGED`/`USER_ACTIVATED`/`USER_DEACTIVATED`/
+  `USER_SUSPENDED` on `GET /admin/users/events`, gated by the same
+  `user:read` RBAC check `GET /admin/users` itself requires) — no second
+  audit log, no second event bus.
+- **`users`/`roles`/`user_roles` carry no RLS policies, and this is
+  intentional, not an oversight**: this is a single-tenant deployment
+  with no per-agency/per-tenant boundary anywhere in this schema (no
+  system through 14 introduces one); admin user management is
+  correctly, explicitly a GLOBAL capability gated entirely by RBAC
+  (`user:read`/`user:create`/`user:update`/`user:deactivate`/`user:role`,
+  ADMIN-only) — there is no narrower, per-row visibility rule to enforce
+  on a global user directory. `evidentia_app` holds no `BYPASSRLS`
+  regardless (unchanged from every prior system) — the tables simply
+  have no policies to bypass. If a future system introduces
+  agency/tenant scoping to `users`, this table's RLS posture must be
+  revisited at that time, not assumed to remain RBAC-only.
+
 ## Principles
 
 The eventual system will enforce all twelve of these. Implemented so far:

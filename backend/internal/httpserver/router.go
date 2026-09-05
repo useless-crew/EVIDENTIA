@@ -160,6 +160,15 @@ func NewRouter(a *app.App) *gin.Engine {
 	adminGroup.Use(jsonBodyLimit)
 	adminGroup.POST("/users", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionUserCreate), userhandlers.Create(a.UserService))
 	adminGroup.GET("/users", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionUserRead), userhandlers.List(a.UserService))
+	// Events (System 14, on System 13's shared SSE infrastructure): a
+	// real-time notification stream for admin user-management activity —
+	// registered as a static route ("events"), which gin's router
+	// correctly prioritizes over the ":id" parameter route immediately
+	// below at the same path depth, so a literal user ID of "events" is
+	// structurally impossible to collide with (UUIDs never take this
+	// form) and this route is never reached via the :id handler or
+	// vice versa.
+	adminGroup.GET("/users/events", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionUserRead), userhandlers.Events(a.SSEManager))
 	adminGroup.GET("/users/:id", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionUserRead), userhandlers.Get(a.UserService))
 	adminGroup.PUT("/users/:id", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionUserUpdate), userhandlers.Update(a.UserService))
 	adminGroup.PUT("/users/:id/role", authMW, userhandlers.UpdateRole(a.UserService))

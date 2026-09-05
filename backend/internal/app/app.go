@@ -193,7 +193,7 @@ func New(ctx context.Context) (*App, error) {
 		_ = redisCache.Close()
 		return nil, fmt.Errorf("app: build certificate service: %w", err)
 	}
-	userService := service.NewUserService(db.Pool(), authzService, recorder, cfg.JWT.BcryptCost)
+	userService := service.NewUserService(db.Pool(), authzService, recorder, eventPublisher, cfg.JWT.BcryptCost)
 	shareService := service.NewShareService(db.Pool(), authzService, recorder, eventPublisher)
 
 	// asynq.RedisClientOpt mirrors cfg.Redis exactly — Asynq manages its
