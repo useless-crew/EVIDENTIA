@@ -422,6 +422,77 @@ Verification & Integrity Dashboard"; summary here:
   flow against these endpoints — the frontend never computes `VERIFIED`
   or a progress percentage itself.
 
+## Implemented in System 12 (Asynchronous Processing & Background Jobs)
+
+Full detail in [BACKGROUND_JOBS.md](./BACKGROUND_JOBS.md); the security
+review this system's own master prompt required, answered directly:
+
+- **A client can never enqueue an arbitrary task, forge a user ID, or
+  forge a role.** There is no generic `POST /jobs/execute` — every route
+  is domain-specific (`POST /audit/verify-chain`), authorizes the caller
+  BEFORE anything is created or enqueued
+  (`AuditService.StartVerification` calls `authz.Service.HasPermission`
+  first), and a job payload carries only a server-generated UUID
+  (`VerifyAuditChainPayload{VerificationID}`) — never a client-supplied
+  `user_id`/`role`/credential of any kind.
+- **A client can never access another user's job** — `GET
+  /audit/verify-chain/:id` re-runs the same RBAC check plus
+  `audit_verifications`' own RLS (`current_app_role() = 'ADMIN'`) System
+  11 already established; System 12 changes none of that.
+- **The worker never bypasses RLS or uses `BYPASSRLS`.** It establishes
+  its own transaction-local `app.user_id`/`app.role` context
+  (`workerIdentity` in `internal/service/audit_service.go`) through the
+  SAME `repository.WithTx` mechanism every HTTP-request-scoped call uses
+  — see BACKGROUND_JOBS.md's "RLS in Workers". `evidentia_app` holds no
+  `BYPASSRLS`, unchanged from every prior system.
+- **A job payload can never contain credentials** — no task type this
+  package defines has ever carried a JWT, password, refresh token,
+  encryption key, or MinIO credential; every payload's own struct
+  definition is small enough to audit by inspection
+  (`VerifyAuditChainPayload` is one field).
+- **Retries cannot duplicate business records** — `asynq.TaskID`
+  (deterministic, per `jobs.DeterministicTaskID`) makes Asynq itself
+  reject a duplicate enqueue for the same entity
+  (`asynq.ErrTaskIDConflict`), underneath (never instead of) each task
+  type's own database-level uniqueness constraint
+  (`idx_audit_verifications_single_active` for `AUDIT_CHAIN_VERIFY`);
+  `MarkAuditVerificationRunning`'s `WHERE status = 'QUEUED'` guard makes a
+  redelivered task attempt a safe no-op, not a second, corrupting run.
+- **A failed job can never remain `RUNNING` forever** — System 11's
+  `reconcileStale` self-heals a stuck `QUEUED`/`RUNNING` row to `FAILED`
+  the first time anyone reads it; System 12 changes nothing here.
+- **A huge document cannot exhaust worker memory** — the one task type
+  that exists (`AUDIT_CHAIN_VERIFY`) never loads a document at all;
+  System 12 evaluated document-processing task types and deliberately did
+  not introduce any (see BACKGROUND_JOBS.md's "Task Types") specifically
+  because the existing synchronous paths are already bounded by
+  `DocumentsConfig.MaxUploadSize` on both the write (upload) and read
+  (redaction) side.
+- **No temporary files exist to leak** — no task type in this package
+  writes one (see BACKGROUND_JOBS.md's "Resource Limits").
+- **Document-processing jobs cannot starve security jobs** — there is no
+  document-processing job today; the queue-priority design
+  (`QueueCritical` weight 6 vs `QueueDefault` weight 2) exists precisely
+  so a future one couldn't, without needing to revisit this decision
+  later.
+- **Verification cannot modify audit records, and workers cannot create
+  recursive audit events** — both unchanged from System 11 (see
+  AUDIT_CHAIN.md's "Concurrency & idempotency" and "Avoiding recursive
+  audit-access events"); System 12 adds no new code path that touches
+  `audit_log` at all.
+- **Redis is never the authoritative source for business state** — it is
+  Asynq's queue transport only; PostgreSQL (`audit_verifications`) is the
+  only place `AuditService` ever reads a verification's status from, and
+  no other task type persists anything to Redis either.
+- **An attacker cannot trigger unlimited expensive jobs** — no dedicated
+  rate-limiting middleware exists in this codebase for any route (a gap
+  master prompt explicitly says not to newly invent a whole system to
+  close), but `POST /audit/verify-chain` is already bounded by
+  `audit:verify` RBAC (ADMIN-only) and, more directly, by
+  `idx_audit_verifications_single_active` — no number of concurrent
+  callers can ever have more than one full-chain verification running at
+  once, platform-wide.
+
 ## Principles
 
 The eventual system will enforce all twelve of these. Implemented so far:

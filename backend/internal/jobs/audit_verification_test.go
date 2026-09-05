@@ -41,7 +41,7 @@ func (f *fakeVerifier) RunVerification(_ context.Context, verificationID uuid.UU
 
 func TestAuditVerificationHandler_ProcessTask_Success(t *testing.T) {
 	verifier := &fakeVerifier{}
-	handler := NewAuditVerificationHandler(verifier, discardLogger())
+	handler := NewAuditVerificationHandler(verifier)
 
 	id := uuid.New()
 	task, err := NewVerifyAuditChainTask(id)
@@ -54,7 +54,7 @@ func TestAuditVerificationHandler_ProcessTask_Success(t *testing.T) {
 func TestAuditVerificationHandler_ProcessTask_PropagatesOperationalError(t *testing.T) {
 	wantErr := errors.New("database unavailable")
 	verifier := &fakeVerifier{err: wantErr}
-	handler := NewAuditVerificationHandler(verifier, discardLogger())
+	handler := NewAuditVerificationHandler(verifier)
 
 	task, err := NewVerifyAuditChainTask(uuid.New())
 	require.NoError(t, err)
@@ -66,7 +66,7 @@ func TestAuditVerificationHandler_ProcessTask_PropagatesOperationalError(t *test
 
 func TestAuditVerificationHandler_ProcessTask_MalformedPayloadSkipsRetry(t *testing.T) {
 	verifier := &fakeVerifier{}
-	handler := NewAuditVerificationHandler(verifier, discardLogger())
+	handler := NewAuditVerificationHandler(verifier)
 
 	task := asynq.NewTask(TypeVerifyAuditChain, []byte("not json"))
 	err := handler.ProcessTask(context.Background(), task)

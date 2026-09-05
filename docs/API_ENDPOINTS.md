@@ -740,19 +740,23 @@ envelope wrapping `{entries: [...], meta: {...}}`, where each entry's
 `hash`/`prev_hash` are lowercase-hex-encoded (`prev_hash` empty only for
 the genesis entry).
 
-### `POST /audit/verify-chain` (System 11 — asynchronous)
+### `POST /audit/verify-chain` (System 11 — asynchronous; System 12 — background-job infrastructure)
 
 No request body. Dispatches a background job rather than verifying
-synchronously — see AUDIT_CHAIN.md's "Asynchronous Verification" for why.
-Always `202 Accepted`:
+synchronously — see AUDIT_CHAIN.md's "Asynchronous Verification" for why,
+and BACKGROUND_JOBS.md for the job infrastructure itself. Always `202
+Accepted`:
 
 ```json
-{ "verification_id": "...", "status": "QUEUED", "created_at": "..." }
+{ "verification_id": "...", "job_id": "audit:verify_chain:...", "status": "QUEUED", "created_at": "..." }
 ```
 
-If a verification is already `QUEUED`/`RUNNING`, this returns **that same
-run's** id/status instead of starting a duplicate scan — two concurrent
-callers are never given two independent verification ids.
+`job_id` is the underlying Asynq task's deterministic, traceable ID
+(`jobs.AuditVerifyChainJobID(verification_id)` — always derivable from
+`verification_id` alone, never a separately-stored value). If a
+verification is already `QUEUED`/`RUNNING`, this returns **that same
+run's** id/job_id/status instead of starting a duplicate scan — two
+concurrent callers are never given two independent verification ids.
 
 ### `GET /audit/verify-chain/:verificationId`
 
@@ -760,7 +764,7 @@ Current status/progress/result of one run:
 
 ```json
 {
-  "verification_id": "...", "status": "RUNNING",
+  "verification_id": "...", "job_id": "audit:verify_chain:...", "status": "RUNNING",
   "entries_checked": 42381, "total_entries": 100000, "progress_percent": 42.4,
   "last_seq_checked": 42381,
   "requested_by_user_id": "...", "requested_by_role": "ADMIN",

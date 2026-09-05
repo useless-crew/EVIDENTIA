@@ -389,6 +389,11 @@ export type VerificationStatus = 'QUEUED' | 'RUNNING' | 'VERIFIED' | 'INTEGRITY_
  * same run's id, never a newly created duplicate. */
 export interface StartVerificationResponse {
   verification_id: string;
+  /** System 12: the underlying Asynq task's traceable id — deterministically
+   * `audit:verify_chain:<verification_id>` (see jobs.AuditVerifyChainJobID).
+   * Not rendered anywhere today; kept for parity with the backend response
+   * and for anyone correlating operational logs with a verification run. */
+  job_id: string;
   status: VerificationStatus;
   created_at: string;
 }
@@ -400,6 +405,8 @@ export interface StartVerificationResponse {
  * different response shapes for "the same fact". */
 export interface VerificationDetail {
   verification_id: string;
+  /** System 12: see StartVerificationResponse.job_id. */
+  job_id: string;
   status: VerificationStatus;
   entries_checked: number;
   total_entries?: number;

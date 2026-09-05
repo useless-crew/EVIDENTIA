@@ -785,14 +785,31 @@ Realtime / SSE
   canonicalization/verification logic completely, unchanged. See
   [docs/AUDIT_CHAIN.md](./docs/AUDIT_CHAIN.md)'s "Asynchronous
   Verification & Integrity Dashboard".
+- **Asynchronous Processing & Background Jobs** (implemented) — System 12
+  generalizes System 11's Asynq integration into reusable infrastructure
+  (`internal/jobs`): queue priority (`QueueCritical`/`QueueDefault`),
+  `LoggingMiddleware`, `FailureCategory`/`Permanent`/`CategoryOf` retry
+  classification, and `DeterministicTaskID` (a traceable `job_id`, now
+  returned alongside `verification_id`, doubling as a second, Asynq-level
+  idempotency guard). `AUDIT_CHAIN_VERIFY` is refactored onto it with no
+  behavior change; no other Systems 1-11 operation was moved to
+  background processing — see
+  [docs/BACKGROUND_JOBS.md](./docs/BACKGROUND_JOBS.md).
 - **Crypto** — SHA-256 integrity hashing (implemented — System 6/7) and
   ECDSA compliance-certificate signing (implemented — System 7,
   `pkg/crypto`); AES-256 encryption and RSA signing remain future.
 - **Storage** — MinIO-backed object storage behind a provider-agnostic
   interface.
-- **Jobs** (implemented) — Redis/Asynq-backed background processing
-  (`internal/jobs`), so far powering audit-chain verification only; the
-  worker runs embedded in the same process as the HTTP server
+- **Jobs** (implemented) — System 12's reusable Redis/Asynq background-
+  processing architecture (`internal/jobs`): named priority queues
+  (`critical`/`default`), a shared structured-logging middleware, a
+  TRANSIENT/PERMANENT/SECURITY/INTEGRITY error-classification vocabulary,
+  and deterministic, traceable job IDs — used by System 11's audit-chain
+  verification (its only consumer today; Systems 6-8's hashing,
+  certificate generation, and redaction were each evaluated and
+  deliberately kept synchronous — see
+  [docs/BACKGROUND_JOBS.md](./docs/BACKGROUND_JOBS.md)'s "Task Types" for
+  why). The worker runs embedded in the same process as the HTTP server
   (`cmd/server/main.go`), not a separate deployment unit.
 - **Realtime** (implemented) — SSE-based progress streaming
   (`internal/realtime`), so far powering audit-chain verification

@@ -39,9 +39,22 @@ type VerifyAuditChainPayload struct {
 	VerificationID uuid.UUID `json:"verification_id"`
 }
 
+// AuditVerifyChainJobID derives this task type's traceable, deterministic
+// job_id — see DeterministicTaskID's own doc comment for both reasons this
+// matters (API traceability, defense-in-depth idempotency). Exported so
+// internal/service.AuditService can populate StartVerificationResult/
+// VerificationDetail's JobID field without re-deriving the same string via
+// a second, potentially-drifting implementation.
+func AuditVerifyChainJobID(verificationID uuid.UUID) string {
+	return DeterministicTaskID(TypeVerifyAuditChain, verificationID)
+}
+
 // NewVerifyAuditChainTask builds the task internal/service.AuditService.
 // StartVerification enqueues once it has created (or found an already-
-// active) audit_verifications row.
+// active) audit_verifications row. Runs on QueueCritical (System 12's
+// highest-priority queue — see queue.go): audit-chain integrity is a
+// security-sensitive operation that must never be starved by a future,
+// higher-volume task type sharing this same worker pool.
 func NewVerifyAuditChainTask(verificationID uuid.UUID) (*asynq.Task, error) {
 	payload, err := json.Marshal(VerifyAuditChainPayload{VerificationID: verificationID})
 	if err != nil {
@@ -52,7 +65,8 @@ func NewVerifyAuditChainTask(verificationID uuid.UUID) (*asynq.Task, error) {
 		payload,
 		asynq.MaxRetry(verifyAuditChainMaxRetry),
 		asynq.Timeout(verifyAuditChainTimeout),
-		asynq.Queue("default"),
+		asynq.Queue(QueueCritical),
+		asynq.TaskID(AuditVerifyChainJobID(verificationID)),
 	), nil
 }
 
@@ -85,36 +99,38 @@ type AuditFailureRecorder interface {
 	MarkVerificationOperationallyFailed(ctx context.Context, verificationID uuid.UUID, cause error) error
 }
 
-// AuditVerificationHandler adapts AuditVerifier to asynq.Handler.
+// AuditVerificationHandler adapts AuditVerifier to asynq.Handler. Carries
+// no logger of its own — see ProcessTask's own doc comment for why
+// LoggingMiddleware (applied uniformly in NewMux) is this task type's only
+// logging point.
 type AuditVerificationHandler struct {
 	verifier AuditVerifier
-	logger   *slog.Logger
 }
 
-func NewAuditVerificationHandler(verifier AuditVerifier, logger *slog.Logger) *AuditVerificationHandler {
-	return &AuditVerificationHandler{verifier: verifier, logger: logger}
+func NewAuditVerificationHandler(verifier AuditVerifier) *AuditVerificationHandler {
+	return &AuditVerificationHandler{verifier: verifier}
 }
 
 // ProcessTask implements asynq.Handler. It never touches PostgreSQL/hash
 // logic itself — see AuditVerifier's doc comment; this method's entire job
 // is unmarshaling the payload and translating a returned error into
-// Asynq's own retry mechanism.
+// Asynq's own retry mechanism. Start/completion/failure logging is
+// LoggingMiddleware's job uniformly across every task type (see NewMux) —
+// this method itself logs nothing, so it never double-logs a failure
+// LoggingMiddleware already recorded (its task_id field already carries
+// this verification's id — see AuditVerifyChainJobID — so nothing here is
+// lost by not repeating it in a second log line).
 func (h *AuditVerificationHandler) ProcessTask(ctx context.Context, task *asynq.Task) error {
 	var payload VerifyAuditChainPayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
-		// A malformed payload can never succeed on retry — asynq.SkipRetry
-		// tells Asynq not to waste its retry budget on it.
-		return fmt.Errorf("jobs: unmarshal verify-audit-chain payload: %w: %w", err, asynq.SkipRetry)
+		// A malformed payload can never succeed on retry — Permanent
+		// (combined with asynq.SkipRetry under the hood) tells Asynq not to
+		// waste its retry budget on it, and preserves FailureCategoryPermanent
+		// for LoggingMiddleware/NewAuditVerificationErrorHandler to read back.
+		return Permanent(FailureCategoryPermanent, fmt.Errorf("jobs: unmarshal verify-audit-chain payload: %w", err))
 	}
 
-	if err := h.verifier.RunVerification(ctx, payload.VerificationID); err != nil {
-		h.logger.ErrorContext(ctx, "audit chain verification task failed",
-			slog.String("verification_id", payload.VerificationID.String()),
-			slog.String("error", err.Error()),
-		)
-		return err
-	}
-	return nil
+	return h.verifier.RunVerification(ctx, payload.VerificationID)
 }
 
 // NewAuditVerificationErrorHandler returns an asynq.ErrorHandler that

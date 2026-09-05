@@ -45,18 +45,22 @@ backend. It reflects decisions already made; it is not a menu of options.
 - Redis
 - Asynq
 
-Implemented (System 11): long-running audit-chain verification
-(`internal/jobs`, `internal/realtime` — see docs/AUDIT_CHAIN.md). The
-worker runs embedded in the same process as the HTTP server
-(`cmd/server/main.go`), not a separate deployment unit; Redis's role is
-Asynq's queue transport only — PostgreSQL remains the authoritative store
-for verification state.
+Implemented (System 11, generalized as reusable infrastructure by System
+12): long-running audit-chain verification (`internal/jobs`,
+`internal/realtime` — see docs/AUDIT_CHAIN.md and
+docs/BACKGROUND_JOBS.md). The worker runs embedded in the same process as
+the HTTP server (`cmd/server/main.go`), not a separate deployment unit;
+Redis's role is Asynq's queue transport only (plus queue priority — see
+`internal/jobs.QueueCritical`/`QueueDefault`) — PostgreSQL remains the
+authoritative store for verification state. System 12 evaluated
+certificate generation and redaction as candidates and deliberately kept
+both synchronous — see docs/BACKGROUND_JOBS.md's "Task Types".
 
 Not yet used for:
 
-- Certificate generation
-- Background document processing
-- Future OCR/AI workloads
+- Certificate generation (evaluated, kept synchronous — see above)
+- Redaction (evaluated, kept synchronous — see above)
+- Future OCR/AI workloads (no such pipeline exists yet)
 - Other asynchronous jobs
 
 ## Validation
@@ -121,6 +125,11 @@ through 7 needs it).
 (`net/http`/Gin's own streaming response support — no new dependency for
 SSE itself) — both already reserved for exactly this use in "Core"/"Async
 Processing" above. See docs/AUDIT_CHAIN.md.
+
+**System 12 (Asynchronous Processing & Background Jobs):** no new
+dependency — generalizes System 11's existing `github.com/hibiken/asynq`
+usage into reusable infrastructure (`internal/jobs`); no new library was
+needed. See docs/BACKGROUND_JOBS.md.
 
 Not yet added, pending the systems that need them: AES-256, RSA,
 `go-playground/validator`. Adding any of these before their owning system

@@ -131,9 +131,14 @@ type AuditListResult struct {
 // VerificationDetail/GET /audit/verify-chain/:id for the actual outcome.
 // If a verification was already QUEUED/RUNNING, this is THAT run's own
 // id/status/created_at, never a duplicate second run (see
-// AuditService.StartVerification's doc comment).
+// AuditService.StartVerification's doc comment). JobID (System 12) is the
+// Asynq task ID this verification runs as — deterministically derived
+// from ID alone (see jobs.AuditVerifyChainJobID), so it is always
+// present, even when this response describes an already-active run this
+// call did not itself enqueue.
 type StartVerificationResult struct {
 	ID        uuid.UUID `json:"verification_id"`
+	JobID     string    `json:"job_id"`
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -148,6 +153,7 @@ type StartVerificationResult struct {
 // content, SQL text, file paths, or credentials.
 type VerificationDetail struct {
 	ID                uuid.UUID  `json:"verification_id"`
+	JobID             string     `json:"job_id"`
 	Status            string     `json:"status"`
 	EntriesChecked    int64      `json:"entries_checked"`
 	TotalEntries      *int64     `json:"total_entries,omitempty"`
@@ -387,7 +393,7 @@ func (s *AuditService) StartVerification(ctx context.Context, user auth.Authenti
 		},
 	})
 
-	return &StartVerificationResult{ID: row.ID, Status: row.Status, CreatedAt: row.CreatedAt}, nil
+	return &StartVerificationResult{ID: row.ID, JobID: jobs.AuditVerifyChainJobID(row.ID), Status: row.Status, CreatedAt: row.CreatedAt}, nil
 }
 
 // GetVerification authorizes user for audit:verify, then returns one
@@ -830,7 +836,7 @@ func (s *AuditService) MarkVerificationOperationallyFailed(ctx context.Context, 
 
 func toVerificationDetail(r generated.AuditVerification) VerificationDetail {
 	d := VerificationDetail{
-		ID: r.ID, Status: r.Status, EntriesChecked: r.EntriesChecked,
+		ID: r.ID, JobID: jobs.AuditVerifyChainJobID(r.ID), Status: r.Status, EntriesChecked: r.EntriesChecked,
 		TotalEntries: r.TotalEntries, LastSeqChecked: r.LastSeqChecked,
 		FailedEntryID: r.FailedEntryID, FailedSeq: r.FailedSeq,
 		FailureType: stringOrEmpty(r.FailureType), FailureReason: stringOrEmpty(r.FailureReason),

@@ -99,12 +99,15 @@ func run(ctx context.Context, a *app.App) {
 	redisOpt := asynq.RedisClientOpt{Addr: a.Config.Redis.Addr, Password: a.Config.Redis.Password, DB: a.Config.Redis.DB}
 	errorHandler := jobs.NewAuditVerificationErrorHandler(a.AuditService, a.Logger)
 	worker := jobs.NewServer(redisOpt, errorHandler, a.Logger)
-	mux := jobs.NewMux(jobs.NewAuditVerificationHandler(a.AuditService, a.Logger))
+	mux := jobs.NewMux(a.Logger, jobs.NewAuditVerificationHandler(a.AuditService))
 
 	a.Logger.Info("starting server",
 		slog.String("addr", a.Config.Server.Addr()),
 		slog.String("env", a.Config.App.Env),
 		slog.String("version", a.Config.App.Version),
+	)
+	a.Logger.Info("starting background worker",
+		slog.String("queues", fmt.Sprintf("%s=6,%s=2", jobs.QueueCritical, jobs.QueueDefault)),
 	)
 
 	serverErr := make(chan error, 1)

@@ -598,6 +598,21 @@ Handler (internal/handlers/audit) -- AuditService.StartVerification
 
 ### Job architecture
 
+> **System 12 note:** `internal/jobs` is now Evidentia's general-purpose
+> background-job infrastructure, not audit-verification-specific code —
+> see [docs/BACKGROUND_JOBS.md](./BACKGROUND_JOBS.md) for the full
+> architecture (queue priority, retry classification, structured logging,
+> job IDs). `AUDIT_CHAIN_VERIFY` is that infrastructure's first and, so
+> far, only task type, refactored onto it with **no change** to any of
+> the behavior this section describes below. One addition: `POST
+> /audit/verify-chain`/`GET /audit/verify-chain/:id` now also return
+> `job_id` — a deterministic, traceable Asynq task ID
+> (`jobs.AuditVerifyChainJobID`) derived from `verification_id` alone,
+> which also makes a duplicate enqueue for the same verification
+> impossible at the Asynq layer itself (`asynq.ErrTaskIDConflict`),
+> underneath (never instead of) the database-level
+> `idx_audit_verifications_single_active` dedup described below.
+
 `internal/jobs` wraps `github.com/hibiken/asynq` (Redis-backed task queue —
 already on the approved stack per TECH_STACK.md, unused until this
 system). `VerifyAuditChainPayload` carries **only** a `verification_id`
@@ -606,7 +621,9 @@ fact (which entries to check, what "correct" looks like) fresh from
 PostgreSQL itself, exactly like `audit.Event` lets no client-supplied
 field influence a hash; a client can never smuggle an expected hash,
 canonicalization rule, chain head, or verification result through this
-payload.
+payload. It now runs on `jobs.QueueCritical` — System 12's highest-
+priority queue, reserved for security-critical work — rather than a
+plain, unnamed default queue.
 
 The worker (`asynq.Server` + `asynq.ServeMux`) runs **embedded in the
 same process/binary as the HTTP server** (`cmd/server/main.go`), not a

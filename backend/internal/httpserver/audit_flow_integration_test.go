@@ -68,6 +68,7 @@ type startVerificationEnvelope struct {
 	Success bool `json:"success"`
 	Data    struct {
 		VerificationID string    `json:"verification_id"`
+		JobID          string    `json:"job_id"`
 		Status         string    `json:"status"`
 		CreatedAt      time.Time `json:"created_at"`
 	} `json:"data"`
@@ -78,6 +79,7 @@ type verificationDetailEnvelope struct {
 	Success bool `json:"success"`
 	Data    struct {
 		VerificationID  string   `json:"verification_id"`
+		JobID           string   `json:"job_id"`
 		Status          string   `json:"status"`
 		EntriesChecked  int64    `json:"entries_checked"`
 		TotalEntries    *int64   `json:"total_entries"`
@@ -230,7 +232,7 @@ func newTestAuditWorker(t *testing.T, application *app.App) func() {
 	redisOpt := asynq.RedisClientOpt{Addr: envOr("REDIS_ADDR", "localhost:6379")}
 	errorHandler := jobs.NewAuditVerificationErrorHandler(application.AuditService, application.Logger)
 	server := jobs.NewServer(redisOpt, errorHandler, application.Logger)
-	mux := jobs.NewMux(jobs.NewAuditVerificationHandler(application.AuditService, application.Logger))
+	mux := jobs.NewMux(application.Logger, jobs.NewAuditVerificationHandler(application.AuditService))
 
 	go func() {
 		_ = server.Run(mux)
@@ -341,6 +343,9 @@ func TestAuditFlow_EndToEnd(t *testing.T) {
 	require.NotEmpty(t, startResp.Data.VerificationID)
 	require.Contains(t, []string{"QUEUED", "RUNNING"}, startResp.Data.Status)
 	verificationID := startResp.Data.VerificationID
+	// System 12: job_id is a traceable, deterministic identifier for the
+	// underlying Asynq task — see jobs.AuditVerifyChainJobID.
+	require.Equal(t, "audit:verify_chain:"+verificationID, startResp.Data.JobID)
 
 	// 8. IDOR: POLICE/FORENSICS cannot inspect this verification either.
 	rec, _ = doVerificationStatus(t, router, policeToken, verificationID)
@@ -351,6 +356,7 @@ func TestAuditFlow_EndToEnd(t *testing.T) {
 	// progress) reaches a terminal VERIFIED result.
 	final := pollVerificationUntilTerminal(t, router, adminToken, verificationID)
 	require.Equal(t, "VERIFIED", final.Data.Status, "this database's chain, however large from other tests/fixtures, must still be internally consistent")
+	require.Equal(t, startResp.Data.JobID, final.Data.JobID, "job_id must be stable across the entire run, not just the initial 202 response")
 	require.Greater(t, *final.Data.TotalEntries, int64(0))
 	require.NotNil(t, final.Data.ProgressPercent)
 	require.InDelta(t, 100.0, *final.Data.ProgressPercent, 0.01)
