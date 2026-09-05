@@ -106,6 +106,13 @@
   border-radius: 50%;
 }
 
+.icon-shape.diamond {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  transform: rotate(45deg);
+}
+
 .sidebar-spacer {
   flex: 1;
 }

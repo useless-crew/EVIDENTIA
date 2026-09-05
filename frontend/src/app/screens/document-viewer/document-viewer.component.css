@@ -440,3 +440,80 @@
 .cert-state-error {
   color: #fecaca;
 }
+
+.share-state {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.share-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.share-item {
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  padding: 10px 12px;
+  background: var(--color-section-alt);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.share-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.share-permission {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-navy-primary);
+}
+
+.share-status {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.share-status-active {
+  background: var(--color-success-bg, #e6f4ea);
+  color: var(--color-success, #2e7d4f);
+}
+
+.share-status-inactive {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.share-item-meta {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.btn-revoke-share {
+  align-self: flex-start;
+  margin-top: 4px;
+  background: transparent;
+  border: none;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-danger);
+  cursor: pointer;
+  padding: 0;
+}
+
+.btn-revoke-share:hover {
+  text-decoration: underline;
+}
+
+.btn-revoke-share:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

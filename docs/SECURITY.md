@@ -742,18 +742,20 @@ with no change required here.
 
 ### What System 4 does *not* do
 
-- **Business logic for audit/admin, and document sharing** —
+- **Business logic for audit/admin** —
   `internal/handlers/audit` and `internal/service/audit_service.go` remain
-  TODO stubs for a later system, as does
-  `internal/handlers/document/share.go`. Cases (System 5), document
-  upload/download (System 6), verify/certificate (System 7), and redact
-  are all implemented today — see "Implemented in System 5"/"Implemented
-  in System 6" above and "Case Management"/"Document Management"/
-  "Document Verification & Compliance Certificates"/"Document Redaction"
-  below; every one of these used exactly the primitives
-  (`app.App.AuthzService`,
+  TODO stubs for a later system. Cases (System 5), document
+  upload/download (System 6), verify/certificate (System 7), redact, and
+  document sharing are all implemented today — see "Implemented in
+  System 5"/"Implemented in System 6" above and "Case Management"/"Document Management"/
+  "Document Verification & Compliance Certificates"/"Document Redaction"/
+  "Document Sharing" below; every one of these used exactly the
+  primitives (`app.App.AuthzService`,
   `RequirePermission`/`RequireCaseAccess`/`RequireDocumentAccess`) this
-  system built, with no changes to `internal/authz` itself.
+  system built, with no changes to `internal/authz` itself (document
+  sharing's own delegated-access path is a new METHOD on the existing
+  `authz.Service`, not a new authorization engine — see "Document
+  Sharing" below).
 - **Membership-type-specific action gating** — see "Case-based ABAC"
   above.
 - **Finer-grained protected-information classification** beyond
@@ -980,8 +982,10 @@ and deliberately never document contents or storage credentials.
   interface-based `Recorder` any future hash-chained writer will
   implement, with no change required to `DocumentService`.
 - **Compliance certificates, document sharing** — certificates are now
-  System 7's job (below); `POST /documents/:id/share` remains a TODO
-  stub, a later system's scope.
+  System 7's job (below); document sharing is now also implemented (see
+  "Document Sharing" below), built on the storage layout this system
+  established (a share never touches an object or a hash — see that
+  section's "Sharing must never change document integrity").
 
 ## Document Verification & Compliance Certificates
 
@@ -1167,13 +1171,14 @@ logic was introduced (still System 8's job).
 - **The audit hash chain** — `DOCUMENT_*`/`CERTIFICATE_*` events go
   through the existing interface-based `Recorder`; computing or verifying
   a hash chain over `audit_log` remains System 8's job.
-- **Redaction, document sharing** — `POST /documents/:id/share` remains
-  out of scope; redaction is now implemented (see "Document Redaction"
-  below), built on top of exactly the verify/certificate independence
-  this system established — a redacted derivative gets its own
-  certificate, bound to its own hash, with no change to this system's
-  code. System 7 itself preserves the original object/hash exactly as
-  System 6 left them.
+- **Redaction, document sharing** — both are now implemented (see
+  "Document Redaction" and "Document Sharing" below), built on top of
+  exactly the verify/certificate independence this system established —
+  a redacted derivative gets its own certificate, bound to its own hash,
+  and a shared document's certificate is reachable by its recipient
+  (per the share's permission) with no change to this system's code.
+  System 7 itself preserves the original object/hash exactly as System 6
+  left them.
 - **A public certificate-verification HTTP endpoint** —
   `CertificateService.VerifyCertificateIntegrity` provides the capability
   (used directly by this system's own tests), but no route exposes it
@@ -1335,8 +1340,10 @@ exactly as System 6/7 already established for their own `DOCUMENT_*`/
 - **PDF or any non-raster-image redaction** — see above; refused safely,
   never faked.
 - **The audit hash chain** — unchanged.
-- **Document sharing, a standalone `GET /documents/:id`** — remain out of
-  scope; see API_ENDPOINTS.md's "Not yet implemented".
+- **A standalone `GET /documents/:id`** — remains out of scope; see
+  API_ENDPOINTS.md's "Not yet implemented" (document sharing, a
+  once-planned "not yet" item here, is now implemented — see "Document
+  Sharing" below).
 - **Expanding who may redact** — `document:redact` remains ADMIN-only,
   per existing System 4 policy; this system does not touch
   `role_permissions`.
@@ -1344,6 +1351,266 @@ exactly as System 6/7 already established for their own `DOCUMENT_*`/
   bounded by the same `MAX_UPLOAD_SIZE` originals are (an in-memory
   decode/re-encode is unavoidable for real pixel-level content removal);
   Asynq remains unintroduced, per `TECH_STACK.md`.
+
+## Document Sharing
+
+`internal/service.ShareService`, `internal/handlers/document/share*.go`,
+`internal/handlers/shared`, `internal/handlers/user.Search` implement
+`POST /documents/:id/share`, `GET /documents/:id/shares`,
+`POST /documents/:id/shares/:shareId/revoke`, `GET /shared/documents`, and
+`GET /users/search` — see [API_ENDPOINTS.md](./API_ENDPOINTS.md)'s
+Documents section for the request/response contract. This section covers
+the security-relevant design decisions. The core guarantee:
+
+> A share is a controlled, revocable authorization GRANT — never
+> ownership transfer, never a second, independent access path that
+> bypasses RBAC/ABAC/RLS. It is a second AUTHORIZATION PATH alongside
+> case membership, evaluated by the exact same centralized
+> `authz.Service.CanAccessDocument` every document route already calls.
+
+```text
+documents_select RLS (and CanAccessDocument's Go-side mirror) permits SELECT/access when:
+
+    current_app_role() = 'ADMIN'
+    OR (case member of the document's case)              <- the ORIGINAL authorization path
+    OR has_active_document_share(document.id, caller.id)  <- the NEW, narrower path this system adds
+```
+
+### Authorization: one centralized check, two paths, never a third
+
+`ShareService.CreateShare`/`ListShares`/`RevokeShare` all authorize via
+`authz.Service.CanAccessDocument(user, documentID, authz.ActionDocumentShare)`
+— the identical RBAC-AND-ABAC pattern verify/download/redact/certificate
+already use. No new authorization engine, no hand-rolled role check.
+`document:share` was already seeded (System 2/4) and already held by
+POLICE/LAWYER/ADMIN per the existing role_permissions matrix — this
+system reuses that grant rather than expanding it.
+
+The genuinely new piece is `authz.Service.shareGrantsAccess`
+(`internal/authz/share_policy.go`), consulted only AFTER RBAC passes and
+ONLY once the ORIGINAL case-relationship check has already failed — a
+second, narrower fallback, never a replacement:
+
+```go
+allowed, _ := HasPermission(user, action)     // RBAC — unchanged, checked FIRST
+...
+if rel.isOwner || rel.isMember { allow }       // ABAC path 1 — unchanged
+delegated, _ := shareGrantsAccess(user, documentID, action)
+if delegated { allow }                         // ABAC path 2 — NEW
+deny
+```
+
+Because RBAC is checked first and is completely unaffected by sharing, a
+share can only ever grant an action-TYPE the recipient's ROLE already
+holds via RBAC — it only closes the "which SPECIFIC document" gap, never
+the "which KIND of action" gap. A LAWYER (who holds no `document:verify`
+permission at all, per the seed data) cannot verify a shared document
+even with a `VERIFY`-tier share; a FORENSICS user (who does hold
+`document:verify`) can, once shared with, verify a document outside
+their case. This is a direct, tested consequence of reusing RBAC exactly
+as-is (`TestShareService_DelegatedAccess_VerifyGrantsBoth` uses FORENSICS
+for exactly this reason, not LAWYER).
+
+### RLS: a second authorization path, and the recursion it caused
+
+Master prompt guidance asked for RLS to permit access when "the user is
+directly authorized OR has an active valid delegated access" — implemented
+by adding an OR-branch to the EXISTING `documents_select` and
+`compliance_certificates_select` policies (via `ALTER POLICY`, never a
+DROP+recreate that could silently lose behavior).
+
+The first implementation attempt inlined a raw
+`EXISTS (SELECT 1 FROM document_shares ...)` into that branch — and
+immediately hit PostgreSQL error 42P17, "infinite recursion detected in
+policy for relation documents". The reason: `document_shares` carries its
+OWN RLS policy (`document_shares_select`), which itself joins back into
+`documents` (so a case member can see a document's share list). Evaluating
+`documents_select`'s new branch therefore required evaluating
+`document_shares_select`, which required re-evaluating `documents_select`
+— an unbounded cycle PostgreSQL correctly refuses to run.
+
+The fix: `has_active_document_share(document_id, user_id)`, a
+`SECURITY DEFINER` SQL function owned by the migrator role (a superuser —
+superusers are exempt from RLS unconditionally, `FORCE ROW LEVEL SECURITY`
+notwithstanding). Calling it from `documents_select` queries
+`document_shares` directly, without ever re-entering `document_shares`'s
+own RLS, breaking the cycle. `document_shares_select` itself is
+unaffected and still safely references `documents` in the other
+direction (evaluating `documents_select`, which no longer loops back) —
+see `db/migrations/000004_document_sharing.up.sql`'s inline comment at
+the `CREATE FUNCTION` site for the full mechanical explanation, and
+`TestMigration_UpDownUpIsReproducible` (`backend/tests/db_migration_test.go`)
+for proof the schema still applies cleanly from scratch.
+
+### Permission tiers: VIEW and VERIFY only, deliberately no DOWNLOAD
+
+`document_shares.permission` is `VIEW` or `VERIFY` — not a third
+`DOWNLOAD` tier some early drafts of this feature's spec suggested. This
+application has no distinct "view metadata without downloading bytes"
+capability (no inline document renderer exists — see
+`document-viewer.component.ts`'s own "Inline preview is not available"
+note), so `VIEW` already covers `document:read` + `document:download` +
+`certificate:read` (a certificate is no more sensitive than the hash it
+already contains — master prompt: "certificate access follows document
+view permission"). `VERIFY` is a strict superset, additionally granting
+`document:verify`. Neither tier — at any level — ever grants
+`document:redact`, `document:share` (resharing), `certificate:create`, or
+any write/delete action; this is enforced structurally in
+`internal/authz/share_policy.go`'s `shareViewActions`/`shareVerifyActions`
+maps (an action simply never appears in either map, rather than being
+excluded by a runtime check that could be gotten wrong) and verified
+directly by `TestShareService_DelegatedAccess_CannotRedactViaShare` and
+`TestShareService_DelegatedAccess_CannotReshareViaShare` — the latter
+using a `VERIFY`-tier share (the highest tier) specifically to prove even
+the most privileged share still cannot reshare.
+
+### Expiration and revocation: server-enforced, both layers
+
+`expires_at` is optional (`NULL` = non-expiring) and, when present, must
+be strictly in the future at creation time. Expiry is evaluated
+server-side in TWO independent places that must agree: the SQL query
+`GetActiveShareForDocumentAndUser`/`has_active_document_share` (both
+filter on `expires_at IS NULL OR expires_at > now()`) and
+`shareGrantsAccess`'s own Go-side re-check of the same condition on the
+row it retrieves — belt-and-suspenders, not redundant decoration: neither
+layer trusts that the other already got it right.
+
+Revocation is a single, permanent `ACTIVE -> REVOKED` transition
+(`ShareService.RevokeShare`, backed by
+`UPDATE ... WHERE id = $1 AND document_id = $2 AND status = 'ACTIVE'`) —
+never a DELETE (no DELETE grant/query exists on `document_shares`, exactly
+like `redactions`/`compliance_certificates`), so the historical record of
+who was granted what, by whom, and when, is permanent. There is
+deliberately no "un-revoke": granting access again after revocation means
+creating a brand-new share row, which is what an owner reasonably wants
+anyway — an unbroken, auditable trail of "revoked, then a NEW grant was
+made" rather than a single row silently flipping back and forth.
+
+`TestShareService_DelegatedAccess_RevokedShareDeniesAccess` and
+`...ExpiredShareDeniesAccess` prove both are enforced immediately and
+server-side — a client cannot bypass either by simply not refreshing its
+own UI state, since the NEXT request re-evaluates
+`CanAccessDocument`/RLS from scratch every time (no session-cached
+authorization decision anywhere in this codebase).
+
+### IDOR protection
+
+Every share-touching route is document-scoped and goes through
+`RequireDocumentAccess`/`CanAccessDocument` exactly like every other
+document route — a document the caller has no relationship to (real or
+guessed ID) is denied with the SAME generic 403 as everywhere else in this
+codebase, never a distinguishable response. `RevokeShare`'s share lookup
+(`GetDocumentShareByID`) is additionally scoped to BOTH the share's own ID
+AND the document ID in the URL: a real share ID that happens to belong to
+a DIFFERENT document is treated identically to a nonexistent one (404),
+so a caller cannot probe whether a given share ID exists at all by
+supplying documents they merely guessed.
+`TestShareService_RevokeShare_CrossDocumentShareIDDenied` and the
+`document_share_flow_integration_test.go` HTTP-level IDOR block
+(FORENSICS attempting to list/create/revoke shares on a document it has
+no relationship to; POLICE attempting to revoke a real share through an
+unrelated document ID) cover this directly.
+
+### Recipient validation and enumeration resistance
+
+`ShareService.validateRecipient` confirms the named recipient exists AND
+is currently `active` — a single generic "Invalid or inactive recipient"
+message covers BOTH failure reasons (the same non-enumerating posture
+this codebase already applies to document/case IDOR responses, applied
+here to user IDs). `GET /users/search` (the recipient picker's only data
+source) requires authentication, a real query (minimum 2 characters —
+never a bare listing), returns only a small safe field subset (no phone,
+status, or timestamps), caps results at 10 regardless of match count,
+excludes inactive users, and excludes the caller themself — deliberately
+NOT gated behind the admin-only `user:read` permission (`GET /admin/users`
+remains ADMIN-only global user management, a materially different,
+more sensitive capability — see `UserService.ListUsers`'s own doc
+comment), since any authenticated user legitimately needs to find a share
+recipient.
+
+### Deactivation
+
+A recipient who is deactivated AFTER a share was created loses usable
+access immediately, on their VERY NEXT request — not because this system
+adds a new check, but because `internal/middleware.Auth` already
+re-resolves the caller's CURRENT status from the database on every single
+request (`AuthService.ResolveIdentity`, System 3), rejecting with a
+generic 401 before any document/share-specific authorization even runs.
+This system's own responsibility is narrower and already covered:
+refusing to CREATE a share naming an inactive recipient in the first
+place (see "Recipient validation" above) — the share record itself is
+never deleted when a recipient is later deactivated, preserving the
+historical grant for audit purposes; it simply becomes unusable exactly
+like every other authenticated route already is for that account.
+
+### Redacted-derivative sharing: lineage is never an authorization bypass
+
+A share is created against ONE EXACT `document_id` — the original OR a
+redacted derivative, never both. Sharing derivative `B` (from System 8)
+never grants access to source `A`, and sharing `A` never automatically
+shares `B`: `document_shares.document_id` names exactly one row, and
+`CanAccessDocument`'s delegated-access check only ever looks up a share
+for the SPECIFIC document ID being accessed — `documents.parent_document_id`
+is never consulted by any authorization path in this system.
+`TestShareService_RedactedDerivative_SharingDerivativeDoesNotGrantOriginal`
+proves this directly: a recipient with an active share on the derivative
+can download it, but the identical call against the original returns the
+same 403 anyone with no relationship to that document gets.
+
+### Document integrity is untouched
+
+`ShareService` never imports `internal/storage`, never touches
+`documents.sha256_hash`, and never calls anything that would (no
+`Storage.Put`, no hash recomputation). A share is a
+`document_shares` row and nothing else — sharing changes only access
+metadata. `TestShareService_DocumentIntegrity_SharingDoesNotChangeHash`
+uploads, records H1, shares, downloads and verifies as the recipient, and
+asserts the verification's `stored_hash` is bit-for-bit H1 — proving
+sharing created no new document version and rewrote no canonical hash.
+
+### Audit
+
+Every successful share creation records `DOCUMENT_SHARED` (document ID,
+recipient ID, permission, whether it expires — never raw file content);
+every revocation records `DOCUMENT_SHARE_REVOKED`. Both go through the
+same `internal/audit.Recorder` interface every prior system uses. No
+cryptographic audit-chain logic was introduced here — that remains a
+separate, later system's job, exactly as every prior system already
+established for its own events. Delegated download/verify access is
+audited exactly like any other download/verify — `DocumentService`
+records `DOCUMENT_DOWNLOADED`/`DOCUMENT_VERIFIED`/
+`DOCUMENT_INTEGRITY_FAILURE` identically regardless of whether the
+caller's access came from case membership or a share; there is
+deliberately no separate "accessed via delegation" audit action, since the
+share itself (queryable via `GET /documents/:id/shares`) is already the
+durable record of who was granted what.
+
+### What this system does *not* do
+
+- **A new authorization engine** — `authz.Service.CanAccessDocument` is
+  extended with one new fallback method
+  (`shareGrantsAccess`); RBAC (`HasPermission`) is completely untouched.
+- **Expanding who may share** — `document:share`'s existing
+  role_permissions grants (POLICE, LAWYER, ADMIN, per the seed data) are
+  reused unmodified; this system does not touch `role_permissions`.
+- **Public/anonymous links, link-plus-password access** — sharing is
+  strictly authenticated-user-to-authenticated-user; there is no token-
+  based link anywhere in this system, and no route that skips
+  `middleware.Auth`.
+- **The audit hash chain** — unchanged.
+- **An "act as user"/impersonation mechanism for ADMIN** — ADMIN's broad
+  access (via `isAdmin` in `CanAccessDocument`) is, as always, attributed
+  to ADMIN's own identity in every audit event; sharing adds no new
+  admin capability.
+- **Case-closure-aware share restrictions** — this codebase's existing
+  case lifecycle (`cases.status`) does not gate document access for
+  ANY existing route (upload, download, verify, redact) today; sharing
+  does not invent a new restriction that would apply to it alone and
+  nowhere else.
+- **Rate limiting** — this codebase has no general rate-limiting
+  infrastructure for ANY route yet (a future system's scope, per
+  `TECH_STACK.md`'s "Not yet added" list); sharing does not add one
+  either, consistent with reusing only what already exists.
 
 ## Cryptography
 

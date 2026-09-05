@@ -211,6 +211,83 @@ export interface RedactionSummary {
   document: DocumentSummary;
 }
 
+/** document_shares.permission — VIEW (read + download + certificate
+ * read) or VERIFY (VIEW's grants plus document:verify). Never implies
+ * redact/reshare/delete. */
+export type SharePermission = 'VIEW' | 'VERIFY';
+
+/** Stored share status (document_shares.status). */
+export type ShareStatus = 'ACTIVE' | 'REVOKED';
+
+/** Computed, API-facing status (service.ShareSummary.effective_status) —
+ * ACTIVE/REVOKED mirror the stored status; EXPIRED is derived from
+ * expires_at and never itself persisted. */
+export type ShareEffectiveStatus = 'ACTIVE' | 'EXPIRED' | 'REVOKED';
+
+/** POST /documents/:id/share's request body. */
+export interface CreateShareRequest {
+  user_id: string;
+  permission: SharePermission;
+  expires_at?: string;
+  reason?: string;
+}
+
+/** internal/service.ShareSummary — POST .../share and
+ * POST .../shares/:shareId/revoke's response data, and one entry of
+ * GET .../shares. */
+export interface ShareSummary {
+  share_id: string;
+  document_id: string;
+  recipient_user_id: string;
+  created_by_user_id: string;
+  permission: SharePermission;
+  status: ShareStatus;
+  effective_status: ShareEffectiveStatus;
+  expires_at?: string;
+  reason?: string;
+  created_at: string;
+  revoked_at?: string;
+  revoked_by_user_id?: string;
+}
+
+/** GET /documents/:id/shares's response data. */
+export interface ShareListResult {
+  shares: ShareSummary[];
+}
+
+/** internal/service.SharedDocumentSummary — one row of
+ * GET /shared/documents. */
+export interface SharedDocumentSummary {
+  share_id: string;
+  permission: SharePermission;
+  expires_at?: string;
+  shared_at: string;
+  shared_by_user_id: string;
+  document: DocumentSummary;
+}
+
+/** GET /shared/documents's response data. */
+export interface SharedWithMeResult {
+  documents: SharedDocumentSummary[];
+  meta: PageMeta;
+}
+
+/** internal/service.RecipientCandidate — GET /users/search's per-user
+ * shape. Deliberately minimal — no phone/status/timestamps. */
+export interface RecipientCandidate {
+  id: string;
+  first_name: string;
+  last_name: string;
+  display_name?: string;
+  email: string;
+  roles: Role[];
+}
+
+/** GET /users/search's response data. */
+export interface UserSearchResult {
+  users: RecipientCandidate[];
+}
+
 /** GET /documents/:id/certificate's response data (service.CertificateSummary). */
 export interface CertificateSummary {
   id: string;

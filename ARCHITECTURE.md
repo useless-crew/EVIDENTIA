@@ -552,6 +552,101 @@ share; expanding `document:redact` beyond ADMIN. Full design:
 `backend/internal/service/document_redact_integration_test.go`,
 `backend/internal/httpserver/document_redact_flow_integration_test.go`.
 
+## Document Sharing (Implemented)
+
+```text
+internal/handlers/document.Share (POST, JSON body: user_id/permission/expires_at/reason)
+    |
+    v
+internal/service.ShareService.CreateShare
+    |
+    +--> authz.Service.CanAccessDocument(ctx, user, sourceID, ActionDocumentShare)
+    |      (the IDENTICAL RBAC+ABAC check every document route already uses)
+    +--> validate permission (VIEW|VERIFY) / expires_at (future or nil) / not self-share
+    +--> repository.WithTx: GetDocumentByID (under RLS) — confirms case_id, re-authorizes
+    +--> validateRecipient — GetUserByID, must exist AND status = active
+    +--> repository.WithTx: CreateDocumentShare
+    |      (document_shares_active_unique violation -> 409, one active share per pair)
+    +--> audit.Recorder — DOCUMENT_SHARED
+
+internal/authz.Service.CanAccessDocument (EVERY document/certificate route, unchanged call site)
+    |
+    +--> HasPermission(action)                          <- RBAC, unchanged, checked FIRST
+    +--> GetDocumentByID (RLS now ALSO allows a valid share — see below)
+    +--> isAdmin -> allow
+    +--> loadCaseRelationship -> isOwner/isMember -> allow
+    +--> shareGrantsAccess(user, documentID, action)     <- NEW fallback, ABAC path 2
+    |      (only for Read/Download/CertificateRead/Verify — never Redact/Share/
+    |       CertificateCreate, which are simply absent from its action maps)
+    +--> deny
+```
+
+The genuinely new authorization surface is exactly one method,
+`authz.Service.shareGrantsAccess` (`internal/authz/share_policy.go`),
+consulted only once RBAC has already passed AND the existing case-
+relationship check has already failed — a second, narrower fallback, never
+a replacement for either. No new authorization engine; no route's
+existing middleware/handler changed.
+
+Routes registered in `internal/httpserver/router.go`:
+
+```text
+POST /api/v1/documents/:id/share                    Auth + RequireDocumentAccess(document:share, "id") + jsonBodyLimit
+GET  /api/v1/documents/:id/shares                   Auth + RequireDocumentAccess(document:share, "id")
+POST /api/v1/documents/:id/shares/:shareId/revoke   Auth + RequireDocumentAccess(document:share, "id")
+GET  /api/v1/shared/documents                       Auth only ("Shared With Me")
+GET  /api/v1/users/search                           Auth only (recipient picker)
+```
+
+**No new RBAC permission was needed**: `document:share` was already
+seeded (System 2/4) and already granted to POLICE/LAWYER/ADMIN in the
+existing `role_permissions` matrix — unused by any route until now. This
+system does not touch `role_permissions`.
+
+**sqlc/migration**: `000004_document_sharing.up.sql` adds `document_shares`
+(permission/status/expires_at/revoked_at/revoked_by_user_id, a partial
+`UNIQUE (document_id, shared_with_user_id) WHERE status = 'ACTIVE'` index
+doubling as both the hot-path lookup index and the duplicate-active-share
+guard), its own RLS policies, and — the one genuinely novel piece —
+`has_active_document_share`, a `SECURITY DEFINER` function that exists
+solely to break an RLS<->RLS circular dependency: `documents_select`'s
+new delegated-access branch needs to check `document_shares`, but
+`document_shares_select` itself needs to check `documents` (for its own
+case-member visibility rule), and PostgreSQL refuses to evaluate that
+cycle (SQLSTATE 42P17, "infinite recursion detected in policy"). The
+function, owned by the migrator role (a superuser, hence RLS-exempt
+regardless of `FORCE`), queries `document_shares` without re-entering its
+RLS, breaking the cycle cleanly — see
+[docs/SECURITY.md](./docs/SECURITY.md)'s "Document Sharing" for the full
+incident writeup and [docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md)
+for the schema-level summary. Two new queries
+(`GetActiveShareForDocumentAndUser`, `ListSharedWithMe`) support the
+authorization hot path and the "Shared With Me" listing respectively.
+
+**What's genuinely new here**: `internal/service/document_share.go`
+(`ShareService` — create/list/revoke/"Shared With Me"/recipient search),
+`internal/authz/share_policy.go` (the delegated-access check and its
+strict VIEW/VERIFY -> Action maps), `internal/handlers/document/share*.go`,
+the new `internal/handlers/shared` package, and
+`internal/handlers/user.Search` (deliberately NOT gated by the admin-only
+`user:read` permission — a narrower, safer capability any authenticated
+user needs to find a share recipient). `DocumentSummary.parent_document_id`
+(already added by the redaction system) is reused as-is for "Shared With
+Me"'s document metadata — no new document-summary shape was needed.
+
+**What's deliberately not here**: a third `DOWNLOAD` permission tier
+(`VIEW` already covers it — this application has no distinct
+metadata-only view separate from download); public/anonymous links or
+link-plus-password access (strictly authenticated user-to-user, every
+route behind `middleware.Auth`); an "act as user" mechanism for ADMIN;
+rate limiting (this codebase has none for any route yet); the audit hash
+chain. Full design: [docs/SECURITY.md](./docs/SECURITY.md)'s "Document
+Sharing" section; tests:
+`backend/internal/authz/share_policy_test.go`,
+`backend/internal/service/document_share_test.go`,
+`backend/internal/service/document_share_integration_test.go`,
+`backend/internal/httpserver/document_share_flow_integration_test.go`.
+
 ## Request Flow (Intended, Later Systems)
 
 ```text

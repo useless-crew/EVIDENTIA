@@ -81,7 +81,7 @@ func truncateAll(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `
 		TRUNCATE TABLE
-			compliance_certificates, audit_log, redactions, documents,
+			document_shares, compliance_certificates, audit_log, redactions, documents,
 			case_involved_parties, case_members, cases,
 			role_permissions, user_roles, permissions, roles, users
 		RESTART IDENTITY CASCADE`)

@@ -40,7 +40,7 @@
           Create Redacted Copy
         </button>
 
-        <button type="button" class="btn-primary" disabled title="Document sharing is not available yet">
+        <button type="button" class="btn-primary" (click)="openShareDialog()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="18" cy="5" r="3"></circle>
             <circle cx="6" cy="12" r="3"></circle>
@@ -166,7 +166,60 @@
             </div>
           </div>
         </div>
+
+        <!-- Shared With — only rendered when the backend's own
+             GET /documents/:id/shares call actually succeeded for this
+             caller (see canManageShares's doc comment); frontend
+             visibility is not the security boundary here, the backend
+             re-checks every call regardless. -->
+        <div class="side-card" *ngIf="canManageShares()">
+          <h2 class="side-card-title">Shared With</h2>
+
+          <div *ngIf="sharesLoading()" class="share-state">Loading shares…</div>
+
+          <div *ngIf="!sharesLoading() && shares().length === 0" class="share-state">
+            Not shared with anyone yet.
+          </div>
+
+          <div *ngIf="!sharesLoading() && shares().length > 0" class="share-list">
+            <div class="share-item" *ngFor="let s of shares()">
+              <div class="share-item-row">
+                <span class="share-permission font-mono">{{ s.permission }}</span>
+                <span class="share-status" [class.share-status-active]="s.effective_status === 'ACTIVE'"
+                      [class.share-status-inactive]="s.effective_status !== 'ACTIVE'">
+                  {{ s.effective_status }}
+                </span>
+              </div>
+              <div class="share-item-meta font-mono">
+                recipient · {{ s.recipient_user_id }}
+              </div>
+              <div class="share-item-meta" *ngIf="s.expires_at">
+                expires {{ s.expires_at | date: 'medium' }}
+              </div>
+              <div class="share-item-meta" *ngIf="!s.expires_at">no expiration</div>
+              <button
+                type="button"
+                class="btn-revoke-share"
+                *ngIf="s.effective_status === 'ACTIVE'"
+                [disabled]="revokingShareId() === s.share_id"
+                (click)="revokeShare(s.share_id)"
+              >
+                {{ revokingShareId() === s.share_id ? 'Revoking…' : 'Revoke' }}
+              </button>
+            </div>
+          </div>
+
+          <div class="inline-error" *ngIf="shareActionError()">{{ shareActionError() }}</div>
+        </div>
       </div>
     </div>
   </ng-container>
+
+  <app-share-dialog
+    *ngIf="shareDialogOpen() && doc() as d"
+    [documentId]="documentId"
+    [documentFilename]="d.filename"
+    (closed)="onShareDialogClosed()"
+    (shared)="onShared($event)"
+  ></app-share-dialog>
 </div>

@@ -13,6 +13,7 @@ package service
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -31,16 +32,25 @@ import (
 // can assert exactly which (if any) events a call produced — a false
 // "success" audit event for a failed mutation is exactly what master
 // prompt §25/§42 forbids, and a spy is how these tests catch it were it to
-// ever happen.
+// ever happen. mu guards Record/actions against concurrent access: some
+// tests (e.g. TestCertificateService_GetOrCreateCertificate_
+// ConcurrentGenerationProducesOneCertificate) deliberately call the
+// service under test from multiple goroutines at once, and every one of
+// those calls records through the same spyRecorder.
 type spyRecorder struct {
+	mu     sync.Mutex
 	events []audit.Event
 }
 
 func (s *spyRecorder) Record(_ context.Context, event audit.Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.events = append(s.events, event)
 }
 
 func (s *spyRecorder) actions() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	actions := make([]string, len(s.events))
 	for i, e := range s.events {
 		actions[i] = e.Action
@@ -52,7 +62,7 @@ func truncateCaseTables(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `
 		TRUNCATE TABLE
-			compliance_certificates, audit_log, redactions, documents,
+			document_shares, compliance_certificates, audit_log, redactions, documents,
 			case_involved_parties, case_members, cases,
 			role_permissions, user_roles, permissions, roles, users
 		RESTART IDENTITY CASCADE`)

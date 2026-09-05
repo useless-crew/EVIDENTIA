@@ -198,7 +198,17 @@ the resulting hash, already computed by this pipeline, is persisted.
 ## Future Systems (Not Implemented Here)
 
 - The audit hash chain itself (`audit_log.hash`/`prev_hash`); System 6/7's
-  `DOCUMENT_*`/`CERTIFICATE_*` events, and redaction's own
-  `DOCUMENT_REDACTED`/`DOCUMENT_INTEGRITY_FAILURE` events, go through the
+  `DOCUMENT_*`/`CERTIFICATE_*` events, redaction's own
+  `DOCUMENT_REDACTED`/`DOCUMENT_INTEGRITY_FAILURE` events, and sharing's
+  own `DOCUMENT_SHARED`/`DOCUMENT_SHARE_REVOKED` events, go through the
   same `audit.Recorder` interface System 3/4/5 already use (today: the
   operational log only).
+
+Document sharing (now implemented — see
+[SECURITY.md](./SECURITY.md)'s "Document Sharing") deliberately never
+appears above this line as a storage-layer concern: a share is a
+`document_shares` row and nothing else. `ShareService` never calls
+`Storage.Put`/`Get`/`Delete`, never recomputes a hash, and never writes
+`documents.sha256_hash`/`storage_bucket`/`storage_object_key` — sharing
+changes only access metadata, exactly as this document's own pipelines
+already guarantee those columns are otherwise immutable.

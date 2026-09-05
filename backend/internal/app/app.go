@@ -70,6 +70,17 @@ type App struct {
 	// status, and admin-initiated password reset for
 	// /api/v1/admin/users*/roles and /api/v1/users/me.
 	UserService *service.UserService
+
+	// ShareService owns secure document sharing & access delegation (see
+	// internal/service.ShareService) — share creation/listing/revocation,
+	// the "Shared With Me" listing, and recipient search for
+	// POST/GET /documents/:id/share(s), the revoke route,
+	// GET /shared/documents, and GET /users/search. Depends on
+	// AuthzService for authorization exactly like every other document
+	// route (authz.ActionDocumentShare) and shares its
+	// delegated-access-check logic with CanAccessDocument itself (see
+	// internal/authz/share_policy.go) — no separate authorization engine.
+	ShareService *service.ShareService
 }
 
 // New loads configuration and connects every infrastructure dependency in
@@ -119,6 +130,7 @@ func New(ctx context.Context) (*App, error) {
 		return nil, fmt.Errorf("app: build certificate service: %w", err)
 	}
 	userService := service.NewUserService(db.Pool(), authzService, recorder, cfg.JWT.BcryptCost)
+	shareService := service.NewShareService(db.Pool(), authzService, recorder)
 
 	return &App{
 		Config:             cfg,
@@ -133,6 +145,7 @@ func New(ctx context.Context) (*App, error) {
 		DocumentService:    documentService,
 		CertificateService: certificateService,
 		UserService:        userService,
+		ShareService:       shareService,
 	}, nil
 }
 

@@ -31,6 +31,7 @@ type Querier interface {
 	// total for pagination metadata, not an unfiltered table count.
 	CountCasesFiltered(ctx context.Context, arg CountCasesFilteredParams) (int64, error)
 	CountDocumentsByCase(ctx context.Context, caseID uuid.UUID) (int64, error)
+	CountSharedWithMe(ctx context.Context, sharedWithUserID uuid.UUID) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	// Same filters as ListUsersFiltered — the caller's filtered total for
 	// pagination metadata, not an unfiltered table count.
@@ -87,6 +88,15 @@ type Querier interface {
 	// master prompt §16's upload ordering) and this INSERT records where it
 	// ended up.
 	CreateDocument(ctx context.Context, arg CreateDocumentParams) (Document, error)
+	// Evidentia — Document Sharing Queries
+	//
+	// Shares are immutable history once created: the only mutation is
+	// RevokeDocumentShare's single ACTIVE -> REVOKED transition (WHERE
+	// status = 'ACTIVE', so revoking an already-revoked share is a documented
+	// no-op — zero rows affected, never an error). There is no
+	// UpdateDocumentShare/DeleteDocumentShare query, and the runtime role
+	// holds no DELETE grant on this table (see the migration).
+	CreateDocumentShare(ctx context.Context, arg CreateDocumentShareParams) (DocumentShare, error)
 	// Evidentia — Case Involved-Party Queries
 	//
 	// metadata is documented as sensitive on the table itself (see migration).
@@ -107,6 +117,11 @@ type Querier interface {
 	// every call site. Every other query below deliberately omits it.
 	CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error)
 	GetActiveCaseMembership(ctx context.Context, arg GetActiveCaseMembershipParams) (CaseMember, error)
+	// The authorization hot path (internal/authz/share_policy.go) — mirrors
+	// documents_select's RLS OR-branch exactly (see the migration). Expiry is
+	// evaluated in SQL (now()) rather than in Go, so it can never drift from
+	// what the database itself would independently allow via RLS.
+	GetActiveShareForDocumentAndUser(ctx context.Context, arg GetActiveShareForDocumentAndUserParams) (DocumentShare, error)
 	GetAuditEntryByID(ctx context.Context, id uuid.UUID) (AuditLog, error)
 	GetAuthSessionByTokenHash(ctx context.Context, tokenHash []byte) (AuthSession, error)
 	GetCaseByCaseNumber(ctx context.Context, caseNumber string) (Case, error)
@@ -121,6 +136,11 @@ type Querier interface {
 	GetCertificateByDocumentID(ctx context.Context, documentID uuid.UUID) (ComplianceCertificate, error)
 	GetCertificateByID(ctx context.Context, id uuid.UUID) (ComplianceCertificate, error)
 	GetDocumentByID(ctx context.Context, id uuid.UUID) (Document, error)
+	// Scoped by document_id as well as id — see ShareService.RevokeShare's
+	// doc comment for why this is the IDOR-safety-relevant lookup (master
+	// prompt §16/§50: "cannot use another share ID" against a different
+	// document must not even resolve the row).
+	GetDocumentShareByID(ctx context.Context, arg GetDocumentShareByIDParams) (DocumentShare, error)
 	GetInvolvedPartyByID(ctx context.Context, id uuid.UUID) (CaseInvolvedParty, error)
 	// The current chain head — System 8's writer reads this to learn the
 	// prev_hash for the next entry it constructs.
@@ -162,6 +182,7 @@ type Querier interface {
 	ListCertificatesByDocument(ctx context.Context, documentID uuid.UUID) ([]ComplianceCertificate, error)
 	// Derivative (e.g. redacted) documents produced from a given source.
 	ListDocumentDerivatives(ctx context.Context, parentDocumentID *uuid.UUID) ([]Document, error)
+	ListDocumentSharesForDocument(ctx context.Context, documentID uuid.UUID) ([]DocumentShare, error)
 	ListDocumentsByCase(ctx context.Context, arg ListDocumentsByCaseParams) ([]Document, error)
 	ListInvolvedPartiesByCase(ctx context.Context, caseID uuid.UUID) ([]CaseInvolvedParty, error)
 	// Evidentia — Permission & Role-Permission Queries
@@ -171,6 +192,15 @@ type Querier interface {
 	// Evidentia — Role & User-Role Assignment Queries
 	ListRoles(ctx context.Context) ([]Role, error)
 	ListRolesForUser(ctx context.Context, userID uuid.UUID) ([]Role, error)
+	// Documents visibility for the "Shared With Me" view (master prompt
+	// §59): every document for which the caller holds a currently-active,
+	// unexpired share, newest share first. Joins into documents for display
+	// metadata directly — RLS's documents_select policy already permits this
+	// (see the migration's delegated-access OR-branch), so no separate
+	// authorization check is needed beyond "this share row exists and is
+	// valid", but ShareService still runs this under the caller's own RLS
+	// identity, never a privileged bypass.
+	ListSharedWithMe(ctx context.Context, arg ListSharedWithMeParams) ([]ListSharedWithMeRow, error)
 	ListUserIDsForRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error)
 	// Every filter is optional (NULL = "no constraint on this field") — same
@@ -195,6 +225,7 @@ type Querier interface {
 	// as sessionID's family — used when a revoked/rotated token is presented
 	// again (reuse detection: see master prompt §25).
 	RevokeAuthSessionFamily(ctx context.Context, familyID uuid.UUID) error
+	RevokeDocumentShare(ctx context.Context, arg RevokeDocumentShareParams) (DocumentShare, error)
 	UpdateCase(ctx context.Context, arg UpdateCaseParams) (Case, error)
 	UpdateDocumentStatus(ctx context.Context, arg UpdateDocumentStatusParams) error
 	UpdateUserLastLogin(ctx context.Context, id uuid.UUID) error

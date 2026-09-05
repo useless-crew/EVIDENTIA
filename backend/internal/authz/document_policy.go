@@ -14,11 +14,13 @@ import (
 
 // CanAccessDocument evaluates whether user may perform action on the
 // document identified by documentID. A document carries no independent
-// access grant of its own — access is inherited entirely from the user's
-// relationship to the document's case (master prompt §9: a LAWYER
-// attached to Case A does not thereby gain access to "every document in
-// the database", only documents belonging to a case they actually have a
-// relationship with).
+// access grant of its own — access is inherited from EITHER of two
+// paths: the user's relationship to the document's case (master prompt
+// §9: a LAWYER attached to Case A does not thereby gain access to "every
+// document in the database", only documents belonging to a case they
+// actually have a relationship with), OR an explicit, document-scoped
+// delegation via document_shares (see shareGrantsAccess below) — never
+// both required, never a third path.
 //
 // The document's own metadata is loaded — never its bytes; authorization
 // must never require reading a file out of MinIO (master prompt §24) —
@@ -70,10 +72,26 @@ func (s *Service) CanAccessDocument(ctx context.Context, user auth.Authenticated
 	if err != nil {
 		return Decision{}, err
 	}
-	if !rel.found || (!rel.isOwner && !rel.isMember) {
-		s.recordDenied(ctx, user, action, "document", &documentID, &caseID, "not_case_member")
-		return deny("not_case_member"), nil
+	if rel.found && (rel.isOwner || rel.isMember) {
+		return allow("case_relationship_verified"), nil
 	}
 
-	return allow("case_relationship_verified"), nil
+	// Second, narrower authorization path: a case-unrelated user may
+	// still hold a valid, ACTIVE, unexpired document_shares grant naming
+	// them as recipient for THIS EXACT document — master prompt §19's
+	// "user is directly authorized OR user has active valid delegated
+	// access". See share_policy.go's shareGrantsAccess for exactly which
+	// actions a share can ever cover (never redact/reshare/certificate-
+	// create — those never reach this branch regardless of what any
+	// share row says).
+	delegated, err := s.shareGrantsAccess(ctx, user, documentID, action)
+	if err != nil {
+		return Decision{}, err
+	}
+	if delegated {
+		return allow("delegated_share"), nil
+	}
+
+	s.recordDenied(ctx, user, action, "document", &documentID, &caseID, "not_case_member")
+	return deny("not_case_member"), nil
 }

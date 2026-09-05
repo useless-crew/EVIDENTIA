@@ -2,17 +2,19 @@
 
 ## Purpose
 
-The PostgreSQL schema for Evidentia — implemented in System 2 (Database &
-Data Layer). This document describes what exists today: 12 tables, their
+The PostgreSQL schema for Evidentia — the core (System 2, Database & Data
+Layer) plus `document_shares`, added later by the document-sharing
+system on top of it (`db/migrations/000004_document_sharing.up.sql`).
+This document describes what exists today: 13 tables, their
 relationships, Row-Level Security policies, and the privilege model that
 makes the audit log append-only at the database level, not just by
 application convention.
 
 Business logic that *uses* this schema (authentication, RBAC/ABAC
 enforcement, document upload, redaction processing, the audit-chain
-writer/verifier, compliance certificate generation) is explicitly **not**
-implemented here — see [ARCHITECTURE.md](../ARCHITECTURE.md) for which
-system owns each.
+writer/verifier, compliance certificate generation, document sharing) is
+explicitly **not** implemented here — see [ARCHITECTURE.md](../ARCHITECTURE.md)
+for which system owns each.
 
 ## Entities
 
@@ -29,6 +31,7 @@ documents
 redactions
 audit_log
 compliance_certificates
+document_shares
 ```
 
 There is no `refresh_tokens` table (an earlier scaffold placeholder):
@@ -56,6 +59,10 @@ erDiagram
     DOCUMENTS ||--|| REDACTIONS : "result of"
     DOCUMENTS ||--o{ COMPLIANCE_CERTIFICATES : "certified by"
 
+    DOCUMENTS ||--o{ DOCUMENT_SHARES : "shared via"
+    USERS ||--o{ DOCUMENT_SHARES : "receives (shared_with_user_id)"
+    USERS ||--o{ DOCUMENT_SHARES : "grants (created_by_user_id)"
+
     USERS ||--o{ AUDIT_LOG : performs
     CASES ||--o{ AUDIT_LOG : scopes
 ```
@@ -76,7 +83,9 @@ Users
  │                │
  │                ├──── Redactions (source_document_id / result_document_id)
  │                │
- │                └──── Compliance Certificates
+ │                ├──── Compliance Certificates
+ │                │
+ │                └──── Document Shares (shared_with_user_id, created_by_user_id -> Users)
  │
  └──── Audit Log (user_id, case_id — both nullable)
 ```
@@ -95,14 +104,21 @@ file's header/table comments for the fuller reasoning inline with the SQL.
 | Hashes (`sha256_hash`, `audit_log.hash`/`prev_hash`, `compliance_certificates.document_hash`) | `BYTEA`, `CHECK (octet_length(...) = 32)` | True binary data; hex-encode only at the API/JSON boundary |
 | Audit ordering | `seq BIGINT GENERATED ALWAYS AS IDENTITY`, `id UUID` kept as external identifier | Deterministic, gap-free ordering for chain traversal — timestamps alone aren't trusted (clock skew, concurrent inserts) |
 | Deletes | No hard-delete path for users/cases/documents/audit_log/certificates — `RESTRICT` on FKs into them, no `DELETE` grant on the runtime role | Evidence-integrity posture: lifecycle is status/timestamp-based (`status`, `removed_at`), never row deletion |
-| Agencies | **No separate table** | Not in the core domain list; per-case storage isolation already works off `case_id` alone. Revisit only when a concrete multi-agency requirement exists |
+| Agencies | **No separate table** | Not in the core domain list; per-case storage isolation already works off `case_id` alone. Document sharing (`document_shares`) reuses this exact same `case_id`-scoped isolation rather than inventing an agency concept — see docs/SECURITY.md's "Document Sharing" |
 | `document_type`/`document.status` | No `DELETED` status | Evidence is archived, never deleted, even at the vocabulary level |
+| `document_shares.status` | Only `ACTIVE`/`REVOKED` stored — no `EXPIRED` value | Expiration is a pure function of `expires_at` vs. `now()`, evaluated fresh on every access check (application AND RLS) rather than written back — the same "never repaired/rewritten" posture `documents.sha256_hash` follows |
+| RLS ↔ RLS recursion (`documents_select` needs to check `document_shares`, whose own policy needs to check `documents`) | A `SECURITY DEFINER` function (`has_active_document_share`, owned by the superuser migrator role) | Breaks the cycle: the function bypasses `document_shares`'s RLS internally (superusers are RLS-exempt regardless of `FORCE`), so `documents_select` never re-enters its own policy. See the migration's `CREATE FUNCTION` comment and docs/SECURITY.md's "Document Sharing" for the full incident/fix |
 
 ## Row-Level Security
 
 RLS is enabled (and `FORCE`d, so even the table owner is subject to it) on
-seven tables: `cases`, `case_members`, `case_involved_parties`,
-`documents`, `redactions`, `compliance_certificates`, `audit_log`.
+eight tables: `cases`, `case_members`, `case_involved_parties`,
+`documents`, `redactions`, `compliance_certificates`, `audit_log`,
+`document_shares`. `documents`/`compliance_certificates`'s own `SELECT`
+policies additionally consult `document_shares` (via the
+`has_active_document_share` `SECURITY DEFINER` function — see the Design
+Decisions table above) as a SECOND, narrower authorization path alongside
+case membership.
 
 `users`, `roles`, `permissions`, `user_roles`, `role_permissions`
 deliberately do **not** get RLS — there is no per-row ownership rule for
@@ -273,6 +289,15 @@ correct if a future system ever legitimately produces more than one
 canonical hash per document. (`000002_auth_sessions` predates this,
 added by System 3.)
 
+`000004_document_sharing.{up,down}.sql` (the document-sharing system)
+adds `document_shares` (see "Entities" above), the
+`has_active_document_share` `SECURITY DEFINER` helper function, and
+extends `documents_select`/`compliance_certificates_select` (via
+`ALTER POLICY`, never a DROP+recreate) with a delegated-access
+OR-branch — see the Design Decisions table above and
+[SECURITY.md](./SECURITY.md)'s "Document Sharing" for the full RLS-
+recursion incident this function exists to fix.
+
 The down migration is safe to run repeatedly against development/test
 databases (verified in `backend/tests/db_migration_test.go`, which applies
 it via the real `golang-migrate` library against an isolated database, not
@@ -314,7 +339,7 @@ Type overrides worth knowing about:
 Query files live in `backend/db/queries/*.sql`, one per domain
 (`users.sql`, `roles.sql`, `permissions.sql`, `cases.sql`,
 `case_members.sql`, `case_involved_parties.sql`, `documents.sql`,
-`redactions.sql`, `audit.sql`, `certificates.sql`). Every query lists
+`redactions.sql`, `audit.sql`, `certificates.sql`, `shares.sql`). Every query lists
 columns explicitly — no `SELECT *` — so a schema change surfaces as a
 compile error in `db/generated`, not a silent runtime mismatch.
 `password_hash` is selected by exactly one query

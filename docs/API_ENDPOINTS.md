@@ -3,9 +3,9 @@
 ## Purpose
 
 TODO: Document the full REST API surface for Evidentia. Cases, Case
-Documents (upload/download/verify/certificate/redact), Authentication,
-Admin (user management), and Health/Readiness are implemented today.
-Document share and Audit are not implemented yet — that section documents
+Documents (upload/download/verify/certificate/redact/share/shared-with-me),
+Authentication, Admin (user management), and Health/Readiness are
+implemented today. Audit is not implemented yet — that section documents
 the intended surface only.
 
 ## Authentication (implemented)
@@ -276,11 +276,15 @@ section above):
 
 ```text
 GET  /api/v1/documents/:id/download
-GET  /documents/:id                    (not implemented — see below)
-POST /api/v1/documents/:id/verify      (implemented — System 7)
-POST /api/v1/documents/:id/redact      (implemented)
-POST /documents/:id/share              (not implemented)
-GET  /api/v1/documents/:id/certificate (implemented — System 7)
+GET  /documents/:id                       (not implemented — see below)
+POST /api/v1/documents/:id/verify         (implemented — System 7)
+POST /api/v1/documents/:id/redact         (implemented)
+POST /api/v1/documents/:id/share          (implemented)
+GET  /api/v1/documents/:id/shares         (implemented)
+POST /api/v1/documents/:id/shares/:shareId/revoke (implemented)
+GET  /api/v1/shared/documents             (implemented)
+GET  /api/v1/users/search                 (implemented)
+GET  /api/v1/documents/:id/certificate    (implemented — System 7)
 ```
 
 ### `GET /api/v1/documents/:id/download` (implemented — System 6)
@@ -535,19 +539,166 @@ raw file bytes); a discovered mismatch during the pre-processing integrity
 check records `DOCUMENT_INTEGRITY_FAILURE` instead — see "Audit" in
 `docs/SECURITY.md`.
 
+### `POST /api/v1/documents/:id/share` (implemented)
+
+Requires `Authorization: Bearer <access_token>` plus `document:share`
+(RBAC) and `CanAccessDocument` (ABAC) — the same document-scoped
+authorization pattern as redact, re-checked independently at the service
+layer (`ShareService.CreateShare`). Grants `user_id` a specific, revocable,
+optionally time-bounded permission on **this exact document** — never
+ownership, never resharing (a share's own recipient can never call this
+route successfully using their delegated access, regardless of
+permission tier — see below).
+
+```json
+{
+  "user_id": "recipient-user-id",
+  "permission": "VIEW",
+  "expires_at": "2026-12-31T23:59:59Z",
+  "reason": "Disclosure to defence counsel"
+}
+```
+
+`permission` is `VIEW` (grants `document:read` + `document:download` +
+`certificate:read` — this application has no distinct metadata-only view
+separate from download) or `VERIFY` (VIEW's grants plus
+`document:verify`) — never `EDIT`/`DELETE`/`REDACT`/`RESHARE`. `expires_at`
+is optional (omitted/`null` = non-expiring); if present it must be in the
+future. `reason` is optional. The recipient must be a real, currently
+**active** Evidentia user (found via `GET /users/search` below) and
+cannot be the caller themself.
+
+```json
+{
+  "success": true,
+  "data": {
+    "share_id": "...",
+    "document_id": "...",
+    "recipient_user_id": "...",
+    "created_by_user_id": "...",
+    "permission": "VIEW",
+    "status": "ACTIVE",
+    "effective_status": "ACTIVE",
+    "expires_at": "2026-12-31T23:59:59Z",
+    "created_at": "2026-01-01T00:00:00Z"
+  }
+}
+```
+
+- `400` — invalid `permission`/`expires_at` (in the past)/recipient
+  (nonexistent, inactive, or the caller themself).
+- `403` — no relationship to the document's case, OR the document
+  doesn't exist, OR the caller lacks `document:share` — identical
+  response in every case (this is also what a share's own recipient gets
+  if they try to reshare: `document:share` is never satisfiable through
+  delegated access, at any permission tier).
+- `409` — an ACTIVE share already exists for this exact
+  (document, recipient) pair — enforced by a database-level partial
+  unique index, not just an application check.
+
+Every successful share records a `DOCUMENT_SHARED` audit event (document
+ID, recipient ID, permission — never raw file content); see "Audit" in
+`docs/SECURITY.md`.
+
+### `GET /api/v1/documents/:id/shares` (implemented)
+
+Requires `document:share` + `CanAccessDocument` — the same authority
+needed to create a share. Returns every share ever created for the
+document, newest first, **including revoked/expired ones** (historical
+delegation records are never hidden — only `effective_status` changes to
+reflect the current truth: `ACTIVE`, `EXPIRED`, or `REVOKED`).
+
+```json
+{ "success": true, "data": { "shares": [ { "share_id": "...", "...": "..." } ] } }
+```
+
+A mere recipient (not a case member, not the creator, not ADMIN) gets
+`403` here even for a document shared with them — seeing who ELSE a
+document is shared with is a materially different, more sensitive
+capability than merely using one's own delegated access.
+
+### `POST /api/v1/documents/:id/shares/:shareId/revoke` (implemented)
+
+Requires `document:share` + `CanAccessDocument` (the same authority as
+creating a share — not narrowed to only the share's original creator).
+`shareId` is scoped to `:id` as well as its own ID: a real share ID
+belonging to a **different** document is denied identically to a
+nonexistent one. Transitions the share `ACTIVE -> REVOKED` — immediately
+and permanently; there is no un-revoke. Access via that share is denied
+server-side starting with the very next request the recipient makes
+(never a frontend-only removal).
+
+- `403` — no relationship to the document's case, the document doesn't
+  exist, or the caller lacks `document:share`.
+- `404` — the share doesn't exist, doesn't belong to this document, or
+  was already revoked — one generic response for all three, never
+  distinguishing which.
+
+Every successful revocation records a `DOCUMENT_SHARE_REVOKED` audit
+event.
+
+### `GET /api/v1/shared/documents` (implemented — "Shared With Me")
+
+Requires authentication only. Lists every document for which the caller
+currently holds an **active, unexpired** share — never a document reached
+through case membership alone. This is the recipient's discovery
+mechanism: there is no standalone `GET /documents/:id`, so a recipient
+with no relationship to the document's case has no other way to learn
+its filename/type/hash.
+
+```json
+{
+  "success": true,
+  "data": {
+    "documents": [
+      {
+        "share_id": "...",
+        "permission": "VIEW",
+        "expires_at": null,
+        "shared_at": "2026-01-01T00:00:00Z",
+        "shared_by_user_id": "...",
+        "document": { "id": "...", "filename": "...", "...": "..." }
+      }
+    ],
+    "meta": { "page": 1, "page_size": 20, "total": 1, "total_pages": 1 }
+  }
+}
+```
+
+### `GET /api/v1/users/search` (implemented — recipient picker)
+
+Requires authentication only — deliberately **not** the admin-only
+`user:read` permission (`GET /admin/users`): this is a narrower, safer
+capability any authenticated user needs to find a share recipient.
+`q` (required, minimum 2 characters) matches against email/name
+(case-insensitive substring); results are capped at 10, exclude inactive
+users, and exclude the caller themself. Returns only `id`, `first_name`,
+`last_name`, `display_name`, `email`, `roles` — no phone, status, or
+timestamps.
+
+- `400` — `q` missing, too short, or too long.
+
+### Redaction & sharing lineage
+
+A redacted derivative (System 8) is a completely ordinary document from
+sharing's perspective: it can be shared independently of its source, and
+sharing it **never** grants access to the source, or vice versa — see
+`docs/SECURITY.md`'s "Document Sharing" for why (each document's access is
+resolved independently; there is no "inherit the parent's shares" rule
+anywhere in this system).
+
 ### Not yet implemented
 
 `GET /documents/:id` (standalone metadata — today's only exposure of
-document metadata is via `GET /cases/:id`'s `documents` array, per master
-prompt §27's fallback: "otherwise expose document metadata through the
-existing case detail flow") and `POST /documents/:id/share` remain TODO
-stubs (`internal/handlers/document/share.go`). Required authorization for
-each, once implemented:
+document metadata for a case-member is via `GET /cases/:id`'s
+`documents` array, per master prompt §27's fallback: "otherwise expose
+document metadata through the existing case detail flow"; a share
+recipient instead uses `GET /shared/documents` above). Required
+authorization, once implemented:
 
 | Route | Permission (RBAC) | Resource check (ABAC) |
 |---|---|---|
 | `GET /documents/:id` | `document:read` | `CanAccessDocument` |
-| `POST /documents/:id/share` | `document:share` | `CanAccessDocument` |
 
 `CanAccessDocument` resolves the document's case and applies the same
 case-relationship check as `CanAccessCase` — see `docs/SECURITY.md`'s

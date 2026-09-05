@@ -6,7 +6,7 @@ import { DocumentService } from './document.service';
 import { DocumentType, Role as BackendRole } from '../models/api.models';
 
 export type Role = 'Police' | 'Judge' | 'Lawyer' | 'Forensics' | 'Admin';
-export type Screen = 'landing' | 'login' | 'dash' | 'cases' | 'case' | 'doc' | 'audit' | 'redact' | 'access' | 'admin';
+export type Screen = 'landing' | 'login' | 'dash' | 'cases' | 'case' | 'doc' | 'audit' | 'redact' | 'access' | 'admin' | 'shared';
 
 export interface NavItem {
   label: string;
@@ -111,6 +111,7 @@ export class DmsStateService {
     audit: '/app/audit',
     access: '/app/access-preview',
     admin: '/app/admin',
+    shared: '/app/shared',
   };
 
   constructor() {
@@ -128,6 +129,7 @@ export class DmsStateService {
     if (segs.length === 0 || segs[0] === 'dashboard') return 'dash';
     if (segs[0] === 'audit') return 'audit';
     if (segs[0] === 'admin') return 'admin';
+    if (segs[0] === 'shared') return 'shared';
     if (segs[0] === 'access-preview') return 'access';
     if (segs[0] === 'cases') {
       if (segs.length <= 1) return 'cases';
@@ -201,7 +203,8 @@ export class DmsStateService {
       redact: 'Home / Cases / Case Detail / Document / Redact',
       audit: 'Home / Audit Log',
       access: 'Home / Access Policy Preview',
-      admin: 'Home / Administration / Users'
+      admin: 'Home / Administration / Users',
+      shared: 'Home / Shared With Me'
     };
     return map[s] || 'Home';
   });
@@ -210,11 +213,11 @@ export class DmsStateService {
   readonly navItems = computed<NavItem[]>(() => {
     const r = this.role();
     const map: Record<Role, string[]> = {
-      Police: ['Dashboard', 'Cases', 'Upload Document', 'Audit Log'],
-      Judge: ['Dashboard', 'Cases', 'Audit Log'],
-      Lawyer: ['Dashboard', 'Cases'],
-      Forensics: ['Dashboard', 'Cases', 'Upload Document'],
-      Admin: ['Dashboard', 'Cases', 'Upload Document', 'Audit Log', 'User Management']
+      Police: ['Dashboard', 'Cases', 'Upload Document', 'Shared With Me', 'Audit Log'],
+      Judge: ['Dashboard', 'Cases', 'Shared With Me', 'Audit Log'],
+      Lawyer: ['Dashboard', 'Cases', 'Shared With Me'],
+      Forensics: ['Dashboard', 'Cases', 'Upload Document', 'Shared With Me'],
+      Admin: ['Dashboard', 'Cases', 'Upload Document', 'Shared With Me', 'Audit Log', 'User Management']
     };
     const list = map[r] || map.Police;
 
@@ -222,6 +225,7 @@ export class DmsStateService {
       'Dashboard': 'dash',
       'Cases': 'cases',
       'Upload Document': 'upload',
+      'Shared With Me': 'shared',
       'Audit Log': 'audit',
       'User Management': 'admin'
     };
@@ -230,6 +234,7 @@ export class DmsStateService {
       'Dashboard': 'dashboard',
       'Cases': 'folder',
       'Upload Document': 'upload',
+      'Shared With Me': 'share',
       'Audit Log': 'shield',
       'User Management': 'users'
     };

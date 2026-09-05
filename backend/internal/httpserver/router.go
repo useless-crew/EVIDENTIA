@@ -14,6 +14,7 @@ import (
 	casehandlers "evidentia/backend/internal/handlers/case"
 	documenthandlers "evidentia/backend/internal/handlers/document"
 	"evidentia/backend/internal/handlers/health"
+	sharedhandlers "evidentia/backend/internal/handlers/shared"
 	userhandlers "evidentia/backend/internal/handlers/user"
 	"evidentia/backend/internal/middleware"
 	"evidentia/backend/internal/utils"
@@ -114,6 +115,29 @@ func NewRouter(a *app.App) *gin.Engine {
 	// same limit auth/case/admin routes already share (a redaction
 	// request's region list is nowhere near upload-sized).
 	r.POST("/api/v1/documents/:id/redact", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentRedact, "id"), jsonBodyLimit, documenthandlers.Redact(a.DocumentService))
+
+	// Secure document sharing & access delegation: create/list/revoke are
+	// all document-scoped (:id is the SOURCE document) and gated by the
+	// SAME authz.ActionDocumentShare permission — "authorized to manage
+	// this document's sharing", not narrowed to only the share's original
+	// creator (see internal/service.ShareService.RevokeShare's doc
+	// comment). Create takes a small JSON body, so it gets jsonBodyLimit
+	// like redact does; list/revoke take no body.
+	r.POST("/api/v1/documents/:id/share", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentShare, "id"), jsonBodyLimit, documenthandlers.Share(a.ShareService))
+	r.GET("/api/v1/documents/:id/shares", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentShare, "id"), documenthandlers.ListShares(a.ShareService))
+	r.POST("/api/v1/documents/:id/shares/:shareId/revoke", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentShare, "id"), documenthandlers.RevokeShare(a.ShareService))
+
+	// "Shared With Me" (master prompt §59): a top-level route, not nested
+	// under /documents/:id — it is not scoped to any single document.
+	// Authenticated-only; service.ShareService.ListSharedWithMe's own
+	// query (backed by documents_select's RLS delegated-access branch)
+	// is the only authorization this needs.
+	r.GET("/api/v1/shared/documents", authMW, sharedhandlers.SharedWithMe(a.ShareService))
+
+	// Share-recipient search (master prompt §38/§48): authenticated-only,
+	// deliberately NOT the admin-only user:read permission — see
+	// internal/handlers/user.Search's doc comment.
+	r.GET("/api/v1/users/search", authMW, userhandlers.Search(a.ShareService))
 
 	// Admin user management (System 8): every route requires
 	// authentication; POST/GET/GET-by-id/PUT/status/password additionally

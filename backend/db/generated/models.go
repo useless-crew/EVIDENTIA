@@ -116,6 +116,24 @@ type Document struct {
 	UpdatedAt        time.Time       `json:"updated_at"`
 }
 
+// Explicit, document-scoped access delegation — master prompt §4/§5. A row grants shared_with_user_id controlled access to EXACTLY document_id (never the whole case, never every derivative of it — see docs/SECURITY.md's "Sharing lineage") for as long as status = 'ACTIVE' and (expires_at IS NULL OR expires_at > now()). Revocation is a status transition (ACTIVE -> REVOKED), never a DELETE — no DELETE privilege is granted below and no DELETE query exists, so historical delegation/accountability records are permanent, exactly like redactions/compliance_certificates. The recipient never becomes the document's owner/uploader; this table only ever grants a read-oriented capability (VIEW or VERIFY) checked by internal/authz.Service.CanAccessDocument alongside — never instead of — the existing RBAC/ABAC/RLS checks.
+type DocumentShare struct {
+	ID               uuid.UUID `json:"id"`
+	DocumentID       uuid.UUID `json:"document_id"`
+	SharedWithUserID uuid.UUID `json:"shared_with_user_id"`
+	CreatedByUserID  uuid.UUID `json:"created_by_user_id"`
+	// VIEW (document:read + document:download + certificate:read) or VERIFY (VIEW's grants PLUS document:verify). Never implies document:redact, document:share (resharing), or any write/delete action — master prompt §7/§25.
+	Permission string `json:"permission"`
+	Status     string `json:"status"`
+	// NULL means non-expiring. Enforced server-side on every access check (internal/authz, and this same condition mirrored in RLS below) — never left to the frontend to hide an expired share.
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	Reason          *string            `json:"reason"`
+	Metadata        json.RawMessage    `json:"metadata"`
+	CreatedAt       time.Time          `json:"created_at"`
+	RevokedAt       pgtype.Timestamptz `json:"revoked_at"`
+	RevokedByUserID *uuid.UUID         `json:"revoked_by_user_id"`
+}
+
 // Fine-grained permission catalog (e.g. name='case:create', resource='case', action='create'). Not constrained to a fixed resource/action vocabulary here — the catalog is expected to grow as later systems are implemented; that growth is ordinary reference-data seeding, not a schema migration.
 type Permission struct {
 	ID          uuid.UUID `json:"id"`
