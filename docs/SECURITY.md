@@ -405,13 +405,17 @@ Verification & Integrity Dashboard"; summary here:
   bearer header — no token in the URL) and re-runs the SAME
   `audit:verify`+RLS check `GET /verify-chain/:id` uses before ever
   sending the caller a single byte of data — `verification_id` alone is
-  never trusted as proof of authorization. (The handler subscribes to the
-  in-process broadcaster before that check, not after, purely to avoid a
+  never trusted as proof of authorization. (The handler registers with
+  System 13's SSE manager before that check, not after, purely to avoid a
   narrow race where a fast verification's one completion event could be
-  published in the gap between the check and the subscription; subscribing
-  itself discloses nothing since no event is ever forwarded before the
-  check passes.) The broadcaster's publish path never blocks, decoupling
-  the verification worker from however slow or absent an SSE client is.
+  published in the gap between the check and the registration;
+  registering itself discloses nothing since no event is ever forwarded
+  before the check passes.) The manager's dispatch path never blocks,
+  decoupling the verification worker from however slow or absent an SSE
+  client is — see [REALTIME_EVENTS.md](./REALTIME_EVENTS.md) for the full
+  System 13 security review (RBAC/ABAC/RLS on every SSE route,
+  cross-case/cross-resource isolation, connection limits, and Redis's
+  transport-only role).
 - **Verification is structurally read-only against `audit_log`** — no
   code path in the job ever `UPDATE`s, `DELETE`s, reorders, or "repairs" a
   chain entry; a detected problem is reported, never fixed.
@@ -492,6 +496,64 @@ review this system's own master prompt required, answered directly:
   `idx_audit_verifications_single_active` — no number of concurrent
   callers can ever have more than one full-chain verification running at
   once, platform-wide.
+
+## Implemented in System 13 (Real-Time Events & Server-Sent Events)
+
+Full detail in [REALTIME_EVENTS.md](./REALTIME_EVENTS.md); the security
+review this system's own master prompt required, answered directly:
+
+- **No unauthenticated SSE connection is possible** — both
+  `GET /audit/verify-chain/:id/events` and `GET /cases/:id/events` sit
+  behind the same `authMW` every other route does; a request with no
+  valid session is rejected `401` before anything else runs.
+- **Every event is authorization-scoped, not just authenticated** —
+  `internal/sse.Manager.Register` performs no authorization of its own;
+  every caller re-runs the existing RBAC/ABAC/RLS machinery
+  (`AuditService.GetVerification`'s `audit:verify`+RLS check;
+  `middleware.RequireCaseAccess`'s `case:read`+case-membership/ownership
+  ABAC check) BEFORE registering, and `Manager.dispatch` only ever
+  delivers to the exact matching `resource_type:resource_id` scope — a
+  client can never receive another case's or another verification's
+  events. Verified live (an unrelated POLICE officer gets `403` opening a
+  case's stream; ADMIN's pre-existing, established universal case-read
+  access — the SAME the plain `GET /cases/:id` route already grants — is
+  correctly preserved, not newly introduced) and by
+  `TestCaseEvents_SSE_DeliversShareCreatedAndEnforcesIsolation`'s explicit
+  cross-case check.
+- **A client cannot subscribe to an arbitrary resource** — the scope key
+  passed to `Register` is built from a URL path parameter that has
+  ALREADY been independently authorized; no query parameter or
+  client-supplied field can widen it.
+- **Event payloads cannot leak sensitive document/witness data** — every
+  event type's `data` shape (`internal/events/catalog.go`) was reviewed
+  field-by-field: identifiers, hashes, and classified outcomes only —
+  never raw document content, witness identity, a share's recipient or
+  permission level, credentials, or internal error detail.
+- **No JWT or credential ever appears in a URL** — both SSE clients
+  (`EventStreamService`) use `fetch()` with a normal `Authorization:
+  Bearer` header, never an `EventSource` with a token query parameter.
+- **Redis is never reachable from the frontend and never authoritative**
+  — it is Pub/Sub transport only (`internal/events.Channel`); PostgreSQL
+  remains the source of truth for every fact an event describes, and a
+  Redis outage degrades SSE only (REST continues functioning) rather than
+  corrupting or blocking any persistent state.
+- **A slow or malicious client cannot exhaust server memory or block
+  other clients** — `internal/sse.Manager` bounds both per-connection
+  buffering (`subscriberBufferSize`, oldest-drop-on-full, never blocking
+  `dispatch`) and per-user concurrent connections
+  (`maxConnectionsPerUser`, `429` beyond it).
+- **Disconnected clients cannot remain registered forever** — `Register`'s
+  `unsubscribe` is always deferred from `Stream`, releasing the
+  connection's map entry and per-user count on every exit path (client
+  disconnect, terminal event, or the periodic forced reconnect
+  `maxConnectionDuration` causes for an otherwise-endless stream).
+- **Verification events cannot recursively create audit records, and
+  workers cannot bypass RLS** — both unchanged from Systems 10/11/12: an
+  event notification is a wholly separate, non-durable signal from the
+  cryptographic audit trail, and `AuditService`'s existing
+  `workerIdentity` mechanism (not touched by this system) is what
+  establishes RLS context for the PostgreSQL writes that precede every
+  publish call.
 
 ## Principles
 

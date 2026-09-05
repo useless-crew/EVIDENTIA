@@ -84,6 +84,13 @@ func NewRouter(a *app.App) *gin.Engine {
 	caseGroup.GET("", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionCaseRead), casehandlers.List(a.CaseService))
 	caseGroup.GET("/:id", authMW, middleware.RequireCaseAccess(a.AuthzService, authz.ActionCaseRead, "id"), casehandlers.Get(a.CaseService))
 	caseGroup.PUT("/:id", authMW, middleware.RequireCaseAccess(a.AuthzService, authz.ActionCaseUpdate, "id"), casehandlers.Update(a.CaseService))
+	// Events (System 13): a real-time notification stream for this ONE
+	// case — document verification/certificate/redaction/share activity —
+	// gated by the SAME case:read authorization GET /cases/:id already
+	// requires (RequireCaseAccess re-validates on every new connection,
+	// including the periodic forced reconnect internal/sse.Stream's own
+	// maxConnectionDuration causes — see that package's doc comment).
+	caseGroup.GET("/:id/events", authMW, middleware.RequireCaseAccess(a.AuthzService, authz.ActionCaseRead, "id"), casehandlers.Events(a.SSEManager))
 
 	// Documents (System 6): upload is nested under its case
 	// (/api/v1/cases/:id/documents — :id is the CASE id) and gated by the
@@ -182,7 +189,7 @@ func NewRouter(a *app.App) *gin.Engine {
 	// the rest are GETs), so none get jsonBodyLimit.
 	r.POST("/api/v1/audit/verify-chain", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditVerify), audithandlers.VerifyChain(a.AuditService))
 	r.GET("/api/v1/audit/verify-chain/:verificationId", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditVerify), audithandlers.Status(a.AuditService))
-	r.GET("/api/v1/audit/verify-chain/:verificationId/events", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditVerify), audithandlers.Events(a.AuditService))
+	r.GET("/api/v1/audit/verify-chain/:verificationId/events", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditVerify), audithandlers.Events(a.AuditService, a.SSEManager))
 	r.GET("/api/v1/audit/verifications", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditVerify), audithandlers.History(a.AuditService))
 	r.GET("/api/v1/audit/integrity", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditVerify), audithandlers.Integrity(a.AuditService))
 

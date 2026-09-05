@@ -825,54 +825,28 @@ since `audit_verifications` has no other consumer.
 
 ### SSE architecture
 
-`internal/realtime.Broadcaster` is a small in-process pub/sub keyed by
-`verification_id` — **not** Redis pub/sub. Because the worker and the
-HTTP server share one process (see "Job architecture" above), there is no
-cross-process coordination problem to solve; Redis's entire role in this
-system stays "Asynq's queue transport", never a second, competing state
-store for progress (master prompt: "do not allow Redis state to override
-PostgreSQL's authoritative verification result"). `Broadcaster.Publish`
-**never blocks**, even on a slow or absent subscriber (a bounded,
-non-blocking buffered send — see that type's own doc comment) — this is
-what keeps the verification worker and an SSE connection fully decoupled:
-a stalled browser tab can never stall verification progress, and the
-worker never touches a database transaction while waiting on anything
-SSE-related.
-
-`GET /audit/verify-chain/:id/events` (`internal/handlers/audit/events.go`)
-performs the **exact same** `AuditService.GetVerification` authorization
-check every REST caller goes through — `verification_id` in the URL is
-never trusted as proof of authorization by itself — sends that already-
-authorized snapshot immediately as the first SSE frame (so a reconnecting
-client is never left waiting on the next event to learn current state),
-then relays further events from the broadcaster until a terminal one is
-sent or the client disconnects (`c.Request.Context().Done()`), at which
-point `unsubscribe()` runs (deferred), releasing the broadcaster
-subscription — no leaked goroutines or channels. A 15-second heartbeat
-comment line (`: heartbeat\n\n`) keeps intermediate proxies from timing
-out an idle connection between real events.
-
-The handler subscribes to the broadcaster **before** running that
-authorization check, not after — `Broadcaster.Subscribe` only registers an
-in-memory channel and sends the caller no data by itself, so doing it
-first discloses nothing. Doing it in the other order (read-then-subscribe)
-loses events for a verification that reaches its terminal state — and
-therefore publishes its one and only completion event — in the gap
-between the authorization read and the `Subscribe` call: a real race for a
-small/fast chain, where a background verification can complete in well
-under the time the authorization DB round trip itself takes, permanently
-losing the only completion event and leaving the connection open until
-the client's own timeout. Subscribing first guarantees a concurrent
-completion is always either already reflected in the authorization read
-(an already-terminal initial event) or captured by the channel (delivered
-as a normal subsequent event) — never both missed.
-
-**Reconnection**: the frontend's SSE client (`audit-verification.
-service.ts`) never treats "connection dropped" as final — on any
-stream error it re-fetches the plain REST status endpoint
-(`GET /audit/verify-chain/:id`) as the source of truth for current state,
-then reopens the SSE connection if the verification is still non-
-terminal. It never relies exclusively on having received every SSE event.
+> **System 13 note:** the SSE transport this section originally described
+> (`internal/realtime.Broadcaster`, an audit-verification-specific
+> in-process pub/sub) has been generalized into `internal/events`
+> (event model + Redis-backed publisher) and `internal/sse` (the
+> authorization-scoped connection manager) — reusable infrastructure any
+> resource type can build a live stream on, not just audit verification.
+> See [docs/REALTIME_EVENTS.md](./REALTIME_EVENTS.md) for the complete,
+> current architecture (Redis's role, event catalog, authorization model,
+> reconnection/delivery semantics, backpressure, and the full security
+> review). Every behavior this section originally documented —
+> subscribe-before-authorization-check ordering, never blocking on a slow
+> client, the 15-second heartbeat, the frontend's REST-poll backstop —
+> is UNCHANGED after that refactor; only the package names and (for
+> future resource types) the transport's reach (Redis Pub/Sub, not only
+> in-process) are new. `GET /audit/verify-chain/:id/events` itself is
+> untouched at the API level: same route, same event sequence
+> (`AUDIT_VERIFICATION_STARTED` → `AUDIT_VERIFICATION_PROGRESS` →
+> `AUDIT_VERIFICATION_COMPLETED`/`AUDIT_INTEGRITY_FAILURE`/
+> `AUDIT_VERIFICATION_FAILED` — renamed from System 11's original
+> lowercase `verification_started`/etc. to match this codebase's
+> established `SCREAMING_SNAKE_CASE` event-naming convention, the one
+> wire-visible change), same `VERIFIED`/`INTEGRITY_FAILURE` outcomes.
 
 **Authentication**: the browser cannot attach an `Authorization` header
 to a native `EventSource` connection, so the frontend deliberately uses

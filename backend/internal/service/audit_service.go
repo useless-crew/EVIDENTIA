@@ -27,9 +27,9 @@ import (
 	auditpkg "evidentia/backend/internal/audit"
 	"evidentia/backend/internal/auth"
 	"evidentia/backend/internal/authz"
+	"evidentia/backend/internal/events"
 	"evidentia/backend/internal/jobs"
 	"evidentia/backend/internal/models"
-	"evidentia/backend/internal/realtime"
 	"evidentia/backend/internal/repository"
 	"evidentia/backend/internal/utils"
 )
@@ -145,9 +145,9 @@ type StartVerificationResult struct {
 
 // VerificationDetail is GET /audit/verify-chain/:id's (and one element of
 // GET /audit/verifications') response shape — the complete, safe-to-expose
-// state of one verification run. ExactLY the fields an SSE
-// realtime.VerificationEvent also carries (see that type's doc comment for
-// why the two must never diverge). Every Failed*/FailureType/
+// state of one verification run. Exactly the fields an SSE
+// events.AuditVerificationData also carries (see that type's doc comment
+// for why the two must never diverge). Every Failed*/FailureType/
 // FailureReason field is populated only for INTEGRITY_FAILURE/FAILED (see
 // audit_verifications_failure_fields_check) and never carries metadata
 // content, SQL text, file paths, or credentials.
@@ -208,25 +208,16 @@ type IntegritySummary struct {
 // needs to change). This type exists for the two read-side operations
 // only: GET /audit and POST /audit/verify-chain.
 type AuditService struct {
-	pool        *pgxpool.Pool
-	authz       *authz.Service
-	recorder    auditpkg.Recorder
-	jobClient   *jobs.Client
-	broadcaster *realtime.Broadcaster
-	logger      *slog.Logger
+	pool      *pgxpool.Pool
+	authz     *authz.Service
+	recorder  auditpkg.Recorder
+	jobClient *jobs.Client
+	publisher events.Publisher
+	logger    *slog.Logger
 }
 
-func NewAuditService(pool *pgxpool.Pool, authzService *authz.Service, recorder auditpkg.Recorder, jobClient *jobs.Client, broadcaster *realtime.Broadcaster, logger *slog.Logger) *AuditService {
-	return &AuditService{pool: pool, authz: authzService, recorder: recorder, jobClient: jobClient, broadcaster: broadcaster, logger: logger}
-}
-
-// Broadcaster exposes the shared realtime.Broadcaster so
-// internal/handlers/audit's SSE route can Subscribe to it directly — the
-// handler needs no OTHER access to AuditService's internals for this, and
-// the broadcaster itself has no service-layer dependency of its own (see
-// internal/realtime's package doc comment).
-func (s *AuditService) Broadcaster() *realtime.Broadcaster {
-	return s.broadcaster
+func NewAuditService(pool *pgxpool.Pool, authzService *authz.Service, recorder auditpkg.Recorder, jobClient *jobs.Client, publisher events.Publisher, logger *slog.Logger) *AuditService {
+	return &AuditService{pool: pool, authz: authzService, recorder: recorder, jobClient: jobClient, publisher: publisher, logger: logger}
 }
 
 // List authorizes user for audit:read (RBAC only — audit_log has no
@@ -640,9 +631,8 @@ func (s *AuditService) RunVerification(ctx context.Context, verificationID uuid.
 		return fmt.Errorf("mark verification running: %w", err)
 	}
 
-	s.broadcaster.Publish(realtime.VerificationEvent{
-		Type: realtime.EventVerificationStarted, VerificationID: verificationID,
-		Status: auditpkg.VerificationStatusRunning, TotalEntries: &total, Timestamp: time.Now().UTC(),
+	s.publisher.Publish(ctx, events.TypeAuditVerificationStarted, events.ResourceTypeAuditVerification, verificationID.String(), events.AuditVerificationData{
+		VerificationID: verificationID.String(), Status: auditpkg.VerificationStatusRunning, TotalEntries: &total,
 	})
 
 	checked, seq, failure, err := s.verifyBatches(ctx, verificationID, total)
@@ -722,7 +712,7 @@ func (s *AuditService) verifyBatches(ctx context.Context, verificationID uuid.UU
 			return checked, seq, nil, fmt.Errorf("persist progress: %w", progressErr)
 		}
 
-		s.broadcaster.Publish(s.progressEvent(verificationID, checked, total))
+		s.publisher.Publish(ctx, events.TypeAuditVerificationProgress, events.ResourceTypeAuditVerification, verificationID.String(), s.progressEventData(verificationID, checked, total))
 
 		if !result.OK {
 			return checked, seq, &result, nil
@@ -734,17 +724,16 @@ func (s *AuditService) verifyBatches(ctx context.Context, verificationID uuid.UU
 	}
 }
 
-func (s *AuditService) progressEvent(verificationID uuid.UUID, checked, total int64) realtime.VerificationEvent {
-	event := realtime.VerificationEvent{
-		Type: realtime.EventVerificationProgress, VerificationID: verificationID,
-		Status: auditpkg.VerificationStatusRunning, EntriesChecked: checked, Timestamp: time.Now().UTC(),
+func (s *AuditService) progressEventData(verificationID uuid.UUID, checked, total int64) events.AuditVerificationData {
+	data := events.AuditVerificationData{
+		VerificationID: verificationID.String(), Status: auditpkg.VerificationStatusRunning, EntriesChecked: checked,
 	}
 	if total > 0 {
-		event.TotalEntries = &total
+		data.TotalEntries = &total
 		pct := float64(checked) / float64(total) * 100
-		event.ProgressPct = &pct
+		data.ProgressPct = &pct
 	}
-	return event
+	return data
 }
 
 // completeVerification persists the terminal VERIFIED/INTEGRITY_FAILURE
@@ -776,18 +765,20 @@ func (s *AuditService) completeVerification(ctx context.Context, verificationID 
 		return completed, err
 	}
 
-	event := realtime.VerificationEvent{
-		VerificationID: verificationID, Status: status, EntriesChecked: checked, Timestamp: time.Now().UTC(),
+	data := events.AuditVerificationData{
+		VerificationID: verificationID.String(), Status: status, EntriesChecked: checked,
 	}
+	eventType := events.TypeAuditVerificationCompleted
 	if failure != nil {
-		event.Type = realtime.EventVerificationIntegrityFailure
-		event.FailedEntryID = failedEntryID
-		event.FailureType = failure.FailureType
-		event.FailureReason = failure.Reason
-	} else {
-		event.Type = realtime.EventVerificationCompleted
+		eventType = events.TypeAuditIntegrityFailure
+		if failedEntryID != nil {
+			id := failedEntryID.String()
+			data.FailedEntryID = &id
+		}
+		data.FailureType = failure.FailureType
+		data.FailureReason = failure.Reason
 	}
-	s.broadcaster.Publish(event)
+	s.publisher.Publish(ctx, eventType, events.ResourceTypeAuditVerification, verificationID.String(), data)
 
 	return completed, nil
 }
@@ -825,10 +816,9 @@ func (s *AuditService) MarkVerificationOperationallyFailed(ctx context.Context, 
 		if err != nil {
 			return err
 		}
-		s.broadcaster.Publish(realtime.VerificationEvent{
-			Type: realtime.EventVerificationFailed, VerificationID: verificationID,
-			Status: auditpkg.VerificationStatusFailed, EntriesChecked: row.EntriesChecked,
-			FailureType: failureType, FailureReason: reason, Timestamp: time.Now().UTC(),
+		s.publisher.Publish(ctx, events.TypeAuditVerificationFailed, events.ResourceTypeAuditVerification, verificationID.String(), events.AuditVerificationData{
+			VerificationID: verificationID.String(), Status: auditpkg.VerificationStatusFailed, EntriesChecked: row.EntriesChecked,
+			FailureType: failureType, FailureReason: reason,
 		})
 		return nil
 	})

@@ -21,6 +21,7 @@ import (
 	"evidentia/backend/internal/audit"
 	"evidentia/backend/internal/auth"
 	"evidentia/backend/internal/authz"
+	"evidentia/backend/internal/events"
 	"evidentia/backend/internal/models"
 	"evidentia/backend/internal/repository"
 	"evidentia/backend/internal/storage"
@@ -114,10 +115,11 @@ type DocumentService struct {
 	storage       storage.Storage
 	bucket        string
 	maxUploadSize int64
+	publisher     events.Publisher
 	logger        *slog.Logger
 }
 
-func NewDocumentService(pool *pgxpool.Pool, authzService *authz.Service, recorder audit.Recorder, objectStorage storage.Storage, bucket string, maxUploadSize int64, logger *slog.Logger) *DocumentService {
+func NewDocumentService(pool *pgxpool.Pool, authzService *authz.Service, recorder audit.Recorder, objectStorage storage.Storage, bucket string, maxUploadSize int64, publisher events.Publisher, logger *slog.Logger) *DocumentService {
 	return &DocumentService{
 		pool:          pool,
 		authz:         authzService,
@@ -125,6 +127,7 @@ func NewDocumentService(pool *pgxpool.Pool, authzService *authz.Service, recorde
 		storage:       objectStorage,
 		bucket:        bucket,
 		maxUploadSize: maxUploadSize,
+		publisher:     publisher,
 		logger:        logger,
 	}
 }
@@ -424,6 +427,9 @@ func (s *DocumentService) VerifyDocument(ctx context.Context, user auth.Authenti
 				"computed_hash": result.ComputedHash,
 			},
 		})
+		s.publisher.Publish(ctx, events.TypeDocumentVerificationCompleted, events.ResourceTypeCase, doc.CaseID.String(), events.DocumentVerificationData{
+			DocumentID: doc.ID.String(), CaseID: doc.CaseID.String(), Result: events.DocumentVerificationResultIntegrityFailure,
+		})
 		return result, nil
 	}
 
@@ -436,6 +442,9 @@ func (s *DocumentService) VerifyDocument(ctx context.Context, user auth.Authenti
 		Role:         role,
 		CaseID:       &doc.CaseID,
 		Metadata:     map[string]any{"sha256_hash": result.StoredHash},
+	})
+	s.publisher.Publish(ctx, events.TypeDocumentVerificationCompleted, events.ResourceTypeCase, doc.CaseID.String(), events.DocumentVerificationData{
+		DocumentID: doc.ID.String(), CaseID: doc.CaseID.String(), Result: events.DocumentVerificationResultVerified,
 	})
 	return result, nil
 }

@@ -32,6 +32,7 @@ import (
 	"evidentia/backend/internal/audit"
 	"evidentia/backend/internal/auth"
 	"evidentia/backend/internal/authz"
+	"evidentia/backend/internal/events"
 	"evidentia/backend/internal/models"
 	"evidentia/backend/internal/repository"
 	"evidentia/backend/internal/utils"
@@ -123,13 +124,14 @@ type RecipientCandidate struct {
 // storage or document bytes — sharing changes only access metadata,
 // never document content, hash, or certificates (master prompt §21).
 type ShareService struct {
-	pool     *pgxpool.Pool
-	authz    *authz.Service
-	recorder audit.Recorder
+	pool      *pgxpool.Pool
+	authz     *authz.Service
+	recorder  audit.Recorder
+	publisher events.Publisher
 }
 
-func NewShareService(pool *pgxpool.Pool, authzService *authz.Service, recorder audit.Recorder) *ShareService {
-	return &ShareService{pool: pool, authz: authzService, recorder: recorder}
+func NewShareService(pool *pgxpool.Pool, authzService *authz.Service, recorder audit.Recorder, publisher events.Publisher) *ShareService {
+	return &ShareService{pool: pool, authz: authzService, recorder: recorder, publisher: publisher}
 }
 
 // CreateShare authorizes user for document:share on documentID (RBAC
@@ -230,6 +232,9 @@ func (s *ShareService) CreateShare(ctx context.Context, user auth.AuthenticatedU
 			"has_expiration":    input.ExpiresAt != nil,
 		},
 	})
+	s.publisher.Publish(ctx, events.TypeShareCreated, events.ResourceTypeCase, doc.CaseID.String(), events.ShareEventData{
+		ShareID: created.ID.String(), DocumentID: documentID.String(), CaseID: doc.CaseID.String(),
+	})
 
 	summary := toShareSummary(created)
 	return &summary, nil
@@ -290,9 +295,20 @@ func (s *ShareService) RevokeShare(ctx context.Context, user auth.AuthenticatedU
 
 	ident := repository.AppIdentity{UserID: user.ID, Role: effectiveCaseRole(user)}
 	var revoked generated.DocumentShare
+	var doc generated.Document
 	err = repository.WithTx(ctx, s.pool, ident, func(ctx context.Context, q *generated.Queries) error {
 		r, err := repository.NewShareRepo(q).Revoke(ctx, shareID, documentID, user.ID)
+		if err != nil {
+			return err
+		}
 		revoked = r
+		// Read-only, same transaction — needed only to scope the
+		// SHARE_REVOKED notification below to the document's case (see
+		// events.ResourceTypeCase); never fails this operation over a
+		// notification concern, since a NotFound here would already have
+		// been caught above via decision.Allowed for the SAME document.
+		d, err := repository.NewDocumentRepo(q).GetByID(ctx, documentID)
+		doc = d
 		return err
 	})
 	if err != nil {
@@ -312,6 +328,9 @@ func (s *ShareService) RevokeShare(ctx context.Context, user auth.AuthenticatedU
 			"document_id":       documentID.String(),
 			"recipient_user_id": revoked.SharedWithUserID.String(),
 		},
+	})
+	s.publisher.Publish(ctx, events.TypeShareRevoked, events.ResourceTypeCase, doc.CaseID.String(), events.ShareEventData{
+		ShareID: revoked.ID.String(), DocumentID: documentID.String(), CaseID: doc.CaseID.String(),
 	})
 
 	summary := toShareSummary(revoked)

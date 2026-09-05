@@ -5,10 +5,10 @@ import { AuthService } from '../../core/services/auth.service';
 import { DmsStateService, AuditRow } from '../../core/services/dms-state.service';
 import { ApiError } from '../../core/services/api-client.service';
 import {
+  AuditVerificationEventData,
   IntegritySummary,
   VerificationDetail,
   VerificationHistoryResult,
-  VerificationSseEvent,
 } from '../../core/models/api.models';
 
 @Component({
@@ -181,7 +181,7 @@ export class AuditLogComponent implements OnInit, OnDestroy {
     }
   }
 
-  progressLabel(detail: VerificationDetail | VerificationSseEvent | null): string {
+  progressLabel(detail: VerificationDetail | AuditVerificationEventData | null): string {
     if (!detail) return '';
     const total = detail.total_entries;
     if (total === undefined) {

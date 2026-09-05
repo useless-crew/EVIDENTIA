@@ -12,6 +12,13 @@
       <div class="case-header-left">
         <div class="case-badge-no font-mono">{{ c.case_number }}</div>
         <h1 class="case-main-title">{{ c.title }}</h1>
+        <span
+          *ngIf="liveConnected()"
+          class="live-indicator"
+          title="Live updates connected — this case's document/certificate/share activity refreshes automatically"
+        >
+          <span class="live-dot"></span>Live
+        </span>
       </div>
 
       <div class="case-header-actions">

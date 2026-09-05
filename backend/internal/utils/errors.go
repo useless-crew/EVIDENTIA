@@ -23,6 +23,7 @@ const (
 	CodeForbidden             = "FORBIDDEN"
 	CodeConflict              = "CONFLICT"
 	CodeUnprocessableEntity   = "UNPROCESSABLE_ENTITY"
+	CodeTooManyRequests       = "TOO_MANY_REQUESTS"
 )
 
 // AppError is the application-wide error type. Status and Code/Message are
@@ -108,6 +109,16 @@ func ErrConflict(message string) *AppError {
 // client.
 func ErrUnprocessableEntity(message string) *AppError {
 	return NewAppError(http.StatusUnprocessableEntity, CodeUnprocessableEntity, message, nil)
+}
+
+// ErrTooManyRequests builds a 429 response — used by System 13's SSE
+// connection-limit guard (internal/sse.Manager.Register's
+// ErrTooManyConnections) when a user already holds the maximum number of
+// concurrent event streams; never a general-purpose HTTP rate limiter
+// (this codebase has none — see docs/BACKGROUND_JOBS.md's own "Rate
+// Limiting" finding), only this specific, self-contained protection.
+func ErrTooManyRequests(message string) *AppError {
+	return NewAppError(http.StatusTooManyRequests, CodeTooManyRequests, message, nil)
 }
 
 // AsAppError unwraps err looking for an *AppError, so callers that receive a

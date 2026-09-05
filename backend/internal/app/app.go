@@ -19,10 +19,11 @@ import (
 	"evidentia/backend/internal/cache"
 	"evidentia/backend/internal/config"
 	"evidentia/backend/internal/database"
+	"evidentia/backend/internal/events"
 	"evidentia/backend/internal/jobs"
 	"evidentia/backend/internal/logger"
-	"evidentia/backend/internal/realtime"
 	"evidentia/backend/internal/service"
+	"evidentia/backend/internal/sse"
 	"evidentia/backend/internal/storage"
 )
 
@@ -105,15 +106,20 @@ type App struct {
 	// Storage above.
 	JobClient *jobs.Client
 
-	// Broadcaster is System 11's in-process SSE fan-out (see
-	// internal/realtime.Broadcaster) — AuditService.RunVerification
-	// (running inside the embedded Asynq worker, same process) publishes
-	// progress to it; internal/handlers/audit's Events route subscribes to
-	// it. Deliberately in-process, not Redis pub/sub: the worker and the
-	// HTTP server sharing one binary means there is no cross-process
-	// coordination problem to solve, and Redis's role in this system stays
-	// exactly "Asynq's queue transport" (see docs/AUDIT_CHAIN.md).
-	Broadcaster *realtime.Broadcaster
+	// SSEManager is System 13's ONE Server-Sent Events fan-out (see
+	// internal/sse.Manager) — subscribes to Redis Pub/Sub
+	// (internal/events.Channel) once, at process start, and delivers each
+	// received event to whichever locally-connected, already-authorized
+	// clients are registered for its exact resource scope.
+	// internal/handlers/audit and internal/handlers/case's Events routes
+	// both register against this SAME instance — never a second manager.
+	// Every service that PUBLISHES a notification (AuditService,
+	// DocumentService, CertificateService, ShareService) depends on
+	// internal/events.Publisher instead, which this field's Manager
+	// receives from independently, through Redis — there is no direct Go
+	// dependency between a business service and this field at all (see
+	// docs/REALTIME_EVENTS.md's own architecture diagram).
+	SSEManager *sse.Manager
 }
 
 // New loads configuration and connects every infrastructure dependency in
@@ -159,19 +165,36 @@ func New(ctx context.Context) (*App, error) {
 	// structured operational log — none of those call sites change.
 	recorder := audit.NewChainWriter(db.Pool(), log)
 
+	// eventPublisher is System 13's ONE real-time-notification publisher
+	// (see internal/events) — reuses the SAME shared go-redis client
+	// internal/cache.Cache already validated at startup (redisCache.
+	// Client()), never a second Redis connection pool. Every service
+	// constructed below that publishes a notification (AuditService,
+	// DocumentService, CertificateService, ShareService) takes this ONE
+	// instance — never its own ad hoc redis.Publish call.
+	eventPublisher := events.NewRedisPublisher(redisCache.Client(), log)
+
+	// sseManager is System 13's ONE SSE fan-out (see internal/sse) —
+	// subscribes to the SAME Redis channel eventPublisher publishes to.
+	// Constructed here (so every handler needing it can depend on this one
+	// instance) but not yet STARTED: cmd/server/main.go launches
+	// SSEManager.Start in its own goroutine, bound to the same top-level
+	// shutdown context as the HTTP server and the Asynq worker.
+	sseManager := sse.NewManager(redisCache.Client(), log)
+
 	jwtManager := auth.NewJWTManager(cfg.JWT.SigningKey, cfg.JWT.Issuer, cfg.JWT.Audience, cfg.JWT.AccessTTL)
 	authService := service.NewAuthService(db.Pool(), jwtManager, cfg.JWT.BcryptCost, cfg.JWT.RefreshTTL, recorder)
 	authzService := authz.NewService(db.Pool(), recorder)
 	caseService := service.NewCaseService(db.Pool(), authzService, recorder)
-	documentService := service.NewDocumentService(db.Pool(), authzService, recorder, objectStorage, cfg.MinIO.Bucket, cfg.Documents.MaxUploadSize, log)
-	certificateService, err := service.NewCertificateService(db.Pool(), authzService, recorder, objectStorage, cfg.Certificate.SigningKeyPEM, log)
+	documentService := service.NewDocumentService(db.Pool(), authzService, recorder, objectStorage, cfg.MinIO.Bucket, cfg.Documents.MaxUploadSize, eventPublisher, log)
+	certificateService, err := service.NewCertificateService(db.Pool(), authzService, recorder, objectStorage, cfg.Certificate.SigningKeyPEM, eventPublisher, log)
 	if err != nil {
 		db.Close()
 		_ = redisCache.Close()
 		return nil, fmt.Errorf("app: build certificate service: %w", err)
 	}
 	userService := service.NewUserService(db.Pool(), authzService, recorder, cfg.JWT.BcryptCost)
-	shareService := service.NewShareService(db.Pool(), authzService, recorder)
+	shareService := service.NewShareService(db.Pool(), authzService, recorder, eventPublisher)
 
 	// asynq.RedisClientOpt mirrors cfg.Redis exactly — Asynq manages its
 	// own connection pool independently of internal/cache.Cache's
@@ -180,8 +203,7 @@ func New(ctx context.Context) (*App, error) {
 	// accepts its own RedisConnOpt types, not an existing *redis.Client).
 	redisOpt := asynq.RedisClientOpt{Addr: cfg.Redis.Addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB}
 	jobClient := jobs.NewClient(redisOpt)
-	broadcaster := realtime.NewBroadcaster()
-	auditService := service.NewAuditService(db.Pool(), authzService, recorder, jobClient, broadcaster, log)
+	auditService := service.NewAuditService(db.Pool(), authzService, recorder, jobClient, eventPublisher, log)
 
 	return &App{
 		Config:             cfg,
@@ -199,7 +221,7 @@ func New(ctx context.Context) (*App, error) {
 		ShareService:       shareService,
 		AuditService:       auditService,
 		JobClient:          jobClient,
-		Broadcaster:        broadcaster,
+		SSEManager:         sseManager,
 	}, nil
 }
 

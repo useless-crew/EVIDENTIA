@@ -23,6 +23,7 @@ import (
 
 	"evidentia/backend/internal/audit"
 	"evidentia/backend/internal/authz"
+	"evidentia/backend/internal/events"
 	"evidentia/backend/internal/models"
 )
 
@@ -32,7 +33,7 @@ func newShareServiceForTest(t *testing.T, recorder audit.Recorder) *ShareService
 	t.Helper()
 	appDB := appPool(t)
 	authzService := authz.NewService(appDB, recorder)
-	return NewShareService(appDB, authzService, recorder)
+	return NewShareService(appDB, authzService, recorder, events.NoopPublisher{})
 }
 
 // mustSeedDocument inserts a document row directly (bypassing

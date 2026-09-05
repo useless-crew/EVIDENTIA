@@ -40,6 +40,7 @@ import (
 	"evidentia/backend/internal/audit"
 	"evidentia/backend/internal/auth"
 	"evidentia/backend/internal/authz"
+	"evidentia/backend/internal/events"
 	"evidentia/backend/internal/repository"
 	"evidentia/backend/internal/storage"
 	"evidentia/backend/internal/utils"
@@ -338,6 +339,9 @@ func (s *DocumentService) RedactDocument(ctx context.Context, user auth.Authenti
 			"source_sha256_hash": hex.EncodeToString(doc.Sha256Hash),
 			"result_sha256_hash": hex.EncodeToString(created.Sha256Hash),
 		},
+	})
+	s.publisher.Publish(ctx, events.TypeDocumentRedactionCompleted, events.ResourceTypeCase, doc.CaseID.String(), events.DocumentRedactionData{
+		SourceDocumentID: doc.ID.String(), ResultDocumentID: created.ID.String(), CaseID: doc.CaseID.String(),
 	})
 
 	return &RedactionSummary{

@@ -26,6 +26,7 @@ import (
 	"evidentia/backend/db/generated"
 	"evidentia/backend/internal/audit"
 	"evidentia/backend/internal/authz"
+	"evidentia/backend/internal/events"
 	"evidentia/backend/internal/models"
 	"evidentia/backend/internal/repository"
 )
@@ -40,7 +41,7 @@ func newCertificateServiceForTest(t *testing.T, recorder audit.Recorder) *Certif
 	appDB := appPool(t)
 	authzService := authz.NewService(appDB, recorder)
 	objStorage, _ := testDocumentStorage(t)
-	svc, err := NewCertificateService(appDB, authzService, recorder, objStorage, "", discardLogger())
+	svc, err := NewCertificateService(appDB, authzService, recorder, objStorage, "", events.NoopPublisher{}, discardLogger())
 	require.NoError(t, err)
 	return svc
 }

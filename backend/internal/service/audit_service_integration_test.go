@@ -29,9 +29,9 @@ import (
 
 	auditpkg "evidentia/backend/internal/audit"
 	"evidentia/backend/internal/authz"
+	"evidentia/backend/internal/events"
 	"evidentia/backend/internal/jobs"
 	"evidentia/backend/internal/models"
-	"evidentia/backend/internal/realtime"
 )
 
 // newChainWriterForTest wires a real audit.ChainWriter against the live
@@ -60,7 +60,7 @@ func newAuditServiceForTest(t *testing.T, recorder auditpkg.Recorder) *AuditServ
 	t.Helper()
 	appDB := appPool(t)
 	authzService := authz.NewService(appDB, recorder)
-	return NewAuditService(appDB, authzService, recorder, testJobClient(t), realtime.NewBroadcaster(), discardLogger())
+	return NewAuditService(appDB, authzService, recorder, testJobClient(t), events.NoopPublisher{}, discardLogger())
 }
 
 // fetchAuditRowsOrdered reads every audit_log row (as the privileged

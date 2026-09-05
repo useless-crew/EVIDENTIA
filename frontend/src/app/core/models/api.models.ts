@@ -454,19 +454,35 @@ export interface IntegritySummary {
   last_verification?: VerificationDetail;
 }
 
-/** One decoded Server-Sent Event from GET /audit/verify-chain/:id/events
- * (internal/realtime.VerificationEvent) — a safe, progress-focused SUBSET
- * of VerificationDetail's fields (no requested-by or created/updated
- * timestamps on every tick), but every field it DOES carry uses the
- * exact same name as its VerificationDetail counterpart, so rendering
- * code can read either shape without a translation layer. */
-export interface VerificationSseEvent {
-  type:
-    | 'verification_started'
-    | 'verification_progress'
-    | 'verification_completed'
-    | 'verification_integrity_failure'
-    | 'verification_failed';
+// ---- System 13: Real-Time Events & Server-Sent Events ----
+// See docs/REALTIME_EVENTS.md for the full architecture these types
+// mirror. internal/events.Event is the ONE envelope every SSE event this
+// backend ever sends uses — never a bespoke per-feature shape.
+
+/** internal/events.Event — the one real-time notification envelope.
+ * `data`'s shape depends on `event_type` (see the Type*EventData
+ * interfaces below); EventStreamService's callers narrow it themselves
+ * (an unrecognized event_type must be ignored safely, never crash — see
+ * that service's own doc comment). */
+export interface RealtimeEvent<T = unknown> {
+  event_id: string;
+  event_type: string;
+  event_version: number;
+  timestamp: string;
+  resource_type: string;
+  resource_id: string;
+  data: T;
+}
+
+/** internal/events.AuditVerificationData — the `data` payload of every
+ * AUDIT_VERIFICATION_STARTED/PROGRESS/COMPLETED/AUDIT_INTEGRITY_FAILURE/
+ * AUDIT_VERIFICATION_FAILED event. A safe, progress-focused SUBSET of
+ * VerificationDetail's fields (no requested-by identity, no created/
+ * updated timestamps on every tick), but every field it DOES carry uses
+ * the exact same name as its VerificationDetail counterpart, so rendering
+ * code can read either shape without a translation layer — see
+ * AuditVerificationService.current's own doc comment. */
+export interface AuditVerificationEventData {
   verification_id: string;
   status: VerificationStatus;
   entries_checked: number;
@@ -475,5 +491,40 @@ export interface VerificationSseEvent {
   failed_entry_id?: string;
   failure_type?: string;
   failure_reason?: string;
-  timestamp: string;
+}
+
+/** internal/events.ShareEventData — the `data` payload of SHARE_CREATED/
+ * SHARE_REVOKED events on a case's event stream (GET /cases/:id/events).
+ * Deliberately omits the recipient's identity and permission level — see
+ * that Go type's own doc comment; this is a refetch SIGNAL, never a copy
+ * of the share record. */
+export interface ShareEventData {
+  share_id: string;
+  document_id: string;
+  case_id: string;
+}
+
+/** internal/events.DocumentVerificationData — DOCUMENT_VERIFICATION_
+ * COMPLETED's `data` payload on a case's event stream. */
+export interface DocumentVerificationEventData {
+  document_id: string;
+  case_id: string;
+  result: 'VERIFIED' | 'INTEGRITY_FAILURE';
+}
+
+/** internal/events.CertificateGenerationData — CERTIFICATE_GENERATION_
+ * COMPLETED's `data` payload on a case's event stream. */
+export interface CertificateGenerationEventData {
+  certificate_id: string;
+  document_id: string;
+  case_id: string;
+  document_hash: string;
+}
+
+/** internal/events.DocumentRedactionData — DOCUMENT_REDACTION_COMPLETED's
+ * `data` payload on a case's event stream. */
+export interface DocumentRedactionEventData {
+  source_document_id: string;
+  result_document_id: string;
+  case_id: string;
 }

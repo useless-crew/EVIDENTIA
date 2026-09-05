@@ -1,16 +1,16 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { Observable } from 'rxjs';
-import { environment } from '../../../environments/environment';
 import {
+  AuditVerificationEventData,
   IntegritySummary,
+  RealtimeEvent,
   StartVerificationResponse,
   VerificationDetail,
   VerificationHistoryFilter,
   VerificationHistoryResult,
-  VerificationSseEvent,
 } from '../models/api.models';
 import { ApiClientService } from './api-client.service';
-import { AuthService } from './auth.service';
+import { EventStreamService } from './event-stream.service';
 
 /** Terminal — VerificationStatus values that will never change again. */
 const TERMINAL_STATUSES = new Set(['VERIFIED', 'INTEGRITY_FAILURE', 'FAILED']);
@@ -23,20 +23,22 @@ function isTerminal(status: string | undefined): boolean {
  * System 11's audit-chain verification client: REST calls (via the shared
  * ApiClientService — no scattered fetch()/HttpClient use elsewhere) plus a
  * live-progress watcher combining Server-Sent Events with a REST polling
- * backstop.
+ * backstop. The SSE half is now built on System 13's shared
+ * EventStreamService (see that service's own doc comment) rather than a
+ * bespoke fetch()/ReadableStream parsing loop of this service's own — the
+ * live-watching BEHAVIOR below (poll timer, terminal detection, REST as
+ * the source of truth) is unchanged from before that refactor.
  *
  * Why a backstop in addition to SSE: the REST status endpoint, not
  * accumulated SSE events, is always treated as the source of truth for
  * "what is the CURRENT state" (see docs/AUDIT_CHAIN.md's "SSE
  * reconnection") — every poll goes through ApiClientService/HttpClient,
  * which means AuthInterceptor's existing 401-triggers-one-refresh-and-
- * retry logic covers it automatically. The SSE half (started via
- * `fetch()`, not `EventSource`, so a normal Authorization header can be
- * attached — see docs/AUDIT_CHAIN.md for why `EventSource` can't do this)
- * exists purely so the dashboard updates quickly; if it drops, disconnects,
- * or errors, watch() simply keeps relying on the poll timer already
- * running underneath it — never leaving the UI stuck on stale data purely
- * because a stream connection failed.
+ * retry logic covers it automatically. The SSE half exists purely so the
+ * dashboard updates quickly; if it drops, disconnects, or errors, watch()
+ * simply keeps relying on the poll timer already running underneath it —
+ * never leaving the UI stuck on stale data purely because a stream
+ * connection failed.
  *
  * The backend is authoritative for VERIFIED/INTEGRITY_FAILURE/progress —
  * this service never computes any of those itself; it only relays
@@ -45,17 +47,22 @@ function isTerminal(status: string | undefined): boolean {
 @Injectable({ providedIn: 'root' })
 export class AuditVerificationService {
   private readonly api = inject(ApiClientService);
-  private readonly auth = inject(AuthService);
+  private readonly eventStream = inject(EventStreamService);
 
   /** The verification currently being watched, or null if none. Updated
-   * by both the poll timer and SSE frames — always server-derived. */
-  readonly current = signal<VerificationDetail | VerificationSseEvent | null>(null);
+   * by both the poll timer (a full VerificationDetail) and SSE frames
+   * (that event's own AuditVerificationEventData, unwrapped from its
+   * RealtimeEvent envelope — see EventStreamService/internal/events) —
+   * always server-derived, and the two shapes share every field a
+   * template actually reads (status, entries_checked, total_entries,
+   * progress_percent, failed_entry_id, failure_type, failure_reason). */
+  readonly current = signal<VerificationDetail | AuditVerificationEventData | null>(null);
   readonly sseConnected = signal(false);
   readonly watchError = signal<string | null>(null);
 
   private watchingId: string | null = null;
   private pollHandle: ReturnType<typeof setInterval> | null = null;
-  private abortController: AbortController | null = null;
+  private stopStream: (() => void) | null = null;
 
   // ---- REST ----
 
@@ -87,15 +94,19 @@ export class AuditVerificationService {
     this.watchError.set(null);
     this.refreshStatus();
     this.pollHandle = setInterval(() => this.refreshStatus(), 4000);
-    this.connectSse(verificationId);
+    this.stopStream = this.eventStream.connect(
+      `/audit/verify-chain/${verificationId}/events`,
+      (event) => this.handleEvent(verificationId, event),
+      (connected) => this.sseConnected.set(connected),
+    );
   }
 
   /** Stop watching — closes the SSE connection (if any) and the poll
    * timer. Always safe to call, including when nothing is being watched
    * (component ngOnDestroy/navigation-away). */
   stop(): void {
-    this.abortController?.abort();
-    this.abortController = null;
+    this.stopStream?.();
+    this.stopStream = null;
     if (this.pollHandle !== null) {
       clearInterval(this.pollHandle);
       this.pollHandle = null;
@@ -122,87 +133,13 @@ export class AuditVerificationService {
     });
   }
 
-  private connectSse(verificationId: string): void {
-    const token = this.auth.accessToken();
-    if (!token) return; // no session — refreshStatus()'s own 401 handling covers this
-
-    this.abortController = new AbortController();
-    const url = `${environment.apiBaseUrl}/audit/verify-chain/${verificationId}/events`;
-
-    fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: this.abortController.signal,
-    })
-      .then((response) => this.readSseStream(verificationId, response))
-      .catch((err: unknown) => {
-        if (this.isAbortError(err)) return; // intentional disconnect — not a failure
-        this.sseConnected.set(false);
-        // No reconnect loop here: the poll timer started by watch() is
-        // already running and is the authoritative fallback.
-      });
-  }
-
-  private async readSseStream(verificationId: string, response: Response): Promise<void> {
-    if (!response.ok || !response.body) {
-      this.sseConnected.set(false);
-      return;
-    }
-    this.sseConnected.set(true);
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    try {
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        let separatorIndex: number;
-        while ((separatorIndex = buffer.indexOf('\n\n')) >= 0) {
-          const frame = buffer.slice(0, separatorIndex);
-          buffer = buffer.slice(separatorIndex + 2);
-          this.handleSseFrame(verificationId, frame);
-        }
-      }
-    } catch (err) {
-      if (!this.isAbortError(err)) {
-        // Stream broke mid-read — same story as a failed initial
-        // connection: rely on the poll timer, don't loop reconnecting.
-      }
-    } finally {
-      this.sseConnected.set(false);
-    }
-  }
-
-  private handleSseFrame(verificationId: string, frame: string): void {
+  private handleEvent(verificationId: string, event: RealtimeEvent): void {
     if (this.watchingId !== verificationId) return; // watch() moved on to a different id
-
-    let data = '';
-    for (const line of frame.split('\n')) {
-      if (line.startsWith('data:')) {
-        data += line.slice(5).trimStart();
-      }
-      // Heartbeat lines (`: heartbeat`) carry no `data:` line and are
-      // correctly ignored here — they exist only to keep the connection
-      // alive through intermediate proxies.
+    const data = event.data as AuditVerificationEventData;
+    if (!data || typeof data.status !== 'string') return; // unrecognized/malformed — ignore safely
+    this.current.set(data);
+    if (isTerminal(data.status)) {
+      this.stop();
     }
-    if (!data) return;
-
-    try {
-      const event = JSON.parse(data) as VerificationSseEvent;
-      this.current.set(event);
-      if (isTerminal(event.status)) {
-        this.stop();
-      }
-    } catch {
-      // Malformed frame — ignore it; the poll timer keeps state current.
-    }
-  }
-
-  private isAbortError(err: unknown): boolean {
-    return err instanceof DOMException && err.name === 'AbortError';
   }
 }

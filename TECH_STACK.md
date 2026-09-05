@@ -45,16 +45,21 @@ backend. It reflects decisions already made; it is not a menu of options.
 - Redis
 - Asynq
 
-Implemented (System 11, generalized as reusable infrastructure by System
-12): long-running audit-chain verification (`internal/jobs`,
-`internal/realtime` — see docs/AUDIT_CHAIN.md and
-docs/BACKGROUND_JOBS.md). The worker runs embedded in the same process as
-the HTTP server (`cmd/server/main.go`), not a separate deployment unit;
-Redis's role is Asynq's queue transport only (plus queue priority — see
-`internal/jobs.QueueCritical`/`QueueDefault`) — PostgreSQL remains the
-authoritative store for verification state. System 12 evaluated
-certificate generation and redaction as candidates and deliberately kept
-both synchronous — see docs/BACKGROUND_JOBS.md's "Task Types".
+Implemented (System 11, generalized as reusable infrastructure by Systems
+12 and 13): long-running audit-chain verification (`internal/jobs`,
+`internal/events`, `internal/sse` — see docs/AUDIT_CHAIN.md,
+docs/BACKGROUND_JOBS.md, and docs/REALTIME_EVENTS.md). The worker runs
+embedded in the same process as the HTTP server (`cmd/server/main.go`),
+not a separate deployment unit; Redis's role is Asynq's queue transport
+(plus queue priority — see `internal/jobs.QueueCritical`/`QueueDefault`)
+AND (System 13) a single Pub/Sub channel real-time event notifications
+travel over (`internal/events.Channel`) — two independent uses of the
+one Redis instance, never conflated (Asynq is for job execution; Pub/Sub
+is for event delivery) — PostgreSQL remains the authoritative store for
+both verification state and every fact an event describes. System 12
+evaluated certificate generation and redaction as candidates and
+deliberately kept both synchronous — see docs/BACKGROUND_JOBS.md's "Task
+Types".
 
 Not yet used for:
 
@@ -130,6 +135,12 @@ Processing" above. See docs/AUDIT_CHAIN.md.
 dependency — generalizes System 11's existing `github.com/hibiken/asynq`
 usage into reusable infrastructure (`internal/jobs`); no new library was
 needed. See docs/BACKGROUND_JOBS.md.
+
+**System 13 (Real-Time Events & Server-Sent Events):** no new
+dependency — generalizes System 11's existing SSE handling and the
+already-connected `github.com/redis/go-redis/v9` client (via
+`internal/cache.Cache`) into reusable infrastructure (`internal/events`,
+`internal/sse`); no new library was needed. See docs/REALTIME_EVENTS.md.
 
 Not yet added, pending the systems that need them: AES-256, RSA,
 `go-playground/validator`. Adding any of these before their owning system

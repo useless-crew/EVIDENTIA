@@ -80,16 +80,17 @@ expired, or the account has been deactivated since the token was issued.
 {"success": true, "data": null}
 ```
 
-## Cases (implemented — System 5)
+## Cases (implemented — System 5; `/events` — System 13)
 
 ```text
 POST   /api/v1/cases
 GET    /api/v1/cases
 GET    /api/v1/cases/:id
 PUT    /api/v1/cases/:id
+GET    /api/v1/cases/:id/events   (SSE — System 13)
 ```
 
-All four require `Authorization: Bearer <access_token>`. Required
+All five require `Authorization: Bearer <access_token>`. Required
 authorization, per System 4 (`docs/SECURITY.md`'s Authorization section),
 wired via `middleware.RequirePermission`/`RequireCaseAccess`:
 
@@ -99,6 +100,21 @@ wired via `middleware.RequirePermission`/`RequireCaseAccess`:
 | `GET /cases` | `case:read` | list is scoped by PostgreSQL RLS (the caller's own case relationships), not a per-item check here |
 | `GET /cases/:id` | `case:read` | `CanAccessCase` — caller must be ADMIN, the case's creator, or an active `case_members` row |
 | `PUT /cases/:id` | `case:update` | `CanAccessCase` (same relationship check) |
+| `GET /cases/:id/events` | `case:read` | `CanAccessCase` (the identical check `GET /cases/:id` requires, re-run on every new SSE connection) |
+
+### `GET /cases/:id/events` (SSE — System 13)
+
+`text/event-stream` of this case's real-time notifications —
+`DOCUMENT_VERIFICATION_COMPLETED`, `CERTIFICATE_GENERATION_COMPLETED`,
+`DOCUMENT_REDACTION_COMPLETED`, `SHARE_CREATED`, `SHARE_REVOKED` (see
+`docs/REALTIME_EVENTS.md`'s "Event Catalog"). Sends no initial snapshot —
+an event here is a "this case's state may have changed" signal only; the
+client's existing `GET /cases/:id` (and related) queries remain the
+source of current state. Never closes on its own aside from a periodic
+forced reconnect (at most hourly) that re-validates authorization — it
+ends only on client disconnect or server shutdown. Same authentication as
+any other route (bearer header, no token in the URL). `429` if the
+caller already holds too many concurrent SSE connections.
 
 `internal/service.CaseService` independently re-checks the same
 authorization internally (not just the HTTP middleware) — see
@@ -782,16 +798,19 @@ integrity finding. `404` for an unknown/inaccessible id (RLS makes "exists
 but not yours" and "doesn't exist" indistinguishable for a non-ADMIN
 caller, though in practice only ADMIN can ever create one).
 
-### `GET /audit/verify-chain/:verificationId/events` (SSE)
+### `GET /audit/verify-chain/:verificationId/events` (SSE — System 13 infrastructure)
 
-`text/event-stream` of `verification_started` / `verification_progress` /
-`verification_completed` / `verification_integrity_failure` /
-`verification_failed` frames, each carrying a safe, progress-focused
+`text/event-stream` of `AUDIT_VERIFICATION_STARTED` /
+`AUDIT_VERIFICATION_PROGRESS` / `AUDIT_VERIFICATION_COMPLETED` /
+`AUDIT_INTEGRITY_FAILURE` / `AUDIT_VERIFICATION_FAILED` events, each
+following System 13's one event envelope (`event_id`, `event_type`,
+`event_version`, `timestamp`, `resource_type`, `resource_id`, `data`  —
+see `docs/REALTIME_EVENTS.md`). `data` carries a safe, progress-focused
 subset of the plain status endpoint's own fields — `verification_id`,
 `status`, `entries_checked`, `total_entries`, `progress_percent`,
-`failed_entry_id`, `failure_type`, `failure_reason`, `timestamp` — using
-the exact same field names (never renamed/reshaped) so client code can
-read either shape without a translation layer. Authenticated exactly like
+`failed_entry_id`, `failure_type`, `failure_reason` — using the exact
+same field names (never renamed/reshaped) so client code can read either
+shape without a translation layer. Authenticated exactly like
 every other route (a
 normal `Authorization: Bearer` header — no token in the URL); sends the
 current state immediately on connect, then relays further events until a

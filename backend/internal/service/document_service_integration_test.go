@@ -23,6 +23,7 @@ import (
 	"evidentia/backend/internal/audit"
 	"evidentia/backend/internal/authz"
 	"evidentia/backend/internal/config"
+	"evidentia/backend/internal/events"
 	"evidentia/backend/internal/models"
 	"evidentia/backend/internal/storage"
 	"evidentia/backend/pkg/hash"
@@ -64,7 +65,7 @@ func newDocumentServiceForTest(t *testing.T, recorder audit.Recorder) (*Document
 	appDB := appPool(t)
 	authzService := authz.NewService(appDB, recorder)
 	objStorage, bucket := testDocumentStorage(t)
-	svc := NewDocumentService(appDB, authzService, recorder, objStorage, bucket, testUploadMaxSize, discardLogger())
+	svc := NewDocumentService(appDB, authzService, recorder, objStorage, bucket, testUploadMaxSize, events.NoopPublisher{}, discardLogger())
 	return svc, objStorage
 }
 
@@ -215,7 +216,7 @@ func TestDocumentService_UploadDocument_OversizedFileRejectedAndNoOrphanLeft(t *
 	objStorage, bucket := testDocumentStorage(t)
 	// A tiny limit so the fixture content deterministically exceeds it
 	// without needing a large test payload.
-	svc := NewDocumentService(appDB, authzService, rec, objStorage, bucket, 16, discardLogger())
+	svc := NewDocumentService(appDB, authzService, rec, objStorage, bucket, 16, events.NoopPublisher{}, discardLogger())
 	ctx := context.Background()
 
 	officer := newUserWithRole(t, migrator, "doc-officer5@example.com", models.RolePolice)

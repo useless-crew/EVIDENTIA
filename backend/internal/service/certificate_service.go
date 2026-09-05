@@ -19,6 +19,7 @@ import (
 	"evidentia/backend/internal/audit"
 	"evidentia/backend/internal/auth"
 	"evidentia/backend/internal/authz"
+	"evidentia/backend/internal/events"
 	"evidentia/backend/internal/repository"
 	"evidentia/backend/internal/storage"
 	"evidentia/backend/internal/utils"
@@ -117,6 +118,7 @@ type CertificateService struct {
 	recorder   audit.Recorder
 	storage    storage.Storage
 	signingKey *ecdsa.PrivateKey
+	publisher  events.Publisher
 	logger     *slog.Logger
 }
 
@@ -131,7 +133,7 @@ type CertificateService struct {
 // parse as a PEM-encoded PKCS#8 ECDSA private key, construction fails:
 // per master prompt §9, a misconfigured secret must never be silently
 // downgraded to an insecure fallback.
-func NewCertificateService(pool *pgxpool.Pool, authzService *authz.Service, recorder audit.Recorder, objectStorage storage.Storage, signingKeyPEM string, logger *slog.Logger) (*CertificateService, error) {
+func NewCertificateService(pool *pgxpool.Pool, authzService *authz.Service, recorder audit.Recorder, objectStorage storage.Storage, signingKeyPEM string, publisher events.Publisher, logger *slog.Logger) (*CertificateService, error) {
 	var key *ecdsa.PrivateKey
 	if signingKeyPEM == "" {
 		k, err := crypto.GenerateECDSAKey()
@@ -154,6 +156,7 @@ func NewCertificateService(pool *pgxpool.Pool, authzService *authz.Service, reco
 		recorder:   recorder,
 		storage:    objectStorage,
 		signingKey: key,
+		publisher:  publisher,
 		logger:     logger,
 	}, nil
 }
@@ -336,6 +339,9 @@ func (s *CertificateService) generateCertificate(ctx context.Context, ident repo
 			"document_id":   doc.ID.String(),
 			"document_hash": hex.EncodeToString(doc.Sha256Hash),
 		},
+	})
+	s.publisher.Publish(ctx, events.TypeCertificateGenerationCompleted, events.ResourceTypeCase, doc.CaseID.String(), events.CertificateGenerationData{
+		CertificateID: created.ID.String(), DocumentID: doc.ID.String(), CaseID: doc.CaseID.String(), DocumentHash: hex.EncodeToString(doc.Sha256Hash),
 	})
 
 	summary := toCertificateSummary(created)

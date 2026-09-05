@@ -124,6 +124,19 @@ func run(ctx context.Context, a *app.App) {
 		workerErr <- worker.Run(mux)
 	}()
 
+	// SSEManager.Start subscribes to Redis (internal/events.Channel) and
+	// fans out to every locally-registered SSE connection until sseCtx is
+	// cancelled. A DEDICATED context, not ctx directly: ctx is only ever
+	// cancelled by the SIGINT/SIGTERM branch below, never by the
+	// serverErr/workerErr branches — sseCancel is called unconditionally
+	// right after the select, exactly like server.Shutdown/worker.Shutdown
+	// below are unconditional steps regardless of which branch triggered
+	// shutdown, so SSEManager is guaranteed to actually stop (and release
+	// its Redis subscription) before a.Close() closes that shared client.
+	sseCtx, sseCancel := context.WithCancel(context.Background())
+	defer sseCancel()
+	go a.SSEManager.Start(sseCtx)
+
 	select {
 	case <-ctx.Done():
 		a.Logger.Info("shutdown signal received")
@@ -153,6 +166,19 @@ func run(ctx context.Context, a *app.App) {
 	// "properly progressed" nor "properly failed".
 	worker.Shutdown()
 	a.Logger.Info("audit verification worker stopped")
+
+	// Unconditionally stop SSEManager (see sseCtx's own doc comment above
+	// for why this must not rely on ctx alone), then wait for its Redis
+	// subscription goroutine to actually exit before a.Close() closes the
+	// shared Redis client out from under it — bounded by the same shutdown
+	// timeout every other step here respects.
+	sseCancel()
+	select {
+	case <-a.SSEManager.Done():
+		a.Logger.Info("sse manager stopped")
+	case <-shutdownCtx.Done():
+		a.Logger.Warn("sse manager did not stop within the shutdown timeout")
+	}
 
 	a.Close()
 	a.Logger.Info("shutdown complete")

@@ -811,10 +811,17 @@ Realtime / SSE
   [docs/BACKGROUND_JOBS.md](./docs/BACKGROUND_JOBS.md)'s "Task Types" for
   why). The worker runs embedded in the same process as the HTTP server
   (`cmd/server/main.go`), not a separate deployment unit.
-- **Realtime** (implemented) — SSE-based progress streaming
-  (`internal/realtime`), so far powering audit-chain verification
-  progress only, via an in-process broadcaster (not Redis pub/sub — see
-  docs/AUDIT_CHAIN.md for why).
+- **Real-Time Events & SSE** (implemented) — System 13's reusable,
+  Redis-Pub/Sub-backed event architecture (`internal/events` +
+  `internal/sse`, replacing System 11's original in-process-only
+  `internal/realtime`): a central `Event` envelope, a `Publisher`
+  abstraction every business service/worker calls to notify of a
+  meaningful state change, and a `Manager` that fans out to
+  authorization-scoped, authenticated SSE connections. Powers System 11's
+  audit-chain verification stream (refactored, unchanged behavior) and a
+  new `GET /cases/:id/events` case-activity stream (document
+  verification/certificate generation/redaction/share create-revoke) —
+  see [docs/REALTIME_EVENTS.md](./docs/REALTIME_EVENTS.md).
 
 ## Data Model Overview
 

@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"evidentia/backend/internal/app"
+	"evidentia/backend/internal/events"
 	"evidentia/backend/internal/jobs"
 )
 
@@ -433,6 +434,17 @@ func TestAuditFlow_SSE(t *testing.T) {
 	shutdownWorker := newTestAuditWorker(t, application)
 	defer shutdownWorker()
 
+	// SSEManager.Start is normally launched by cmd/server/main.go's run() —
+	// this test builds the router directly, bypassing that, so it must
+	// start the manager's Redis subscription itself; without this, every
+	// event AuditService.RunVerification publishes has no subscriber and
+	// is genuinely lost (Redis Pub/Sub's own ephemeral-delivery semantics —
+	// see internal/events' package doc comment), leaving this test's SSE
+	// connection waiting for an event that will never arrive.
+	sseManagerCtx, sseManagerCancel := context.WithCancel(context.Background())
+	defer sseManagerCancel()
+	go application.SSEManager.Start(sseManagerCtx)
+
 	server := httptest.NewServer(router)
 	defer server.Close()
 
@@ -510,9 +522,9 @@ func TestAuditFlow_SSE(t *testing.T) {
 	require.Contains(t, sseResp.Header.Get("Content-Type"), "text/event-stream")
 
 	terminalTypes := map[string]bool{
-		"verification_completed":         true,
-		"verification_integrity_failure": true,
-		"verification_failed":            true,
+		events.TypeAuditVerificationCompleted: true,
+		events.TypeAuditIntegrityFailure:      true,
+		events.TypeAuditVerificationFailed:    true,
 	}
 
 	scanner := bufio.NewScanner(sseResp.Body)

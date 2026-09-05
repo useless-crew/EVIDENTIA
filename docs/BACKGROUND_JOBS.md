@@ -66,10 +66,12 @@ never replaced:
   COMPLETED task, never retried), now built on this package's shared
   `FailureCategory`/`Permanent`/`CategoryOf` vocabulary instead of an ad
   hoc `asynq.SkipRetry` wrap.
-- `internal/realtime` (SSE) — completely untouched. System 12 introduces
-  no second real-time mechanism; audit verification's progress dashboard
-  still streams through the same `Broadcaster`/`StreamVerification` System
-  11 built.
+- SSE (`internal/realtime` at the time System 12 was written, later
+  generalized into `internal/events`/`internal/sse` by System 13 — see
+  docs/REALTIME_EVENTS.md) — untouched BY SYSTEM 12: it introduces no
+  second real-time mechanism; audit verification's progress dashboard
+  streams through whichever SSE infrastructure is current, unchanged in
+  behavior across that later refactor.
 - `audit_verifications` (migration `000005`) — completely untouched.
   System 12 introduces NO new persistent job table: this table is
   intentionally domain-specific (it IS the audit-chain verification
