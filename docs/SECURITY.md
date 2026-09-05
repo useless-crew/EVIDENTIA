@@ -677,7 +677,20 @@ document now durably records through System 8's hash chain, not only the
 operational log). Partial: **5** (System 6 computes/persists the initial
 hash; System 7 adds recompute-and-compare verification and tamper
 detection — AES-256 encryption at rest, the other half of principle
-**6**'s neighbor, remains unstarted). Not started: 6, 10.
+**6**'s neighbor, remains unstarted); **10** (see "Transport Security"
+below — TLS termination is a deployment-time reverse-proxy
+responsibility this application documents and cooperates with via
+`TRUSTED_PROXIES`, but does not implement in-process). Not started: 6.
+System 15 (Security Hardening & Compliance Layer) adds a login
+brute-force/credential-stuffing throttle (`internal/ratelimit`, see
+"Authentication" below), a fixed set of defense-in-depth response
+headers and cache-control on every response (`middleware.SecurityHeaders`),
+explicit reverse-proxy trust configuration for `ClientIP()`, a
+wildcard-CORS-plus-credentials guard, an HTML/active-content upload
+denylist, and infrastructure hardening (Redis authentication,
+loopback-only Postgres/Redis/MinIO port binding in the local
+docker-compose stack) — see "Threat Model" below for how these fit
+together with Systems 1-14's existing controls.
 
 1. JWT authentication
 2. RBAC (Role-Based Access Control)
@@ -822,12 +835,66 @@ than silently.
   access token (default 15 minutes) plus revocable refresh sessions is
   judged sufficient; a Redis-backed blacklist is explicitly out of scope
   for this system (Redis/Asynq business logic belongs to a later system).
-- **Account lockout / rate limiting** — not implemented, to avoid an
-  easy denial-of-service vector against legitimate users from a naive
-  implementation. `AuthService`'s structure (one method per operation, no
-  hidden global state) does not preclude adding this later.
+- **Permanent account lockout** — deliberately never implemented, in
+  either the original System 3 or System 15's throttle below: a naive
+  lockout would itself be a denial-of-service vector, letting an attacker
+  lock a victim out indefinitely just by repeating failed logins against
+  their account. See "Login brute-force throttle (System 15)" — the
+  actual control added — immediately below for what IS implemented
+  instead: temporary, auto-expiring, fail-open rate limiting.
 - **MFA** — explicitly out of scope per the project requirements (a
   stretch goal for sensitive roles), not precluded by this architecture.
+
+### Login brute-force throttle (System 15)
+
+`AuthService.Login` — via `internal/ratelimit.Limiter`, Redis-backed —
+runs two independent, fixed-window counters before ever querying the
+database, both checked in `checkLoginRateLimit`:
+
+- **Per-IP** (`login:ip:<ClientIP>`, default 20 attempts / 15 minutes) —
+  bounds total login volume from one source regardless of which account
+  it targets (a credential-stuffing spray across many accounts).
+- **Per-account** (`login:acct:<SHA-256(lowercased email)>`, default 10
+  attempts / 15 minutes) — bounds attempts against one account regardless
+  of source IP (a distributed brute-force against a single victim, e.g.
+  rotating through a botnet). The email itself is never used as the Redis
+  key directly (data minimization); a fast, non-adaptive hash is
+  appropriate here for the same reason `HashRefreshToken` uses one — this
+  protects against storing an identifier in cleartext, not against
+  offline brute-forcing of a secret.
+
+Both counters are **fixed-window and auto-expiring** — neither can become
+a permanent lockout, satisfying the constraint above. A successful login
+resets its account counter (`Login`'s `s.loginLimit.Reset(ctx, acctKey)`)
+so a legitimate user who mistyped a password a few times regains a full
+quota immediately; the per-IP counter is deliberately NOT reset on
+success, since it tracks aggregate request volume independent of which
+account eventually succeeds.
+
+Exceeding either limit returns the same generic `429 Too Many Requests`
+(`loginRateLimitError`, "Too many login attempts. Please try again
+later.") with a `Retry-After` header — never revealing which dimension
+tripped, for the same anti-enumeration reason `genericAuthError` is
+generic. The throttled attempt is also recorded through the audit
+`Recorder` as `AUTH_LOGIN_RATE_LIMITED` with a `reason` of
+`ip_rate_limited` or `account_rate_limited` for server-side diagnosis.
+
+**Fails OPEN, never closed, on a Redis error**: `RedisLimiter.Allow`
+returns `(allowed: true, err: non-nil)` when Redis is unreachable, and
+`checkLoginRateLimit` only blocks when `err == nil`. A rate limiter is
+defense-in-depth on top of the bcrypt/account-status checks that remain
+the authoritative gate — an infrastructure outage in Redis must not be
+able to lock every user out of the entire application. Thresholds
+(`LOGIN_RATE_LIMIT_{IP,ACCOUNT}_{MAX,WINDOW}`) are centrally configured
+(`config.LoginRateLimitConfig`), validated positive at startup, never
+scattered as inline constants.
+
+An unknown-email login additionally runs `bcrypt.CompareHashAndPassword`
+against a fixed placeholder hash (`AuthService.dummyHash`, computed once
+at construction at the same configured cost as real passwords) purely to
+spend comparable wall-clock time to the "wrong password" path — otherwise
+the two failure branches would be distinguishable by response latency
+alone despite returning byte-identical bodies.
 
 ## Authorization
 
@@ -2002,11 +2069,329 @@ durable record of who was granted what.
   — no system through 7 needs either; `pkg/crypto/aes.go` remains a TODO
   stub.
 
+## HTTP & Infrastructure Hardening (System 15)
+
+Controls added on top of Systems 1-14 that don't belong to any single
+earlier system, gathered here rather than scattered:
+
+- **Security response headers** (`middleware.SecurityHeaders`, applied to
+  every route ahead of `CORS` in `httpserver.NewRouter`) —
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
+  `X-Frame-Options: DENY`, `Cache-Control: no-store` unconditionally, on
+  every response. No `Content-Security-Policy`: this is a pure JSON API
+  with no server-rendered HTML and no cookie session, so a CSP would
+  govern nothing and be dead configuration — see that middleware's own
+  doc comment.
+- **Reverse-proxy trust** (`Server.TrustedProxies`/`TRUSTED_PROXIES`,
+  `httpserver.NewRouter`'s explicit `engine.SetTrustedProxies` call) —
+  gin's zero-value behavior trusts every proxy hop's
+  `X-Forwarded-For`/`X-Real-Ip`, which would let any client forge its
+  apparent `ClientIP()` unless explicitly configured. Default (unset) is
+  **trust none**: `ClientIP()` falls back to the request's direct,
+  unspoofable `RemoteAddr`. This matters beyond request logging as of
+  System 15: `ClientIP()` also keys the per-IP login throttle below — an
+  attacker able to spoof it could bypass that throttle entirely. A
+  deployment behind a real reverse proxy/load balancer must set
+  `TRUSTED_PROXIES` to that proxy's exact address(es), never a wildcard.
+- **CORS wildcard + credentials guard** (`config.validate`) — rejects
+  `CORS_ALLOWED_ORIGINS` containing `"*"` combined with
+  `CORS_ALLOW_CREDENTIALS=true` at startup, in **every** environment
+  (not just production): that combination reflects any origin's
+  credentialed requests, which is never safe regardless of `APP_ENV`.
+  Complements the pre-existing production-only bare-wildcard check.
+- **Upload content-type denylist** (`document.deniedUploadMimeTypes`,
+  `DocumentService.UploadDocument`) — rejects a file whose *sniffed*
+  content (`http.DetectContentType` on the real bytes, not the
+  client-declared `Content-Type` or filename extension) is `text/html`:
+  the one format among those System 6 must accept as arbitrary evidence
+  that can itself carry a `<script>` tag. Deliberately a denylist, not an
+  allowlist — an evidence platform must accept forensic formats content
+  sniffing cannot even recognize (falling back to
+  `application/octet-stream`) — and a narrow one, since every download
+  already pairs `Content-Disposition: attachment` with
+  `X-Content-Type-Options: nosniff` (System 6/7), so nothing accepted
+  here is ever rendered inline by a browser regardless of type. See
+  "Malicious Documents" under the Threat Model below.
+- **Password length ceiling** (`min=8,max=72` on every password-accepting
+  DTO — login, admin user creation, admin password reset) — bcrypt
+  silently ignores/errors on input past 72 bytes
+  (`bcrypt.GenerateFromPassword`'s documented hard limit); rejecting it
+  at the request-validation layer produces a clean `400` instead of
+  surfacing that as an internal `500` from `auth.HashPassword`.
+- **Redis authentication + loopback-only infrastructure ports**
+  (`docker-compose.yml`) — the local-dev Redis service now runs with
+  `--requirepass` (`REDIS_PASSWORD`, same placeholder-credential
+  convention as every other credential in that file), and Postgres,
+  Redis, and MinIO are all bound to `127.0.0.1` rather than `0.0.0.0` —
+  reachable for local development and the migration step, never from
+  another host on the same network. Only the backend's own port remains
+  published on all interfaces, since it is the one service meant to
+  receive external traffic. A production deployment should go further —
+  no published ports at all for these three, communicating with the
+  backend purely over an internal Docker/orchestrator network — this
+  compose file's job is safe local development, not a production
+  topology (see "Deployment Security" considerations below).
+- **Dead security-relevant stubs removed** —
+  `internal/handlers/user/login.go`,
+  `internal/middleware/audit_middleware.go`, and
+  `internal/middleware/validation_middleware.go` were pure `// TODO`
+  placeholders, superseded by `internal/handlers/auth/login.go`,
+  `internal/audit.ChainWriter`, and per-DTO `binding` tags respectively,
+  years before System 15 — but left in the tree they read as an
+  unimplemented security control someone might reasonably expect to find
+  wired in. Removed rather than left as a misleading TODO (master prompt
+  §52).
+
 ## Transport Security
 
-TODO: Document TLS configuration and certificate management.
+**The application does not terminate TLS itself** — `httpserver.Server`
+(see `internal/httpserver/server.go`) listens on plain HTTP, and
+`ServerConfig` carries no certificate/key configuration. This is a
+deliberate, common architecture for a containerized backend, not an
+oversight: TLS termination belongs to whatever sits in front of it in a
+real deployment — a reverse proxy (nginx, Caddy, Envoy), an API gateway,
+or a cloud load balancer — which is also the natural place to manage
+certificate provisioning/rotation (e.g. ACME/Let's Encrypt, or a cloud
+provider's managed-certificate service). **Never run this application
+directly on the public Internet over plain HTTP** — every credential,
+access token, and refresh token this API issues or accepts travels in
+the request/response body or the `Authorization` header, all of which
+plain HTTP exposes to anyone on the network path.
+
+What the application DOES do to cooperate correctly with a TLS-
+terminating proxy in front of it:
+
+- **`TRUSTED_PROXIES`** (see "HTTP & Infrastructure Hardening" above) —
+  configure this to the proxy's address so `ClientIP()` (audit logging,
+  the login throttle) reflects the real client, not the proxy, while
+  still not trusting an arbitrary client-supplied header.
+- **`CORS_ALLOWED_ORIGINS`** should list the scheme the client actually
+  uses (`https://...` in any deployment with real TLS) — `config.validate`
+  does not enforce this (it cannot know your deployment's scheme), but a
+  production `.env` listing an `http://` origin for a site actually
+  served over `https://` is very likely a mistake worth catching in
+  review.
+- **`Cache-Control: no-store`** (see above) is set regardless of
+  transport — it protects against caching by any intermediary,
+  TLS-terminating or not.
+
+Local development (`docker-compose.yml`, `.env.example`) intentionally
+runs everything over plain HTTP on `localhost` — this is safe *because*
+it never leaves the local machine (loopback-only port binding, see
+above), not because plain HTTP is broadly acceptable. Treating a
+development configuration as adequate for a production deployment is
+exactly the mistake this section exists to prevent; see
+[DEPLOYMENT.md](./DEPLOYMENT.md) for the fuller local-vs-production
+distinction.
 
 ## Threat Model
 
-TODO: Document assumptions, trust boundaries, and mitigations relevant to
-investigative/judicial evidence handling.
+Evidentia holds investigative case data and forensic evidence for Indian
+law-enforcement/judicial workflows: material whose evidentiary value
+depends on provable integrity and whose exposure could endanger ongoing
+investigations, witnesses, or a fair trial. The controls documented
+throughout this file exist to defend against realistic, specific threats
+to that material — this section states the assumptions and trust
+boundaries those controls rest on, and maps each threat category to
+where its mitigation actually lives. It is a map, not a duplicate:
+follow the links back to the sections above (and to
+[AUDIT_CHAIN.md](./AUDIT_CHAIN.md), [STORAGE.md](./STORAGE.md),
+[DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md)) for the actual mechanism
+behind each mitigation.
+
+### Trust boundaries and assumptions
+
+- **The client is never trusted.** Every request is treated as
+  potentially hostile regardless of who appears to have sent it. Role,
+  permissions, user ID, and agency ID are NEVER accepted from client
+  input as authoritative — they are re-resolved from server-side state
+  on every request (`AuthService.ResolveIdentity`, "Authentication"
+  above) and re-checked against RBAC+ABAC+RLS on every access
+  ("Authorization" above). A JWT's `role` claim is an unenforced display
+  hint, not an authorization source — restated here because it is the
+  single most consequential trust-boundary decision in this system.
+- **PostgreSQL is the one authoritative store.** Redis (cache, Asynq
+  queues, SSE pub/sub, the System 15 login throttle) and MinIO (blob
+  storage) are both infrastructure the authoritative Postgres-recorded
+  state depends on, never a substitute for it — an evidence record, an
+  audit entry, and an authorization decision all ultimately live in, or
+  are verified against, Postgres. Losing Redis degrades throttling and
+  real-time notifications (fails open/degrades gracefully — see below);
+  it can never silently grant access or fabricate evidence integrity.
+- **The database role the application runs as is deliberately
+  unprivileged.** `evidentia_app` is `NOSUPERUSER NOCREATEDB NOCREATEROLE
+  NOBYPASSRLS NOINHERIT`, with RLS `FORCE`d on every protected table and
+  no `UPDATE`/`DELETE` grant on `audit_log` (see
+  [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md)) — a full SQL-injection
+  compromise of the application's own DB connection still cannot bypass
+  row-level authorization or rewrite audit history, because the
+  privilege to do either was never granted to that connection in the
+  first place, independent of anything the application's Go code does or
+  fails to do correctly.
+- **A background job is not an elevated-trust shortcut.** The audit-chain
+  verification worker (System 12) runs as a fixed, server-constant
+  identity (never client-influenced) scoped to exactly what that job
+  legitimately needs (full-chain read visibility for verification) — see
+  "Asynchronous Processing" above — not as a general RLS bypass.
+- **Operational logs and the cryptographic audit trail are separate
+  systems with separate guarantees.** `logging_middleware.go`'s
+  structured logs are for operators debugging the running service and
+  are not tamper-evident; `audit.ChainWriter`'s hash-chained `audit_log`
+  is the tamper-evident compliance record. Neither substitutes for the
+  other — see "Logging Security" implications throughout this file
+  wherever a Recorder call and a `slog` call appear side by side.
+
+### Threat categories and where each is mitigated
+
+**Authentication** (credential theft, brute force, credential stuffing,
+token theft, refresh-token abuse, session fixation, stale sessions,
+account enumeration) — bcrypt password hashing with a centrally
+configured cost floor; short-lived (≤24h, default 15m) HS256 access
+tokens with algorithm/issuer/audience pinning; opaque, hashed, rotating
+refresh tokens with family-wide reuse-detection revocation; per-request
+account-status re-resolution (a deactivated account's outstanding access
+token stops working on its very next request, not merely at expiry); a
+single generic error string and comparable-latency dummy-hash comparison
+across every failure branch; a fixed-window, fail-open, never-permanent
+per-IP/per-account login throttle. See "Authentication" and "Login
+brute-force throttle (System 15)" above. **Residual risk**: no MFA
+(explicitly out of scope); no access-token revocation list (mitigated by
+short TTL); the per-IP throttle is bypassable by an attacker who controls
+enough distinct source IPs faster than the per-account throttle catches
+them — the two dimensions are complementary, not individually sufficient.
+
+**Authorization** (privilege escalation, IDOR, horizontal/vertical
+escalation, role manipulation, ABAC bypass, RLS bypass, cross-agency
+access) — RBAC permission checks, ABAC case/document-relationship checks,
+and PostgreSQL RLS are three independently-enforced layers (see
+"Authorization" above and [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md)); no
+single layer is trusted alone. Self-role/self-status modification is
+hard-blocked in `UserService`, not merely hidden in the UI. Transaction-
+scoped `set_config(..., true)` for RLS identity means a pooled connection
+can never leak one request's identity into another's query. **Residual
+risk**: correctness of this layer depends on every new handler
+continuing to compose all three checks — a future route added without
+`RequireCaseAccess`/`RequireDocumentAccess` would regress silently unless
+caught in review; there is no automated "every route has an authz
+middleware" check today.
+
+**Evidence integrity** (file tampering, hash substitution, malicious
+uploads, unauthorized downloads, evidence replacement, unsafe redaction,
+certificate forgery, metadata manipulation) — SHA-256 computed
+server-side via streaming hash (never a client-supplied hash, never a
+full-file in-memory read); recompute-and-compare verification against
+the actual stored MinIO object; downloads streamed through an
+authenticated backend handler (no direct/presigned MinIO URL ever
+reaches a client); redaction produces an independently-hashed derivative
+while the original remains untouched; compliance certificates are signed
+from server-derived document/hash/timestamp data only. See "Document
+Verification & Compliance Certificates" and "Document Redaction" above.
+**Residual risk**: redaction's ability to truly remove (not merely
+overlay) sensitive content is bounded by the underlying document
+format/library's capabilities — see that section's own discussion of
+which formats are supported.
+
+**Application-layer attacks** (SQL injection, XSS, CSRF, SSRF, path
+traversal, command injection, unsafe deserialization, mass assignment,
+malicious filenames, oversized payloads) — every query goes through sqlc-
+generated parameterized statements (no string-concatenated SQL anywhere
+in the codebase, no dynamic `ORDER BY`/filter identifiers since none of
+today's sortable listings expose a client-controlled sort field); request
+DTOs are narrow, hand-written structs that never bind a privileged field
+(`role`, `password_hash`, `agency_id`, `created_by`, ...) directly from a
+public request body; uploaded files get a generated storage key, never
+a user-supplied filename, path-joined into object storage; a global
+per-route body-size limit plus a separate, larger upload-specific limit
+bound payload size; the upload MIME denylist above closes the one
+concretely dangerous format (HTML) among accepted evidence types. CSRF
+protection is correctly ABSENT: authentication is bearer-JWT-in-header,
+attached by application code, never an ambiently-sent cookie — there is
+no session for a forged cross-site request to ride on. No feature in
+this codebase accepts an arbitrary client-supplied URL for the backend to
+fetch, so there is no SSRF surface to mitigate; if one is added later, it
+must validate scheme/host against an allowlist and block
+loopback/link-local/cloud-metadata addresses before this threat model can
+claim it is covered.
+
+**Infrastructure** (leaked secrets, excessive DB privileges, exposed
+MinIO/Redis, insecure Docker configuration, weak TLS, insecure CORS) —
+see "HTTP & Infrastructure Hardening" and "Transport Security" above:
+loopback-only Postgres/Redis/MinIO ports, Redis `requirepass`, an
+unprivileged/RLS-forced DB role, a non-root multi-stage Docker build,
+explicit reverse-proxy trust configuration, and a CORS wildcard+
+credentials guard enforced at startup in every environment. Secrets
+(`JWT_SIGNING_KEY`, `DATABASE_PASSWORD`, `MINIO_SECRET_KEY`,
+`REDIS_PASSWORD`, `CERTIFICATE_SIGNING_KEY`, bootstrap-admin credentials)
+are read from environment configuration only, validated non-empty/
+non-trivial at startup where a weak value would be dangerous
+(`JWT_SIGNING_KEY` ≥ 32 chars), and never given a baked-in production-
+usable default — `.env` is gitignored, `.env.example` carries only
+placeholders. **Residual risk**: this repository's docker-compose stack
+is a local-development topology; a real production deployment needs its
+own hardened compose/Kubernetes manifests (no published infrastructure
+ports at all, secrets from a real secret manager, TLS from a real
+reverse proxy) that this repository does not itself provide.
+
+**Audit trail** (audit deletion, modification, chain tampering, hash
+substitution, unauthorized audit access) — `audit_log` grants
+`SELECT, INSERT` only to the application role, with `UPDATE`/`DELETE`
+explicitly revoked at the database level (not merely un-exposed via the
+API) — a full application-layer compromise still cannot rewrite history
+because the underlying database connection lacks the privilege
+regardless. Hash chaining is computed from a single canonical
+serialization function shared by the writer and verifier (no drift
+possible between "what was chained" and "what verification checks");
+a PostgreSQL advisory lock serializes concurrent writers so the
+chain-head read-then-append is race-free. See "Audit trail" and "Audit
+Chain Verification" above, and [AUDIT_CHAIN.md](./AUDIT_CHAIN.md) for the
+full mechanism. **Residual risk**: an attacker with actual database
+superuser access (not the application's own role) could still alter
+`audit_log` directly — no application-layer control can prevent that;
+defending against it is a database-administration/infrastructure-access
+concern (least-privilege access to the Postgres superuser itself),
+outside this application's own threat surface.
+
+**Real-time/SSE** (unauthorized subscriptions, sensitive event leakage,
+event injection, Redis exposure, connection exhaustion) — every SSE route
+sits behind the same `middleware.Auth` + RBAC/ABAC chain as its
+equivalent REST route (e.g. `GET /cases/:id/events` requires the same
+`case:read` + case-relationship check `GET /cases/:id` does, re-checked
+on every reconnect); no route accepts a token via URL query string; every
+published event payload carries only IDs/statuses/hashes, never
+passwords, tokens, credentials, or unnecessary witness identity/evidence
+content (see "Real-Time Events" above and
+[REALTIME_EVENTS.md](./REALTIME_EVENTS.md)). Redis pub/sub itself is
+internal infrastructure, not a client-reachable surface (see
+"Infrastructure" above).
+
+### Malicious documents
+
+Evidentia must accept arbitrary forensic evidence formats it cannot
+always parse or sanitize (disk images, proprietary report formats,
+scanned documents) — the "Malicious documents" principle applied here is
+therefore: **never execute or render accepted content**, and **reject
+outright** the narrow set of formats that could carry active content AND
+would otherwise be rendered. Concretely: every download is
+`Content-Disposition: attachment` with `X-Content-Type-Options: nosniff`
+(never inline rendering, regardless of format); the upload denylist
+(above) rejects sniffed `text/html`, the one common format capable of
+carrying a `<script>` tag that this codebase might otherwise be tempted
+to render inline somewhere. SVG, Office macros, and PDF active content
+are not separately denylisted today because nothing in this codebase
+renders or executes ANY accepted format server-side or client-side
+inline — they are stored and served as opaque, `attachment`-disposed
+bytes exactly like every other evidence file. If a future feature adds
+inline preview/rendering of any format, that feature — not this
+denylist — becomes the place a sanitization or format-restriction
+control must be added; do not assume this denylist alone makes inline
+rendering of arbitrary uploads safe.
+
+### What this threat model does not claim
+
+This document describes technical controls, not certification. It does
+not claim compliance with any specific law, regulation, or forensic-
+evidence standard (Indian Evidence Act, IT Act rules, chain-of-custody
+requirements, or otherwise) — those require a legal/compliance review
+this document is not a substitute for. It documents what the system
+technically does and does not do, so that review has an accurate
+starting point.

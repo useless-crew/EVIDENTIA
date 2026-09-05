@@ -24,7 +24,7 @@ func TestIntegration_ConnectAndPing(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	c, err := New(ctx, config.RedisConfig{Addr: addr})
+	c, err := New(ctx, config.RedisConfig{Addr: addr, Password: os.Getenv("REDIS_PASSWORD")})
 	require.NoError(t, err)
 	defer c.Close()
 

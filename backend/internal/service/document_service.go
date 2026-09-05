@@ -57,6 +57,24 @@ const (
 	sniffLen = 512
 )
 
+// deniedUploadMimeTypes rejects the handful of http.DetectContentType
+// results that can carry active/executable content with no legitimate
+// evidence use case — see docs/SECURITY.md's "Malicious documents". This
+// is deliberately a DENYlist, not an ALLOWlist: an evidence platform must
+// accept arbitrary forensic file formats (disk images, proprietary report
+// formats, ...) that content sniffing cannot even recognize (falling back
+// to "application/octet-stream"), and DownloadDocument already pairs
+// every response with Content-Disposition: attachment plus
+// X-Content-Type-Options: nosniff, so nothing accepted here is ever
+// rendered/executed by a browser regardless of type. This denylist closes
+// the remaining, narrower gap of storing an HTML document capable of
+// carrying a <script> tag at all — rejected outright rather than merely
+// relying on it never being served inline.
+var deniedUploadMimeTypes = map[string]bool{
+	"text/html; charset=utf-8": true,
+	"text/html":                true,
+}
+
 // errUploadTooLarge is returned by the streaming size guard the moment a
 // read would push the running total past the configured limit — see
 // limitedReader below. It is checked with errors.Is from UploadDocument to
@@ -192,6 +210,11 @@ func (s *DocumentService) UploadDocument(ctx context.Context, user auth.Authenti
 				fmt.Sprintf("File exceeds the maximum upload size of %d bytes", s.maxUploadSize), nil)
 		}
 		return nil, utils.ErrInternal(fmt.Errorf("store document: %w", err))
+	}
+
+	if deniedUploadMimeTypes[detectedMime] {
+		s.cleanupOrphan(ctx, objectKey, caseID, documentID, "detected content type is not permitted")
+		return nil, utils.ErrUnprocessableEntity(fmt.Sprintf("Files detected as %q are not accepted", detectedMime))
 	}
 
 	ident := repository.AppIdentity{UserID: user.ID, Role: effectiveCaseRole(user)}

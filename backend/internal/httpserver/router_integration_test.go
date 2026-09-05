@@ -38,6 +38,9 @@ func TestIntegration_HealthAndReadyEndToEnd(t *testing.T) {
 	setenvIfUnset(t, "MINIO_ACCESS_KEY", "evidentia_minio")
 	setenvIfUnset(t, "MINIO_SECRET_KEY", "changeme_example")
 	setenvIfUnset(t, "MINIO_BUCKET", "evidentia-documents")
+	setenvIfUnset(t, "REDIS_PASSWORD", "changeme_example")
+	setenvIfUnset(t, "LOGIN_RATE_LIMIT_IP_MAX", "1000000")
+	setenvIfUnset(t, "LOGIN_RATE_LIMIT_ACCOUNT_MAX", "1000000")
 	setenvIfUnset(t, "JWT_SIGNING_KEY", "test_signing_key_padded_to_32_chars_min")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

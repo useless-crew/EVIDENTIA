@@ -15,13 +15,13 @@ import (
 // pair is actually correct is a business decision made by AuthService.
 type loginRequest struct {
 	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required,min=8"`
+	Password string `json:"password" binding:"required,min=8,max=72"`
 }
 
 // Login handles POST /api/v1/auth/login.
 //
 // @Summary      Log in
-// @Description  Validates email/password and returns a short-lived access token plus a refresh token. Returns a single generic error for any invalid-credential case (unknown email, wrong password, inactive account) — never which one, to avoid user enumeration.
+// @Description  Validates email/password and returns a short-lived access token plus a refresh token. Returns a single generic error for any invalid-credential case (unknown email, wrong password, inactive account) — never which one, to avoid user enumeration. Subject to a per-IP and per-account login throttle (System 15) — see the 429 response.
 // @Tags         auth
 // @Accept       json
 // @Produce      json
@@ -29,6 +29,7 @@ type loginRequest struct {
 // @Success      200      {object}  response.Envelope{data=tokenResponse}
 // @Failure      400      {object}  response.Envelope  "Invalid request body"
 // @Failure      401      {object}  response.Envelope  "Invalid email or password"
+// @Failure      429      {object}  response.Envelope  "Too many login attempts from this IP or against this account — see the Retry-After response header for when to retry"
 // @Router       /api/v1/auth/login [post]
 func Login(svc *service.AuthService) gin.HandlerFunc {
 	return func(c *gin.Context) {

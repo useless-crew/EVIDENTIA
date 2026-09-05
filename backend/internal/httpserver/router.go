@@ -36,9 +36,28 @@ func NewRouter(a *app.App) *gin.Engine {
 	r := gin.New()
 	r.HandleMethodNotAllowed = true
 
+	// gin's zero-value behavior trusts every proxy hop's X-Forwarded-For/
+	// X-Real-Ip when computing ClientIP(), which would let any client
+	// forge its apparent IP unless this deployment happens to sit behind
+	// no proxy at all. SetTrustedProxies(nil) is the explicit, secure
+	// default (trust none — ClientIP() falls back to the direct
+	// RemoteAddr); a deployment behind a reverse proxy/load balancer must
+	// set TRUSTED_PROXIES to that proxy's exact address(es), never a
+	// wildcard. This matters beyond logging as of System 15: ClientIP()
+	// also keys the per-IP login-attempt throttle (internal/ratelimit, see
+	// AuthService.Login) — an attacker able to spoof it could bypass that
+	// throttle entirely.
+	if len(a.Config.Server.TrustedProxies) == 0 {
+		_ = r.SetTrustedProxies(nil)
+	} else if err := r.SetTrustedProxies(a.Config.Server.TrustedProxies); err != nil {
+		a.Logger.Error("invalid TRUSTED_PROXIES configuration, trusting no proxy", "error", err.Error())
+		_ = r.SetTrustedProxies(nil)
+	}
+
 	r.Use(middleware.Recovery(a.Logger))
 	r.Use(middleware.RequestID())
 	r.Use(middleware.RequestLogger(a.Logger))
+	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.CORS(a.Config.CORS))
 	// BodyLimit is deliberately NOT applied engine-wide: document upload
 	// routes (System 6) need a much larger limit than JSON-bodied routes,

@@ -230,7 +230,7 @@ func pollVerificationUntilTerminal(t *testing.T, router http.Handler, bearer, ve
 // shutdown func the caller must defer.
 func newTestAuditWorker(t *testing.T, application *app.App) func() {
 	t.Helper()
-	redisOpt := asynq.RedisClientOpt{Addr: envOr("REDIS_ADDR", "localhost:6379")}
+	redisOpt := asynq.RedisClientOpt{Addr: envOr("REDIS_ADDR", "localhost:6379"), Password: envOr("REDIS_PASSWORD", "")}
 	errorHandler := jobs.NewAuditVerificationErrorHandler(application.AuditService, application.Logger)
 	server := jobs.NewServer(redisOpt, errorHandler, application.Logger)
 	mux := jobs.NewMux(application.Logger, jobs.NewAuditVerificationHandler(application.AuditService))
@@ -251,6 +251,9 @@ func TestAuditFlow_EndToEnd(t *testing.T) {
 	setenvIfUnset(t, "MINIO_ACCESS_KEY", "evidentia_minio")
 	setenvIfUnset(t, "MINIO_SECRET_KEY", "changeme_example")
 	setenvIfUnset(t, "MINIO_BUCKET", "evidentia-documents")
+	setenvIfUnset(t, "REDIS_PASSWORD", "changeme_example")
+	setenvIfUnset(t, "LOGIN_RATE_LIMIT_IP_MAX", "1000000")
+	setenvIfUnset(t, "LOGIN_RATE_LIMIT_ACCOUNT_MAX", "1000000")
 	setenvIfUnset(t, "JWT_SIGNING_KEY", "test-signing-key-at-least-32-characters-long")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -421,6 +424,9 @@ func TestAuditFlow_SSE(t *testing.T) {
 	setenvIfUnset(t, "MINIO_ACCESS_KEY", "evidentia_minio")
 	setenvIfUnset(t, "MINIO_SECRET_KEY", "changeme_example")
 	setenvIfUnset(t, "MINIO_BUCKET", "evidentia-documents")
+	setenvIfUnset(t, "REDIS_PASSWORD", "changeme_example")
+	setenvIfUnset(t, "LOGIN_RATE_LIMIT_IP_MAX", "1000000")
+	setenvIfUnset(t, "LOGIN_RATE_LIMIT_ACCOUNT_MAX", "1000000")
 	setenvIfUnset(t, "JWT_SIGNING_KEY", "test-signing-key-at-least-32-characters-long")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

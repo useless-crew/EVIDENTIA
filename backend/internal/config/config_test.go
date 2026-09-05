@@ -143,6 +143,27 @@ func TestLoad_AllowsWildcardCORSInDevelopment(t *testing.T) {
 	assert.Equal(t, []string{"*"}, cfg.CORS.AllowedOrigins)
 }
 
+// TestLoad_RejectsWildcardCORSWithCredentials_AnyEnvironment covers System
+// 15's hardening of the wildcard-origin check: TestLoad_
+// RejectsWildcardCORSInProduction above only exercises production, but
+// wildcard-plus-credentials must never pass validation in ANY
+// environment, since it reflects any origin's requests with credentials
+// enabled regardless of APP_ENV.
+func TestLoad_RejectsWildcardCORSWithCredentials_AnyEnvironment(t *testing.T) {
+	for _, env := range []string{"development", "test", "staging", "production"} {
+		t.Run(env, func(t *testing.T) {
+			setRequired(t)
+			t.Setenv("APP_ENV", env)
+			t.Setenv("CORS_ALLOWED_ORIGINS", "*")
+			t.Setenv("CORS_ALLOW_CREDENTIALS", "true")
+
+			_, err := Load()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "CORS_ALLOW_CREDENTIALS")
+		})
+	}
+}
+
 func TestLoad_MissingRequiredCredentials(t *testing.T) {
 	setRequired(t)
 	// Simulate the credentials never having been set.

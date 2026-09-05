@@ -101,6 +101,9 @@ func TestDocumentVerifyCertificateFlow_EndToEnd(t *testing.T) {
 	setenvIfUnset(t, "MINIO_ACCESS_KEY", "evidentia_minio")
 	setenvIfUnset(t, "MINIO_SECRET_KEY", "changeme_example")
 	setenvIfUnset(t, "MINIO_BUCKET", "evidentia-documents")
+	setenvIfUnset(t, "REDIS_PASSWORD", "changeme_example")
+	setenvIfUnset(t, "LOGIN_RATE_LIMIT_IP_MAX", "1000000")
+	setenvIfUnset(t, "LOGIN_RATE_LIMIT_ACCOUNT_MAX", "1000000")
 	setenvIfUnset(t, "JWT_SIGNING_KEY", "test-signing-key-at-least-32-characters-long")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

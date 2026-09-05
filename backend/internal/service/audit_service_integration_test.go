@@ -51,7 +51,7 @@ func newChainWriterForTest(t *testing.T) *auditpkg.ChainWriter {
 func testJobClient(t *testing.T) *jobs.Client {
 	t.Helper()
 	addr := envOr("REDIS_ADDR", "localhost:6379")
-	client := jobs.NewClient(asynq.RedisClientOpt{Addr: addr})
+	client := jobs.NewClient(asynq.RedisClientOpt{Addr: addr, Password: envOr("REDIS_PASSWORD", "")})
 	t.Cleanup(func() { _ = client.Close() })
 	return client
 }

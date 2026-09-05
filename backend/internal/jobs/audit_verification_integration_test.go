@@ -28,7 +28,7 @@ func redisOptFromEnv() asynq.RedisClientOpt {
 	if addr == "" {
 		addr = "localhost:6379"
 	}
-	return asynq.RedisClientOpt{Addr: addr}
+	return asynq.RedisClientOpt{Addr: addr, Password: os.Getenv("REDIS_PASSWORD")}
 }
 
 // TestEnqueueVerifyAuditChain_UsesCriticalQueueAndDeterministicJobID

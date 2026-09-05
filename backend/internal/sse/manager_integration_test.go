@@ -28,7 +28,7 @@ func redisClientFromEnv(t *testing.T) *redis.Client {
 	if addr == "" {
 		addr = "localhost:6379"
 	}
-	client := redis.NewClient(&redis.Options{Addr: addr})
+	client := redis.NewClient(&redis.Options{Addr: addr, Password: os.Getenv("REDIS_PASSWORD")})
 	require.NoError(t, client.Ping(context.Background()).Err())
 	t.Cleanup(func() { _ = client.Close() })
 	return client

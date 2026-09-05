@@ -1,0 +1,65 @@
+# Evidentia CI — System 15 (Security Hardening & Compliance Layer)
+#
+# Runs the same checks docs/SECURITY.md's "Final Validation" section
+# expects a contributor to run locally before merging: gofmt, go vet, go
+# build, and the backend's unit test suite (the `//go:build integration`
+# tests under backend/tests/ and *_integration_test.go require live
+# Postgres/Redis/MinIO and are intentionally NOT run here — see
+# docs/DEPLOYMENT.md for how to run those against docker-compose), plus a
+# production Angular build for the frontend. This is deliberately a
+# build/test gate, not a security scanner — see master prompt §39: "Do
+# not introduce an external security scanner unless necessary."
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend (fmt, vet, build, test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: gofmt (must be a no-op)
+        run: |
+          diff <(gofmt -l .) <(printf '')
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build -trimpath -o /dev/null ./cmd/server ./cmd/migrate ./cmd/devuser
+
+      - name: go test (unit only — integration tests need live infra)
+        run: go test ./...
+
+  frontend:
+    name: Frontend (build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: npm ci
+        run: npm ci
+
+      - name: Production build
+        run: npm run build

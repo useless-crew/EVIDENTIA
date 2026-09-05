@@ -26,10 +26,14 @@ import (
 // binding:"email" additionally shape-validates the address the same way
 // loginRequest already does; UserService independently re-validates it
 // (master prompt: service-layer validation, never trust that a handler's
-// binding tag is the only check).
+// binding tag is the only check). max=72 on Password mirrors bcrypt's own
+// hard limit (golang.org/x/crypto/bcrypt.GenerateFromPassword errors
+// rather than silently truncating past 72 bytes) — rejecting it here
+// produces a clean 400 instead of surfacing that error out of
+// auth.HashPassword as an internal-error 500.
 type createUserRequest struct {
 	Email       string  `json:"email" binding:"required,email"`
-	Password    string  `json:"password" binding:"required,min=8"`
+	Password    string  `json:"password" binding:"required,min=8,max=72"`
 	FirstName   string  `json:"first_name" binding:"required,max=255"`
 	LastName    string  `json:"last_name" binding:"required,max=255"`
 	DisplayName *string `json:"display_name" binding:"omitempty,max=255"`
@@ -61,7 +65,7 @@ type updateStatusRequest struct {
 
 // resetPasswordRequest is PUT /admin/users/:id/password's request body.
 type resetPasswordRequest struct {
-	Password string `json:"password" binding:"required,min=8"`
+	Password string `json:"password" binding:"required,min=8,max=72"`
 }
 
 // userResponse/userListResponse are thin aliases over the service's own

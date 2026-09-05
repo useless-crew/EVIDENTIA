@@ -22,6 +22,7 @@ import (
 	"evidentia/backend/internal/events"
 	"evidentia/backend/internal/jobs"
 	"evidentia/backend/internal/logger"
+	"evidentia/backend/internal/ratelimit"
 	"evidentia/backend/internal/service"
 	"evidentia/backend/internal/sse"
 	"evidentia/backend/internal/storage"
@@ -182,8 +183,14 @@ func New(ctx context.Context) (*App, error) {
 	// shutdown context as the HTTP server and the Asynq worker.
 	sseManager := sse.NewManager(redisCache.Client(), log)
 
+	// loginLimiter reuses the SAME shared go-redis client
+	// internal/cache.Cache already validated at startup, exactly like
+	// eventPublisher/sseManager above — never a second Redis connection
+	// pool for this.
+	loginLimiter := ratelimit.NewRedisLimiter(redisCache.Client())
+
 	jwtManager := auth.NewJWTManager(cfg.JWT.SigningKey, cfg.JWT.Issuer, cfg.JWT.Audience, cfg.JWT.AccessTTL)
-	authService := service.NewAuthService(db.Pool(), jwtManager, cfg.JWT.BcryptCost, cfg.JWT.RefreshTTL, recorder)
+	authService := service.NewAuthService(db.Pool(), jwtManager, cfg.JWT.BcryptCost, cfg.JWT.RefreshTTL, recorder, loginLimiter, cfg.LoginLimit)
 	authzService := authz.NewService(db.Pool(), recorder)
 	caseService := service.NewCaseService(db.Pool(), authzService, recorder)
 	documentService := service.NewDocumentService(db.Pool(), authzService, recorder, objectStorage, cfg.MinIO.Bucket, cfg.Documents.MaxUploadSize, eventPublisher, log)

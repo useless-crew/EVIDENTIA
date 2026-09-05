@@ -5,14 +5,14 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 import { ApiError } from '../../core/services/api-client.service';
 import { environment } from '../../../environments/environment';
-import { DemoAccount } from './demo-accounts';
+import type { DemoAccount } from './demo-accounts';
 
 @Component({
   selector: 'app-login',
   standalone: true,
   imports: [CommonModule, FormsModule],
   templateUrl: './login.component.html',
-  styleUrls: ['./login.component.css']
+  styleUrls: ['./login.component.css'],
 })
 export class LoginComponent {
   private readonly auth = inject(AuthService);
@@ -33,10 +33,16 @@ export class LoginComponent {
   constructor() {
     this.sessionExpired.set(this.route.snapshot.queryParamMap.get('sessionExpired') === '1');
 
-    // Dynamically imported so this module — and the dev-only credential
-    // strings in it — is a separate chunk a production build (demoMode
-    // false) never imports and the browser never fetches, not merely a
-    // hidden UI element still bundled into the main chunk.
+    // Dynamically imported so this UI path (rendered only when demoMode is
+    // true — see login.component.html) doesn't force the main bundle to
+    // eagerly load it. The actual security boundary against shipping real
+    // dev credentials in a production build is NOT this runtime check —
+    // esbuild still emits a dynamic import()'s target as a fetchable
+    // static chunk even when the branch that triggers it never runs — it
+    // is angular.json's `fileReplacements`, which compiles this file's
+    // production sibling (an empty DEMO_ACCOUNTS stub) instead of
+    // demo-accounts.development.ts for anything but the `development`
+    // build configuration. See demo-accounts.ts's own doc comment.
     if (this.demoMode) {
       import('./demo-accounts').then((m) => this.demoAccounts.set(m.DEMO_ACCOUNTS));
     }
@@ -67,12 +73,14 @@ export class LoginComponent {
       next: () => {
         this.submitting.set(false);
         const redirectTo = this.route.snapshot.queryParamMap.get('redirectTo');
-        this.router.navigateByUrl(redirectTo && redirectTo.startsWith('/app') ? redirectTo : '/app/dashboard');
+        this.router.navigateByUrl(
+          redirectTo && redirectTo.startsWith('/app') ? redirectTo : '/app/dashboard',
+        );
       },
       error: (err: ApiError) => {
         this.submitting.set(false);
         this.errorMessage.set(err.message);
-      }
+      },
     });
   }
 
