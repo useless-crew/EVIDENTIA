@@ -62,7 +62,7 @@ func truncateCaseTables(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `
 		TRUNCATE TABLE
-			document_shares, compliance_certificates, audit_log, redactions, documents,
+			document_shares, compliance_certificates, audit_log, audit_verifications, redactions, documents,
 			case_involved_parties, case_members, cases,
 			role_permissions, user_roles, permissions, roles, users
 		RESTART IDENTITY CASCADE`)

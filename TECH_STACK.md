@@ -45,9 +45,15 @@ backend. It reflects decisions already made; it is not a menu of options.
 - Redis
 - Asynq
 
-Redis/Asynq are intended to eventually support:
+Implemented (System 11): long-running audit-chain verification
+(`internal/jobs`, `internal/realtime` — see docs/AUDIT_CHAIN.md). The
+worker runs embedded in the same process as the HTTP server
+(`cmd/server/main.go`), not a separate deployment unit; Redis's role is
+Asynq's queue transport only — PostgreSQL remains the authoritative store
+for verification state.
 
-- Long-running audit-chain verification
+Not yet used for:
+
 - Certificate generation
 - Background document processing
 - Future OCR/AI workloads
@@ -110,9 +116,15 @@ reserved for a future digital-signature module" above; RSA remains
 unimplemented (`pkg/crypto/rsa_sign.go` is still a TODO stub — no system
 through 7 needs it).
 
-Not yet added, pending the systems that need them: AES-256, RSA, Asynq,
-`go-playground/validator`, SSE. Adding any of these before their owning
-system is implemented is scope creep — don't.
+**System 11 (Audit Chain Verification & Integrity Dashboard):** adds
+`github.com/hibiken/asynq` (Redis-backed task queue) and SSE
+(`net/http`/Gin's own streaming response support — no new dependency for
+SSE itself) — both already reserved for exactly this use in "Core"/"Async
+Processing" above. See docs/AUDIT_CHAIN.md.
+
+Not yet added, pending the systems that need them: AES-256, RSA,
+`go-playground/validator`. Adding any of these before their owning system
+is implemented is scope creep — don't.
 
 ## Explicitly Out of Scope
 

@@ -11,13 +11,17 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/hibiken/asynq"
+
 	"evidentia/backend/internal/audit"
 	"evidentia/backend/internal/auth"
 	"evidentia/backend/internal/authz"
 	"evidentia/backend/internal/cache"
 	"evidentia/backend/internal/config"
 	"evidentia/backend/internal/database"
+	"evidentia/backend/internal/jobs"
 	"evidentia/backend/internal/logger"
+	"evidentia/backend/internal/realtime"
 	"evidentia/backend/internal/service"
 	"evidentia/backend/internal/storage"
 )
@@ -84,10 +88,32 @@ type App struct {
 
 	// AuditService owns audit-trail retrieval and cryptographic chain
 	// verification (see internal/service.AuditService) for GET /audit and
-	// POST /audit/verify-chain. Audit event RECORDING is not this field's
-	// job — every other service already records through the shared
-	// audit.Recorder (see the ChainWriter constructed below).
+	// the System 11 audit-verification routes. Audit event RECORDING is
+	// not this field's job — every other service already records through
+	// the shared audit.Recorder (see the ChainWriter constructed below).
 	AuditService *service.AuditService
+
+	// JobClient is System 11's Asynq task-enqueueing client (see
+	// internal/jobs.Client) — the only way AuditService dispatches a
+	// background verification. The corresponding WORKER (asynq.Server +
+	// ServeMux processing tasks) is deliberately NOT a field here: it is
+	// constructed and run by cmd/server/main.go alongside the HTTP
+	// server's own listen/shutdown lifecycle, embedded in this same
+	// process/binary rather than a separate deployment unit (see that
+	// file's own doc comment for why) — app.go itself only owns the
+	// Redis-backed CLIENT connection, exactly like it owns Cache/DB/
+	// Storage above.
+	JobClient *jobs.Client
+
+	// Broadcaster is System 11's in-process SSE fan-out (see
+	// internal/realtime.Broadcaster) — AuditService.RunVerification
+	// (running inside the embedded Asynq worker, same process) publishes
+	// progress to it; internal/handlers/audit's Events route subscribes to
+	// it. Deliberately in-process, not Redis pub/sub: the worker and the
+	// HTTP server sharing one binary means there is no cross-process
+	// coordination problem to solve, and Redis's role in this system stays
+	// exactly "Asynq's queue transport" (see docs/AUDIT_CHAIN.md).
+	Broadcaster *realtime.Broadcaster
 }
 
 // New loads configuration and connects every infrastructure dependency in
@@ -146,7 +172,16 @@ func New(ctx context.Context) (*App, error) {
 	}
 	userService := service.NewUserService(db.Pool(), authzService, recorder, cfg.JWT.BcryptCost)
 	shareService := service.NewShareService(db.Pool(), authzService, recorder)
-	auditService := service.NewAuditService(db.Pool(), authzService, recorder)
+
+	// asynq.RedisClientOpt mirrors cfg.Redis exactly — Asynq manages its
+	// own connection pool independently of internal/cache.Cache's
+	// go-redis client (they are two separate connections to the same
+	// Redis instance, not a shared pool: Asynq's client/server API only
+	// accepts its own RedisConnOpt types, not an existing *redis.Client).
+	redisOpt := asynq.RedisClientOpt{Addr: cfg.Redis.Addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB}
+	jobClient := jobs.NewClient(redisOpt)
+	broadcaster := realtime.NewBroadcaster()
+	auditService := service.NewAuditService(db.Pool(), authzService, recorder, jobClient, broadcaster, log)
 
 	return &App{
 		Config:             cfg,
@@ -163,6 +198,8 @@ func New(ctx context.Context) (*App, error) {
 		UserService:        userService,
 		ShareService:       shareService,
 		AuditService:       auditService,
+		JobClient:          jobClient,
+		Broadcaster:        broadcaster,
 	}, nil
 }
 
@@ -170,6 +207,12 @@ func New(ctx context.Context) (*App, error) {
 // graceful shutdown, after the HTTP server has stopped accepting new
 // requests (see cmd/server/main.go for the full shutdown sequence).
 func (a *App) Close() {
+	if err := a.JobClient.Close(); err != nil {
+		a.Logger.Error("shutdown: closing asynq client", slog.String("error", err.Error()))
+	} else {
+		a.Logger.Info("shutdown: asynq client closed")
+	}
+
 	if err := a.Cache.Close(); err != nil {
 		a.Logger.Error("shutdown: closing redis", slog.String("error", err.Error()))
 	} else {

@@ -170,13 +170,21 @@ func NewRouter(a *app.App) *gin.Engine {
 	// document ID in its URL (like GET /cases), so it is gated by
 	// RequirePermission (RBAC only) here — row-level visibility beyond
 	// that is PostgreSQL RLS's job (audit_log_select), re-checked
-	// independently by AuditService.List. POST /audit/verify-chain is
-	// ADMIN-only per the seed data (audit:verify) and needs the JSON
-	// body limit even though its own body is just two optional query
-	// params — no request body at all, actually, so no body limit is
-	// applied, matching verify/redact-with-no-body's own convention.
+	// independently by AuditService.List.
 	r.GET("/api/v1/audit", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditRead), audithandlers.List(a.AuditService))
+
+	// Audit-chain verification & integrity dashboard (System 11): every
+	// route below is audit:verify (ADMIN-only per the seed data) —
+	// verifying/inspecting the GLOBAL chain only makes sense against the
+	// complete, unfiltered view, exactly like System 10's original
+	// synchronous POST /audit/verify-chain already required; see
+	// docs/AUDIT_CHAIN.md. None of these take a JSON body (POST has none,
+	// the rest are GETs), so none get jsonBodyLimit.
 	r.POST("/api/v1/audit/verify-chain", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditVerify), audithandlers.VerifyChain(a.AuditService))
+	r.GET("/api/v1/audit/verify-chain/:verificationId", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditVerify), audithandlers.Status(a.AuditService))
+	r.GET("/api/v1/audit/verify-chain/:verificationId/events", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditVerify), audithandlers.Events(a.AuditService))
+	r.GET("/api/v1/audit/verifications", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditVerify), audithandlers.History(a.AuditService))
+	r.GET("/api/v1/audit/integrity", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditVerify), audithandlers.Integrity(a.AuditService))
 
 	return r
 }

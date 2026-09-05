@@ -703,17 +703,22 @@ authorization, once implemented:
 case-relationship check as `CanAccessCase` — see `docs/SECURITY.md`'s
 "Document-based ABAC".
 
-## Audit (implemented — System 8)
+## Audit (implemented — Systems 8 & 11)
 
 ```text
 GET  /audit
 POST /audit/verify-chain
+GET  /audit/verify-chain/:verificationId
+GET  /audit/verify-chain/:verificationId/events   (SSE)
+GET  /audit/verifications
+GET  /audit/integrity
 ```
 
-See [AUDIT_CHAIN.md](./AUDIT_CHAIN.md) for the full hash-chain
-architecture; this section covers the HTTP contract.
+See [AUDIT_CHAIN.md](./AUDIT_CHAIN.md) for the full hash-chain and
+asynchronous-verification architecture; this section covers the HTTP
+contract.
 
-`GET /audit` needs `audit:read`; `POST /audit/verify-chain` needs
+`GET /audit` needs `audit:read`. Every other route below needs
 `audit:verify`. Per the seed data, ADMIN, POLICE, LAWYER, and JUDGE hold
 `audit:read` — but row-level visibility beyond that permission check is
 entirely PostgreSQL RLS's job (`audit_log_select`, see AUDIT_CHAIN.md's
@@ -723,7 +728,8 @@ no single case/document ID in its URL to check against the way
 it's a filtered LISTING (like `GET /cases`). ADMIN sees every entry;
 every other role sees only its own actions plus entries tied to a case it
 is an active member of — a query filter can only narrow this further,
-never widen it. Only ADMIN holds `audit:verify`.
+never widen it. Only ADMIN holds `audit:verify` — verifying/inspecting
+the chain only makes sense against its complete, unfiltered state.
 
 `GET /audit` query parameters (all optional; a filter can only narrow
 what RLS already permits): `user_id`, `role`, `action`, `resource_type`,
@@ -734,14 +740,77 @@ envelope wrapping `{entries: [...], meta: {...}}`, where each entry's
 `hash`/`prev_hash` are lowercase-hex-encoded (`prev_hash` empty only for
 the genesis entry).
 
-`POST /audit/verify-chain` query parameters: `from_seq` (resume just
-after this `seq`; default `0` = start from genesis), `max_entries`
-(maximum entries to check in this call; a large internal default/cap
-applies otherwise). Response: `{status: "VERIFIED" | "INTEGRITY_FAILURE",
-entries_checked, total_entries, next_seq?, failed_entry_id?, failed_seq?,
-reason?, expected_prev_hash?, actual_prev_hash?, expected_hash?,
-actual_hash?, verified_at}` — always `200`; `next_seq` present means more
-of the chain remains to be checked in a follow-up call.
+### `POST /audit/verify-chain` (System 11 — asynchronous)
+
+No request body. Dispatches a background job rather than verifying
+synchronously — see AUDIT_CHAIN.md's "Asynchronous Verification" for why.
+Always `202 Accepted`:
+
+```json
+{ "verification_id": "...", "status": "QUEUED", "created_at": "..." }
+```
+
+If a verification is already `QUEUED`/`RUNNING`, this returns **that same
+run's** id/status instead of starting a duplicate scan — two concurrent
+callers are never given two independent verification ids.
+
+### `GET /audit/verify-chain/:verificationId`
+
+Current status/progress/result of one run:
+
+```json
+{
+  "verification_id": "...", "status": "RUNNING",
+  "entries_checked": 42381, "total_entries": 100000, "progress_percent": 42.4,
+  "last_seq_checked": 42381,
+  "requested_by_user_id": "...", "requested_by_role": "ADMIN",
+  "started_at": "...", "completed_at": null,
+  "created_at": "...", "updated_at": "..."
+}
+```
+
+On `INTEGRITY_FAILURE`: additionally carries `failed_entry_id`,
+`failed_seq`, `failure_type` (e.g. `ENTRY_HASH_MISMATCH`), and a safe
+`failure_reason` string — never metadata content, SQL text, or a
+filesystem path. On `FAILED`: `failure_type` is an operational category
+(`DATABASE_ERROR`, `TIMEOUT`, `STALE_TIMEOUT`) — never confused with an
+integrity finding. `404` for an unknown/inaccessible id (RLS makes "exists
+but not yours" and "doesn't exist" indistinguishable for a non-ADMIN
+caller, though in practice only ADMIN can ever create one).
+
+### `GET /audit/verify-chain/:verificationId/events` (SSE)
+
+`text/event-stream` of `verification_started` / `verification_progress` /
+`verification_completed` / `verification_integrity_failure` /
+`verification_failed` frames, each carrying a safe, progress-focused
+subset of the plain status endpoint's own fields — `verification_id`,
+`status`, `entries_checked`, `total_entries`, `progress_percent`,
+`failed_entry_id`, `failure_type`, `failure_reason`, `timestamp` — using
+the exact same field names (never renamed/reshaped) so client code can
+read either shape without a translation layer. Authenticated exactly like
+every other route (a
+normal `Authorization: Bearer` header — no token in the URL); sends the
+current state immediately on connect, then relays further events until a
+terminal one is sent or the client disconnects. See AUDIT_CHAIN.md's "SSE
+architecture" for the full connection-management/reconnection contract.
+
+### `GET /audit/verifications`
+
+Paginated history. Query parameters: `status`, `requested_by` (UUID),
+`from`/`to` (RFC3339), `page`/`page_size`. Response: `{verifications: [...
+same shape as GET /verify-chain/:id ...], meta: {...}}`.
+
+### `GET /audit/integrity`
+
+Dashboard summary — cheap aggregate data, never a fresh scan:
+
+```json
+{
+  "total_entries": 100234,
+  "chain_head_seq": 100234, "chain_head_hash": "…64 hex chars…",
+  "last_verification": { "verification_id": "...", "status": "VERIFIED", ... }
+}
+```
 
 ## Admin (implemented)
 

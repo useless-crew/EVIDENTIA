@@ -39,6 +39,11 @@ type Querier interface {
 	AdminUserExists(ctx context.Context) (bool, error)
 	AssignPermissionToRole(ctx context.Context, arg AssignPermissionToRoleParams) error
 	AssignRoleToUser(ctx context.Context, arg AssignRoleToUserParams) error
+	// Sets the terminal state exactly once. failed_entry_id/failed_seq/
+	// failure_type/failure_reason are NULL for VERIFIED (see the table's own
+	// audit_verifications_failure_fields_check constraint, which rejects any
+	// other combination).
+	CompleteAuditVerification(ctx context.Context, arg CompleteAuditVerificationParams) (AuditVerification, error)
 	// The chain's total row count — used by chain verification to report
 	// total_entries alongside entries_checked, and cheap (a single index/
 	// heap estimate-free count) since it is only ever called once per
@@ -47,6 +52,7 @@ type Querier interface {
 	// Same filters as ListAuditEntriesFiltered — the caller's authorized,
 	// filtered total for pagination metadata, not an unfiltered table count.
 	CountAuditEntriesFiltered(ctx context.Context, arg CountAuditEntriesFilteredParams) (int64, error)
+	CountAuditVerificationsFiltered(ctx context.Context, arg CountAuditVerificationsFilteredParams) (int64, error)
 	CountCases(ctx context.Context) (int64, error)
 	// Same filters as ListCasesFiltered — the caller's authorized, filtered
 	// total for pagination metadata, not an unfiltered table count.
@@ -57,6 +63,20 @@ type Querier interface {
 	// Same filters as ListUsersFiltered — the caller's filtered total for
 	// pagination metadata, not an unfiltered table count.
 	CountUsersFiltered(ctx context.Context, arg CountUsersFilteredParams) (int64, error)
+	// Evidentia — Audit Chain Verification Job Queries (System 11)
+	//
+	// These queries only persist/retrieve the LIFECYCLE of a verification run
+	// (audit_verifications). The actual cryptographic check — reading
+	// audit_log in chain order and recomputing hashes — reuses System 10's
+	// existing audit.sql queries (InsertAuditEntry's neighbors:
+	// GetLatestAuditEntry, ListAuditEntriesFromSeq, CountAuditEntries)
+	// unchanged; nothing here duplicates that.
+	// Always attempted first by AuditService.StartVerification; a unique-
+	// violation on idx_audit_verifications_single_active (at most one
+	// QUEUED/RUNNING row at a time) means a verification is already active —
+	// the caller catches that specific conflict and calls
+	// GetActiveAuditVerification instead of treating it as an error.
+	CreateAuditVerification(ctx context.Context, arg CreateAuditVerificationParams) (AuditVerification, error)
 	// Evidentia — Auth Session (Refresh Token) Queries
 	//
 	// token_hash is always SHA-256(raw refresh token) — the raw token itself
@@ -137,6 +157,9 @@ type Querier interface {
 	// so its one legitimate caller (System 3's login flow) is unmistakable at
 	// every call site. Every other query below deliberately omits it.
 	CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error)
+	// At most one row can ever match (idx_audit_verifications_single_active),
+	// so LIMIT 1 is defensive rather than load-bearing.
+	GetActiveAuditVerification(ctx context.Context) (AuditVerification, error)
 	GetActiveCaseMembership(ctx context.Context, arg GetActiveCaseMembershipParams) (CaseMember, error)
 	// The authorization hot path (internal/authz/share_policy.go) — mirrors
 	// documents_select's RLS OR-branch exactly (see the migration). Expiry is
@@ -144,6 +167,7 @@ type Querier interface {
 	// what the database itself would independently allow via RLS.
 	GetActiveShareForDocumentAndUser(ctx context.Context, arg GetActiveShareForDocumentAndUserParams) (DocumentShare, error)
 	GetAuditEntryByID(ctx context.Context, id uuid.UUID) (AuditLog, error)
+	GetAuditVerificationByID(ctx context.Context, id uuid.UUID) (AuditVerification, error)
 	GetAuthSessionByTokenHash(ctx context.Context, tokenHash []byte) (AuthSession, error)
 	GetCaseByCaseNumber(ctx context.Context, caseNumber string) (Case, error)
 	GetCaseByID(ctx context.Context, id uuid.UUID) (Case, error)
@@ -169,6 +193,11 @@ type Querier interface {
 	// audit_log_seq_unique's implicit index — an index-only backward scan
 	// for LIMIT 1, never a full table scan.
 	GetLatestAuditEntry(ctx context.Context) (AuditLog, error)
+	// The dashboard summary's "last verification status/timestamp" — the
+	// most recently CREATED run regardless of status (a caller wanting only
+	// completed runs filters client-side on the small result, or calls
+	// ListAuditVerificationsFiltered with status set).
+	GetLatestAuditVerification(ctx context.Context) (AuditVerification, error)
 	GetPermissionByID(ctx context.Context, id uuid.UUID) (Permission, error)
 	GetPermissionByName(ctx context.Context, name string) (Permission, error)
 	GetRedactionByResultDocument(ctx context.Context, resultDocumentID uuid.UUID) (Redaction, error)
@@ -214,6 +243,9 @@ type Querier interface {
 	// uses, so verifying a multi-million-row chain never requires loading it
 	// all into memory at once.
 	ListAuditEntriesFromSeq(ctx context.Context, arg ListAuditEntriesFromSeqParams) ([]AuditLog, error)
+	// GET /audit/verifications: every filter optional (NULL = "no
+	// constraint"), same convention as ListAuditEntriesFiltered.
+	ListAuditVerificationsFiltered(ctx context.Context, arg ListAuditVerificationsFilteredParams) ([]AuditVerification, error)
 	ListCaseMembers(ctx context.Context, caseID uuid.UUID) ([]CaseMember, error)
 	ListCases(ctx context.Context, arg ListCasesParams) ([]Case, error)
 	ListCasesByStatus(ctx context.Context, arg ListCasesByStatusParams) ([]Case, error)
@@ -253,6 +285,21 @@ type Querier interface {
 	// EXISTS against user_roles/roles rather than a JOIN, so a user with
 	// multiple roles is never duplicated in the result set.
 	ListUsersFiltered(ctx context.Context, arg ListUsersFilteredParams) ([]ListUsersFilteredRow, error)
+	// The `AND status = 'QUEUED'` guard makes this safe against Asynq ever
+	// redelivering/retrying the same task concurrently: a second attempt to
+	// start an already-RUNNING job matches zero rows (sqlc surfaces this as
+	// pgx.ErrNoRows for :one), which the handler treats as "someone else
+	// already started it" rather than corrupting total_entries/started_at.
+	MarkAuditVerificationRunning(ctx context.Context, arg MarkAuditVerificationRunningParams) (AuditVerification, error)
+	// The read-time self-healing path (AuditService.reconcileStale): a
+	// QUEUED/RUNNING row whose updated_at is older than the staleness
+	// threshold is presumed to belong to a worker that crashed/was killed
+	// without ever reaching CompleteAuditVerification. The `AND status IN
+	// (...)` guard makes this safe to call speculatively on every read of a
+	// non-terminal row — if the real worker completes it in the same instant,
+	// this matches zero rows (pgx.ErrNoRows) and the caller just re-fetches
+	// the now-terminal row instead.
+	MarkAuditVerificationStale(ctx context.Context, arg MarkAuditVerificationStaleParams) (AuditVerification, error)
 	RemoveCaseMember(ctx context.Context, arg RemoveCaseMemberParams) error
 	RemovePermissionFromRole(ctx context.Context, arg RemovePermissionFromRoleParams) error
 	RemoveRoleFromUser(ctx context.Context, arg RemoveRoleFromUserParams) error
@@ -271,6 +318,11 @@ type Querier interface {
 	// again (reuse detection: see master prompt §25).
 	RevokeAuthSessionFamily(ctx context.Context, familyID uuid.UUID) error
 	RevokeDocumentShare(ctx context.Context, arg RevokeDocumentShareParams) (DocumentShare, error)
+	// Called at a throttled cadence (see internal/service.AuditService's
+	// progress-update interval), never once per audit_log row — one UPDATE
+	// per verification BATCH (see internal/audit.VerifyBatch), which is
+	// already a small, bounded number of writes even for a very large chain.
+	UpdateAuditVerificationProgress(ctx context.Context, arg UpdateAuditVerificationProgressParams) error
 	UpdateCase(ctx context.Context, arg UpdateCaseParams) (Case, error)
 	UpdateDocumentStatus(ctx context.Context, arg UpdateDocumentStatusParams) error
 	UpdateUserLastLogin(ctx context.Context, id uuid.UUID) error

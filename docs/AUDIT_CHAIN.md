@@ -542,18 +542,452 @@ migration has therefore always been subject to genesis/chain-linkage
 invariants from the first insert onward; there is no unchained legacy
 data requiring a backfill or an explicit legacy marker.
 
-## Relationship to Async Work
+## Asynchronous Verification & Integrity Dashboard (System 11)
 
-Explicitly **out of scope** for this system, by design (see the top-level
-task scope): a background job dispatching chain verification via
-Redis/Asynq, an SSE-streamed live progress UI, and a frontend audit
-dashboard. `AuditService.VerifyChain`'s batched, resumable (`next_seq`)
-design was chosen specifically so a future system can build that
-experience on top of it (repeated calls, each covering one bounded slice
-of work) without requiring any change to the verification logic itself —
-but no such job, queue consumer, or streaming endpoint exists yet.
-`internal/jobs/audit_verification.go` remains the placeholder it was
-before this system, intentionally.
+System 10 (above) built the cryptographic chain and a synchronous,
+single-HTTP-call `VerifyChain`. System 11 replaces that HTTP contract with
+an asynchronous job so a chain of any size — 100,000, 1,000,000, or more
+entries — never has to be checked within one request's lifetime, and adds
+the operational surface (status tracking, SSE progress, history,
+dashboard) to observe it. **It reuses System 10's verification logic
+completely and unchanged**: `internal/audit.VerifyBatch`/
+`ComputeEntryHash`/`CanonicalizeMetadata` are called by the new job
+exactly as `VerifyChain` called them — there is still, and only ever,
+**one** hash/canonicalization/chain-traversal implementation in this
+codebase.
+
+```text
+Frontend                    (dashboard: signals-based state in
+   |                         audit-verification.service.ts)
+   | POST /audit/verify-chain
+   v
+Handler (internal/handlers/audit) -- AuditService.StartVerification
+   |                                      |
+   |                              INSERT audit_verifications (QUEUED)
+   |                              [dedup: idx_audit_verifications_single_active]
+   |                                      |
+   |                              jobs.Client.EnqueueVerifyAuditChain
+   v                                      |
+202 Accepted {verification_id}            v
+                                     Redis (Asynq queue — transport only)
+                                           |
+                                           v
+                            jobs.AuditVerificationHandler.ProcessTask
+                            (embedded worker, same process — cmd/server)
+                                           |
+                                 AuditService.RunVerification
+                                           |
+                              +----------------------------+
+                              | for each batch (1000 rows): |
+                              |   ListAuditEntriesFromSeq    |  <- System 10's own
+                              |   audit.VerifyBatch          |  <- exact functions,
+                              |   UPDATE progress (Postgres) |     unchanged
+                              |   Broadcaster.Publish(event) |
+                              +----------------------------+
+                                           |
+                              CompleteAuditVerification (Postgres)
+                                           |
+                                 realtime.Broadcaster
+                                           |
+                                           v
+                      GET /audit/verify-chain/:id/events (SSE)
+                                           |
+                                           v
+                                     Dashboard progress bar
+```
+
+### Job architecture
+
+`internal/jobs` wraps `github.com/hibiken/asynq` (Redis-backed task queue —
+already on the approved stack per TECH_STACK.md, unused until this
+system). `VerifyAuditChainPayload` carries **only** a `verification_id`
+(`internal/jobs/audit_verification.go`) — the worker loads every other
+fact (which entries to check, what "correct" looks like) fresh from
+PostgreSQL itself, exactly like `audit.Event` lets no client-supplied
+field influence a hash; a client can never smuggle an expected hash,
+canonicalization rule, chain head, or verification result through this
+payload.
+
+The worker (`asynq.Server` + `asynq.ServeMux`) runs **embedded in the
+same process/binary as the HTTP server** (`cmd/server/main.go`), not a
+separate deployment unit — this project's docker-compose has no `worker`
+service, and audit verification's workload (a handful of sequential
+batched reads against the same PostgreSQL pool the HTTP server already
+shares) does not justify the operational cost of a second container. A
+future system with a genuinely different scaling profile can introduce
+`cmd/worker` later without any change to `internal/jobs`/`internal/
+service` — `jobs.NewServer`/`NewMux` take no dependency on `httpserver`.
+
+`internal/jobs.AuditVerifier`/`AuditFailureRecorder` are narrow interfaces
+`internal/jobs` defines and `*service.AuditService` satisfies
+structurally (Go's implicit interface satisfaction) — `internal/jobs`
+never imports `internal/service`, only the reverse (`AuditService` imports
+`internal/jobs.Client` to enqueue). This is what lets `AuditService`
+depend on the job-enqueueing client while the job **handler** calls back
+into `AuditService.RunVerification` without an import cycle.
+
+### Verification status model & lifecycle
+
+A dedicated table, `audit_verifications` (migration `000005`), is the
+**authoritative, durable** record — not Redis, which this system uses
+purely as Asynq's queue transport and nowhere else. Lifecycle:
+
+```text
+QUEUED -> RUNNING -> VERIFIED
+                   -> INTEGRITY_FAILURE
+                   -> FAILED
+```
+
+- **QUEUED**: the row exists; the task has been enqueued; no worker has
+  picked it up yet.
+- **RUNNING**: a worker claimed it (`MarkAuditVerificationRunning`'s
+  `WHERE status = 'QUEUED'` guard — see "Concurrency & idempotency"
+  below) and is actively verifying.
+- **VERIFIED**: the run completed and found no problem.
+- **INTEGRITY_FAILURE**: the run completed and found a definite
+  cryptographic/structural problem — see "Failure classification" below.
+  This is a **successful, meaningful result**, exactly like System 10's
+  `VerifyChain` treated it — never confused with an error.
+- **FAILED**: the run could **not** complete due to an operational
+  problem (PostgreSQL unavailable, an unexpected driver error, a timeout).
+  **Never** used interchangeably with `INTEGRITY_FAILURE` — an outage is
+  not evidence of tampering, and a genuine tamper finding is not a
+  transient error to retry away.
+
+Persisted fields (see the migration's own column comments for the full
+detail): `entries_checked`, `total_entries` (captured once, at the
+`RUNNING` transition, from a single `COUNT(*)` — never re-queried per
+batch), `last_seq_checked` (the live progress cursor), `failed_entry_id`/
+`failed_seq`/`failure_type`/`failure_reason` (INTEGRITY_FAILURE/FAILED
+only — enforced by `audit_verifications_failure_fields_check`),
+`requested_by_user_id`/`requested_by_role`, `started_at`/`completed_at`,
+`created_at`/`updated_at`.
+
+### Progress calculation
+
+`progress_percent = entries_checked / total_entries * 100`, computed in
+`internal/service.toVerificationDetail` from the two persisted counters —
+never a separately-stored percentage that could drift from them.
+`total_entries` is `NULL` only in the brief window before a `QUEUED` job
+has been picked up; the API omits `progress_percent` in that case (an
+explicit indeterminate state — "queued, not yet known how much work
+remains" — rather than a misleading `0%`).
+
+Progress is **throttled to once per batch** (`defaultVerifyBatchSize` =
+1000 entries) — `AuditService.verifyBatches` persists a Postgres `UPDATE`
+and calls `Broadcaster.Publish` exactly once per batch, never once per
+row. For a 1,000,000-row chain this is ~1,000 database writes and ~1,000
+SSE events for the entire run, not a stream of per-row events.
+
+### Batching & large-chain strategy
+
+`verifyBatches` reuses `AuditRepo.ListFromSeq` — the identical `WHERE seq
+> $1 ORDER BY seq LIMIT $2` keyset-paginated query System 10's synchronous
+verifier already used, never `OFFSET`-based paging (which degrades
+quadratically for a very large table) and never `SELECT *` loaded into
+memory at once. Each batch is its own short-lived transaction — the
+function never holds one PostgreSQL transaction open across an entire
+(potentially long) run, so a large chain's verification never holds locks
+or a connection for its whole duration, and never keeps a transaction
+open while waiting on anything SSE-related (the worker and the SSE
+connection are fully decoupled — see "SSE architecture" below). The only
+non-batched read is the single `COUNT(*)` for `total_entries`, done once
+at job start.
+
+### Failure classification
+
+`internal/audit.BatchResult` (System 10) gained one additive field,
+`FailureType`, populated by the SAME `VerifyBatch` function with no
+change to its existing behavior or return values otherwise:
+
+- `GENESIS_INVALID` — the first entry checked claims a predecessor, or an
+  unexpected second genesis-shaped entry appears mid-chain.
+- `PREVIOUS_HASH_MISMATCH` — any other broken link. This single category
+  also covers a **deleted** entry (the next surviving entry's `prev_hash`
+  no longer matches anything) and an **attempted** fork — see below for
+  why those are not separate categories.
+- `ENTRY_HASH_MISMATCH` — the recomputed SHA-256 doesn't match the stored
+  hash.
+- `CANONICALIZATION_ERROR` — stored metadata could not be canonicalized
+  (theoretical in practice: PostgreSQL's `jsonb` column type itself
+  guarantees syntactically valid JSON, so this path is defensive, not
+  reachable via any realistic database-level tamper).
+
+Master prompt's `CHAIN_FORK_DETECTED`/`DUPLICATE_ENTRY`/
+`CHAIN_ORDER_INVALID`/`MISSING_ENTRY` are **not** implemented as separate,
+distinguishable categories — not an oversight, a deliberate scope
+decision: `idx_audit_log_prev_hash_unique`/`idx_audit_log_single_genesis`
+(System 2) reject a forking or duplicate-genesis `INSERT` at the database
+level *before* it can ever commit, so a fork or duplicate genesis
+structurally cannot exist in a chain the verifier scans in the first
+place — there is nothing to detect because it was already prevented.
+`audit_log.seq` is a `GENERATED ALWAYS AS IDENTITY` column (monotonic by
+construction), so there is no "chain order" for `ORDER BY seq` to get
+wrong. A deleted entry is real and detectable, but is honestly reported as
+what it structurally IS — a broken link — rather than a separate label
+the algorithm cannot actually distinguish from other causes of the same
+symptom.
+
+`FAILED` uses a **different** vocabulary
+(`internal/audit.OperationalFailure*`): `DATABASE_ERROR`, `TIMEOUT`, and
+`STALE_TIMEOUT` (see "Stale verification recovery" below) — stored in the
+same `failure_type` column, whose meaning depends on `status`.
+
+### Concurrency & idempotency
+
+- **Duplicate active jobs**: `idx_audit_verifications_single_active` (a
+  unique index on a constant expression filtered to `status IN ('QUEUED',
+  'RUNNING')` — the exact same idiom `idx_audit_log_single_genesis`
+  already established) guarantees at the database level that at most one
+  verification is ever `QUEUED`/`RUNNING` at a time.
+  `AuditService.StartVerification` attempts an `INSERT`; on a 23505
+  conflict against that specific index, it reads back and returns the
+  **already-active** run's id instead of erroring or starting a second
+  concurrent full-chain scan. Verified by
+  `TestAuditService_StartVerification_DeduplicatesActiveRun` (20
+  concurrent callers, exactly one row created, every caller receives the
+  same id).
+- **Duplicate/redelivered tasks**: `MarkAuditVerificationRunning`'s `WHERE
+  status = 'QUEUED'` guard means a second attempt to start an
+  already-`RUNNING` (or terminal) job matches zero rows; `RunVerification`
+  treats that as "someone else already handles this" and returns `nil`
+  immediately — no re-verification, no double-counted `entries_checked`.
+  Verified by `TestAuditService_RunVerification_ConcurrentInvocationsDoNotCorruptState`
+  (10 concurrent `RunVerification` calls on the same id; exactly one
+  performs the real work).
+- **Verification is read-only against the chain, always.** No code path
+  in `RunVerification`/`verifyBatches`/`completeVerification` ever
+  `UPDATE`s or `DELETE`s an `audit_log` row, ever "repairs" a hash, or
+  reorders anything — a corrupted entry is reported (`INTEGRITY_FAILURE`),
+  never fixed. `evidentia_app`'s own database grants make this
+  structurally true regardless of application logic (see "Append-Only
+  Database Permissions" above), and `audit_verifications` itself has no
+  purchase over `audit_log` — inserting/updating a verification row never
+  touches the chain table at all.
+
+### Retry semantics
+
+Asynq retries a task automatically when `ProcessTask` returns a non-nil
+error (`asynq.MaxRetry(3)`, `asynq.Timeout(30 * time.Minute)` — see
+`NewVerifyAuditChainTask`). `RunVerification` returns an error **only**
+for a genuine operational failure (a database read/write failing, or
+`ctx.Done()` from a timeout); it returns `nil` for both `VERIFIED` and
+`INTEGRITY_FAILURE` — both are a *completed* run from Asynq's point of
+view, so neither is ever retried. A malformed task payload wraps
+`asynq.SkipRetry` (never retryable — no amount of retrying fixes a bad
+payload).
+
+A verification row is marked terminally `FAILED` **only after Asynq's
+retry budget is exhausted** — `jobs.NewAuditVerificationErrorHandler`
+(registered as the `asynq.Server`'s `ErrorHandler`) checks
+`asynq.GetRetryCount`/`GetMaxRetry` on every failed attempt and calls
+`AuditService.MarkVerificationOperationallyFailed` only when
+`retried >= maxRetry` — an intermediate attempt that will still be
+retried never marks the row `FAILED`, so a transient blip that succeeds
+on retry 2 never leaves a stray `FAILED` row alongside the eventual real
+`VERIFIED`/`INTEGRITY_FAILURE` outcome.
+
+### Stale verification recovery
+
+A worker can die outright (process killed, not merely slow) without ever
+reaching its own completion or `MarkVerificationOperationallyFailed`
+handling, which would otherwise leave a row `RUNNING` (or `QUEUED`)
+forever. Rather than a separate scheduled sweeper/cron process,
+`AuditService.reconcileStale` self-heals **lazily, at read time**: every
+`GetVerification`/`ListVerifications`/`GetIntegritySummary` call (and
+therefore every REST poll and every SSE connection's initial snapshot)
+checks whether a `QUEUED`/`RUNNING` row's `updated_at` is older than a
+threshold (5 minutes for `QUEUED` — no worker has even started it;
+2 minutes for `RUNNING` — no progress reported) and, if so, **persists**
+(not merely returns) a `FAILED`/`STALE_TIMEOUT` correction before
+returning it. This guarantees master prompt's "a failed job must not
+remain RUNNING forever" and "never incorrectly mark an interrupted
+verification as VERIFIED" without a second background process: the
+correction is applied the first time anyone looks, which is sufficient
+since `audit_verifications` has no other consumer.
+
+### SSE architecture
+
+`internal/realtime.Broadcaster` is a small in-process pub/sub keyed by
+`verification_id` — **not** Redis pub/sub. Because the worker and the
+HTTP server share one process (see "Job architecture" above), there is no
+cross-process coordination problem to solve; Redis's entire role in this
+system stays "Asynq's queue transport", never a second, competing state
+store for progress (master prompt: "do not allow Redis state to override
+PostgreSQL's authoritative verification result"). `Broadcaster.Publish`
+**never blocks**, even on a slow or absent subscriber (a bounded,
+non-blocking buffered send — see that type's own doc comment) — this is
+what keeps the verification worker and an SSE connection fully decoupled:
+a stalled browser tab can never stall verification progress, and the
+worker never touches a database transaction while waiting on anything
+SSE-related.
+
+`GET /audit/verify-chain/:id/events` (`internal/handlers/audit/events.go`)
+performs the **exact same** `AuditService.GetVerification` authorization
+check every REST caller goes through — `verification_id` in the URL is
+never trusted as proof of authorization by itself — sends that already-
+authorized snapshot immediately as the first SSE frame (so a reconnecting
+client is never left waiting on the next event to learn current state),
+then relays further events from the broadcaster until a terminal one is
+sent or the client disconnects (`c.Request.Context().Done()`), at which
+point `unsubscribe()` runs (deferred), releasing the broadcaster
+subscription — no leaked goroutines or channels. A 15-second heartbeat
+comment line (`: heartbeat\n\n`) keeps intermediate proxies from timing
+out an idle connection between real events.
+
+The handler subscribes to the broadcaster **before** running that
+authorization check, not after — `Broadcaster.Subscribe` only registers an
+in-memory channel and sends the caller no data by itself, so doing it
+first discloses nothing. Doing it in the other order (read-then-subscribe)
+loses events for a verification that reaches its terminal state — and
+therefore publishes its one and only completion event — in the gap
+between the authorization read and the `Subscribe` call: a real race for a
+small/fast chain, where a background verification can complete in well
+under the time the authorization DB round trip itself takes, permanently
+losing the only completion event and leaving the connection open until
+the client's own timeout. Subscribing first guarantees a concurrent
+completion is always either already reflected in the authorization read
+(an already-terminal initial event) or captured by the channel (delivered
+as a normal subsequent event) — never both missed.
+
+**Reconnection**: the frontend's SSE client (`audit-verification.
+service.ts`) never treats "connection dropped" as final — on any
+stream error it re-fetches the plain REST status endpoint
+(`GET /audit/verify-chain/:id`) as the source of truth for current state,
+then reopens the SSE connection if the verification is still non-
+terminal. It never relies exclusively on having received every SSE event.
+
+**Authentication**: the browser cannot attach an `Authorization` header
+to a native `EventSource` connection, so the frontend deliberately uses
+`fetch()` with a normal `Authorization: Bearer <token>` header and reads
+the response body as a stream (manually parsing `event:`/`data:` frames),
+rather than `EventSource` — this keeps the SSE route authenticated
+identically to every other route (the same interceptor-attached bearer
+token, the same 401-triggers-one-refresh-and-retry logic — see "Frontend
+Integration" below), and never leaks a JWT into a URL (server/proxy
+access logs, browser history) the way a `?access_token=...` query
+parameter would.
+
+### Security review (System 11-specific)
+
+1. Can an unauthorized user start or inspect verification? No — every
+   route (`POST /verify-chain`, `GET /verify-chain/:id`, the SSE route,
+   `GET /verifications`, `GET /integrity`) requires `audit:verify`
+   (ADMIN-only per the seed data), re-checked independently inside
+   `AuditService`, with `audit_verifications`' own RLS
+   (`current_app_role() = 'ADMIN'`) as a second, database-level layer.
+2. Can a user access another verification by guessing/enumerating an ID?
+   No — `audit_verifications_select`'s RLS restricts every non-ADMIN
+   identity to zero rows regardless of the ID queried; an ADMIN can see
+   every run, which is correct (the chain is a single global resource,
+   not per-user/per-case data).
+3. Can the browser fake `VERIFIED` or fake progress? No — the frontend
+   renders exactly what `GetVerification`/the SSE stream return; nothing
+   in the dashboard computes a hash, a percentage from anything but the
+   server's own counters, or a status from anything but the server's
+   response.
+4. Can verification modify audit data or "repair" a corrupted entry? No —
+   see "Concurrency & idempotency" above; verification is structurally
+   read-only against `audit_log`.
+5. Can Redis override the authoritative result? No — Redis holds no
+   verification state at all in this design; PostgreSQL is the only
+   store `AuditService` ever reads a verification's status from.
+6. Can an SSE connection leak data across verifications or users? No —
+   `Broadcaster.Subscribe`/`Publish` are keyed by `verification_id`, and a
+   subscriber is only ever created after the SAME per-caller authorization
+   check every REST route applies.
+7. Can starting/completing verification create recursive or unbounded
+   audit events? No — exactly two `audit.Recorder.Record` calls exist in
+   the entire System 11 code path (`AUDIT_CHAIN_VERIFICATION_REQUESTED` at
+   start, `AUDIT_CHAIN_VERIFICATION_COMPLETED` at the end of one run) —
+   never one per batch, never one per entry checked.
+8. Can a failed job remain `RUNNING` forever? No — see "Stale verification
+   recovery" above.
+9. Can multiple workers/duplicate task deliveries corrupt verification
+   state? No — see "Concurrency & idempotency" above.
+10. Can a huge audit table exhaust memory? No — see "Batching &
+    large-chain strategy" above.
+11. Can secrets enter a verification record? No — `audit_verifications`
+    stores only identifiers, counts, a classified `failure_type`, and a
+    hand-written, safe `failure_reason` string; it never stores a raw
+    driver/SQL error, a stack trace, or a filesystem path.
+12. Can RLS be bypassed? No — `evidentia_app` holds no `BYPASSRLS`
+    (unchanged from System 10), and the worker's own internal identity
+    (`workerIdentity` in `internal/service/audit_service.go`) still
+    satisfies `audit_verifications`'/`audit_log`'s policies through their
+    own ADMIN-equivalent branch, never by disabling RLS.
+
+### Frontend integration
+
+`frontend/src/app/core/services/audit-verification.service.ts` is the one
+Angular service for this feature (following this codebase's existing
+per-domain-service convention — `case.service.ts`, `document.service.ts`,
+etc. — there is no TanStack Query in this Angular project; the equivalent
+pattern here is a signals-based service wrapping `ApiClientService`, the
+one central HTTP client every backend call already goes through). It
+exposes:
+
+- `getIntegritySummary()` / `startVerification()` / `getVerificationStatus(id)`
+  / `getVerificationHistory(params)` — thin wrappers over the REST
+  endpoints below, returning RxJS `Observable`s exactly like every other
+  service in `core/services`.
+- A small SSE client (`connectToVerification(id)`) using `fetch()` +
+  manual `ReadableStream` frame parsing (see "SSE architecture" above for
+  why not `EventSource`), exposing the live status as Angular signals
+  (`status`, `entriesChecked`, `totalEntries`, `progressPercent`,
+  `failureType`, `failureReason`) a component can bind to directly.
+
+The dashboard itself replaces the **entirely fabricated** chain-
+verification demo (`DmsStateService.verifyChain`'s `setInterval`-driven
+fake sweep over 24 hardcoded nodes, and its `simulateTamper` toggle) that
+previously occupied the "Blockchain Graph" tab of the existing `/app/audit`
+screen — this was pre-existing scaffolding built before System 10's real
+backend existed, explicitly documented in that service's own comment as
+illustrative-only. Master prompt's "no client-side verification, no
+simulated progress" makes replacing it in-scope, not optional. The
+"Ledger Table" tab (individual audit **entries**, System 10's `GET
+/audit`) is unchanged by this system — wiring that tab to real data is a
+separate concern from chain **verification**, which is this system's
+actual mandate.
+
+Role-based UI hiding (the "Verify Audit Chain" button, the whole
+dashboard section) is **UX only** — `auth.role() === 'ADMIN'` gates
+rendering, exactly like `adminGuard` already gates the `/app/admin` route
+— the backend's RBAC/RLS stack above is what actually enforces this; a
+manipulated frontend gains nothing, since every API call independently
+re-checks `audit:verify`.
+
+## API Endpoints (System 11)
+
+See [API_ENDPOINTS.md](./API_ENDPOINTS.md)'s "Audit" section for full
+request/response detail. Summary:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/audit/verify-chain` | Start (or join an already-active) verification — `202` |
+| `GET` | `/audit/verify-chain/:verificationId` | Current status/progress/result |
+| `GET` | `/audit/verify-chain/:verificationId/events` | SSE progress stream |
+| `GET` | `/audit/verifications` | Paginated verification history |
+| `GET` | `/audit/integrity` | Dashboard summary (total entries, chain head, last run) |
+
+## Limitations & Follow-Up
+
+- `CANONICALIZATION_ERROR` is defensive: PostgreSQL's `jsonb` type
+  guarantees syntactically valid JSON, so this path has no known
+  realistic trigger via direct database tampering — documented, not
+  tested via an integration tamper scenario (unlike every other failure
+  type, which IS tamper-tested).
+- A crashed worker's in-progress run is never resumed from its last
+  checkpoint — it is marked `FAILED` (see "Stale verification recovery")
+  and a fresh run starts from genesis. This is a deliberate simplicity
+  choice (resuming correctly across a process restart is meaningfully
+  more complex and was judged not to justify the cost for this system),
+  not an oversight.
+- The embedded-worker deployment (see "Job architecture") means
+  verification throughput is bounded by the same process/connection pool
+  as the HTTP server; a deployment that needs to scale verification
+  independently would introduce a separate `cmd/worker` binary sharing
+  `internal/jobs`/`internal/service` unchanged.
 
 ## Security Assumptions
 

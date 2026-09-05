@@ -3,16 +3,17 @@ module evidentia/backend
 go 1.25.0
 
 // Dependencies not yet used by any implemented system (added when that
-// system is built, not before): github.com/golang-jwt/jwt/v5 (JWT auth),
-// golang.org/x/crypto's bcrypt/RSA/ECDSA helpers, golang-migrate,
-// hibiken/asynq, spf13/viper, swaggo/swag + swaggo/gin-swagger. Do not add
-// dependencies outside TECH_STACK.md's approved stack.
+// system is built, not before): spf13/viper. Do not add dependencies
+// outside TECH_STACK.md's approved stack. hibiken/asynq was added for
+// System 11 (asynchronous audit-chain verification) — see
+// internal/jobs.
 
 require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/google/uuid v1.6.0
+	github.com/hibiken/asynq v0.26.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/joho/godotenv v1.5.1
 	github.com/minio/minio-go/v7 v7.3.0
@@ -63,7 +64,9 @@ require (
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.59.0 // indirect
+	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/rs/xid v1.6.0 // indirect
+	github.com/spf13/cast v1.10.0 // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.1 // indirect
@@ -77,6 +80,7 @@ require (
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/time v0.14.0 // indirect
 	golang.org/x/tools v0.48.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/ini.v1 v1.67.3 // indirect

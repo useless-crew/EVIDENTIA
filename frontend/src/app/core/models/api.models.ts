@@ -65,12 +65,7 @@ export interface CaseSummary {
 }
 
 export type CaseStatus =
-  | 'OPEN'
-  | 'UNDER_INVESTIGATION'
-  | 'SUBMITTED'
-  | 'UNDER_REVIEW'
-  | 'CLOSED'
-  | 'ARCHIVED';
+  'OPEN' | 'UNDER_INVESTIGATION' | 'SUBMITTED' | 'UNDER_REVIEW' | 'CLOSED' | 'ARCHIVED';
 
 /** internal/service.InvolvedPartySummary. */
 export interface InvolvedPartySummary {
@@ -101,11 +96,7 @@ export interface DocumentSummary {
 }
 
 export type DocumentType =
-  | 'FIR'
-  | 'FORENSIC_REPORT'
-  | 'PHOTO_EVIDENCE'
-  | 'WITNESS_STATEMENT'
-  | 'OTHER';
+  'FIR' | 'FORENSIC_REPORT' | 'PHOTO_EVIDENCE' | 'WITNESS_STATEMENT' | 'OTHER';
 
 export type DocumentStatus = 'ACTIVE' | 'TAMPERED';
 
@@ -379,4 +370,103 @@ export interface RoleCatalogEntry {
   id: string;
   name: Role;
   description?: string;
+}
+
+// ---- System 11: Audit Chain Verification & Integrity Dashboard ----
+// See docs/AUDIT_CHAIN.md's "Asynchronous Verification & Integrity
+// Dashboard" for the full backend design these types mirror.
+
+/** The complete verification-status vocabulary (internal/audit's
+ * VerificationStatus* constants) — QUEUED/RUNNING are in-flight;
+ * VERIFIED/INTEGRITY_FAILURE/FAILED are terminal. FAILED is an
+ * OPERATIONAL failure (e.g. a database outage), never a cryptographic
+ * finding — the two are never interchangeable in the UI either. */
+export type VerificationStatus = 'QUEUED' | 'RUNNING' | 'VERIFIED' | 'INTEGRITY_FAILURE' | 'FAILED';
+
+/** POST /audit/verify-chain's response data (internal/service.
+ * StartVerificationResult) — always 202: this is an ACCEPTANCE, not a
+ * result. If a verification was already QUEUED/RUNNING, this is that
+ * same run's id, never a newly created duplicate. */
+export interface StartVerificationResponse {
+  verification_id: string;
+  status: VerificationStatus;
+  created_at: string;
+}
+
+/** GET /audit/verify-chain/:id's response data, and one element of
+ * GET /audit/verifications' list (internal/service.VerificationDetail).
+ * The SSE stream (see AuditVerificationService) delivers events shaped
+ * identically to this — the frontend never has to reconcile two
+ * different response shapes for "the same fact". */
+export interface VerificationDetail {
+  verification_id: string;
+  status: VerificationStatus;
+  entries_checked: number;
+  total_entries?: number;
+  progress_percent?: number;
+  last_seq_checked?: number;
+  failed_entry_id?: string;
+  failed_seq?: number;
+  /** INTEGRITY_FAILURE: GENESIS_INVALID | PREVIOUS_HASH_MISMATCH |
+   * ENTRY_HASH_MISMATCH | CANONICALIZATION_ERROR. FAILED: DATABASE_ERROR
+   * | TIMEOUT | STALE_TIMEOUT. Absent for QUEUED/RUNNING/VERIFIED. */
+  failure_type?: string;
+  /** Safe, human-readable text only — never raw SQL/driver detail. */
+  failure_reason?: string;
+  requested_by_user_id: string;
+  requested_by_role?: string;
+  started_at?: string;
+  completed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** GET /audit/verifications' filter/query params. */
+export interface VerificationHistoryFilter {
+  status?: VerificationStatus;
+  requested_by?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+  page_size?: number;
+}
+
+/** GET /audit/verifications' response data (internal/service.
+ * VerificationListResult). */
+export interface VerificationHistoryResult {
+  verifications: VerificationDetail[];
+  meta: PageMeta;
+}
+
+/** GET /audit/integrity's response data (internal/service.
+ * IntegritySummary) — the dashboard's at-a-glance card. */
+export interface IntegritySummary {
+  total_entries: number;
+  chain_head_seq?: number;
+  chain_head_hash?: string;
+  last_verification?: VerificationDetail;
+}
+
+/** One decoded Server-Sent Event from GET /audit/verify-chain/:id/events
+ * (internal/realtime.VerificationEvent) — a safe, progress-focused SUBSET
+ * of VerificationDetail's fields (no requested-by or created/updated
+ * timestamps on every tick), but every field it DOES carry uses the
+ * exact same name as its VerificationDetail counterpart, so rendering
+ * code can read either shape without a translation layer. */
+export interface VerificationSseEvent {
+  type:
+    | 'verification_started'
+    | 'verification_progress'
+    | 'verification_completed'
+    | 'verification_integrity_failure'
+    | 'verification_failed';
+  verification_id: string;
+  status: VerificationStatus;
+  entries_checked: number;
+  total_entries?: number;
+  progress_percent?: number;
+  failed_entry_id?: string;
+  failure_type?: string;
+  failure_reason?: string;
+  timestamp: string;
 }

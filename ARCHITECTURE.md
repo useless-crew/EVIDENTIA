@@ -774,13 +774,30 @@ Realtime / SSE
   rather than the operational-log-only `audit.SlogRecorder` placeholder
   used until this system landed — see
   [docs/AUDIT_CHAIN.md](./docs/AUDIT_CHAIN.md) for the full design.
+- **Audit Chain Verification & Integrity Dashboard** (implemented) —
+  Asynchronous audit-chain verification (`internal/jobs`, `internal/
+  realtime`, `internal/service.AuditService.RunVerification`) so a chain
+  of any size verifies via a background job rather than one long-running
+  HTTP request: `POST /audit/verify-chain` returns `202` and dispatches an
+  Asynq task; progress/result are tracked in the durable
+  `audit_verifications` table and streamed live over SSE
+  (`GET /audit/verify-chain/:id/events`). Reuses System 10's hash/
+  canonicalization/verification logic completely, unchanged. See
+  [docs/AUDIT_CHAIN.md](./docs/AUDIT_CHAIN.md)'s "Asynchronous
+  Verification & Integrity Dashboard".
 - **Crypto** — SHA-256 integrity hashing (implemented — System 6/7) and
   ECDSA compliance-certificate signing (implemented — System 7,
   `pkg/crypto`); AES-256 encryption and RSA signing remain future.
 - **Storage** — MinIO-backed object storage behind a provider-agnostic
   interface.
-- **Jobs** — Redis/Asynq-backed background processing.
-- **Realtime** — SSE-based progress and notification streaming.
+- **Jobs** (implemented) — Redis/Asynq-backed background processing
+  (`internal/jobs`), so far powering audit-chain verification only; the
+  worker runs embedded in the same process as the HTTP server
+  (`cmd/server/main.go`), not a separate deployment unit.
+- **Realtime** (implemented) — SSE-based progress streaming
+  (`internal/realtime`), so far powering audit-chain verification
+  progress only, via an in-process broadcaster (not Redis pub/sub — see
+  docs/AUDIT_CHAIN.md for why).
 
 ## Data Model Overview
 

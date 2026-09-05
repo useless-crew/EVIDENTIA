@@ -344,17 +344,83 @@ Full detail in [AUDIT_CHAIN.md](./AUDIT_CHAIN.md); summary here:
   `BYPASSRLS`, and does not own the table (verified by
   `backend/tests/db_audit_privileges_test.go`).
 - **Chain verification streams in bounded-size batches**
-  (`internal/audit.VerifyBatch`, called once per page from
-  `AuditService.VerifyChain`), never loading the whole chain into memory,
-  and is resumable (`next_seq`) across HTTP calls for very large chains.
-- **`GET /audit`/`POST /audit/verify-chain`** are gated by
-  `audit:read`/`audit:verify` RBAC, with row-level visibility beyond that
-  left entirely to `audit_log_select` RLS — a filter can only narrow what
-  RLS already permits, never widen it (verified against IDOR: an
-  arbitrary `user_id`/`case_id` filter never returns another actor's
-  rows). `GET /audit` records its own `AUDIT_ACCESSED` event once the
-  query has already run, which cannot recurse (`Recorder.Record` only
-  ever inserts one row and never calls back into `AuditService`).
+  (`internal/audit.VerifyBatch`, called once per page), never loading the
+  whole chain into memory. As of System 11, verification runs
+  asynchronously (see "Implemented in System 11" below) rather than
+  resuming via a `next_seq` HTTP parameter — the same batching, just no
+  longer bounded by one request's lifetime.
+- **`GET /audit`** is gated by `audit:read` RBAC, with row-level
+  visibility beyond that left entirely to `audit_log_select` RLS — a
+  filter can only narrow what RLS already permits, never widen it
+  (verified against IDOR: an arbitrary `user_id`/`case_id` filter never
+  returns another actor's rows). It records its own `AUDIT_ACCESSED` event
+  once the query has already run, which cannot recurse (`Recorder.Record`
+  only ever inserts one row and never calls back into `AuditService`).
+  `POST /audit/verify-chain` and its companion routes are `audit:verify`
+  (ADMIN-only) — see System 11 below.
+
+## Implemented in System 11 (Audit Chain Verification & Integrity Dashboard)
+
+Full detail in [AUDIT_CHAIN.md](./AUDIT_CHAIN.md)'s "Asynchronous
+Verification & Integrity Dashboard"; summary here:
+
+- **Reuses System 10's verifier completely**: `internal/audit.VerifyBatch`/
+  `ComputeEntryHash`/`CanonicalizeMetadata` are unchanged and called by the
+  new background job exactly as the old synchronous `VerifyChain` called
+  them — one hash/canonicalization/chain-traversal implementation, never
+  two.
+- **Asynchronous by design**: `POST /audit/verify-chain` now dispatches a
+  background job (Asynq, Redis-backed) and returns `202 Accepted`
+  immediately, rather than verifying within the HTTP request — so a chain
+  of any size never requires one long-running synchronous call.
+  `audit_verifications` (migration `000005`) is the durable, PostgreSQL-
+  authoritative record of every run — Redis is used ONLY as Asynq's queue
+  transport, never as a competing state store for the result.
+- **Duplicate-job prevention is database-enforced**:
+  `idx_audit_verifications_single_active` — a unique index on a constant
+  expression filtered to `status IN ('QUEUED', 'RUNNING')`, the identical
+  idiom `audit_log`'s own genesis-uniqueness index already established —
+  guarantees at most one verification runs at a time, independent of
+  application-level locking.
+  `TestAuditService_StartVerification_DeduplicatesActiveRun` proves 20
+  concurrent callers all receive the same run.
+  `MarkAuditVerificationRunning`'s `WHERE status = 'QUEUED'` guard
+  similarly makes a redelivered/duplicate task a safe no-op, never a
+  double-counted re-verification
+  (`TestAuditService_RunVerification_ConcurrentInvocationsDoNotCorruptState`).
+- **`FAILED` (operational) is never confused with `INTEGRITY_FAILURE`
+  (cryptographic)**: a database outage or worker timeout marks a run
+  `FAILED`; only a definite hash/link mismatch marks it
+  `INTEGRITY_FAILURE`. Asynq retries an operational failure per its own
+  configured budget; a `FAILED` status is only persisted once that budget
+  is exhausted (`jobs.NewAuditVerificationErrorHandler`) — a transient
+  blip that succeeds on retry never leaves a stray `FAILED` row.
+- **Stale jobs self-heal on read, not via a second scheduled process**: a
+  `QUEUED`/`RUNNING` row with no progress for longer than expected is
+  reconciled to `FAILED`/`STALE_TIMEOUT` — and that correction is
+  persisted — the first time anyone reads it
+  (`AuditService.reconcileStale`), so a crashed worker can never leave a
+  verification `RUNNING` forever.
+- **SSE is authenticated exactly like every other route** (a normal
+  bearer header — no token in the URL) and re-runs the SAME
+  `audit:verify`+RLS check `GET /verify-chain/:id` uses before ever
+  sending the caller a single byte of data — `verification_id` alone is
+  never trusted as proof of authorization. (The handler subscribes to the
+  in-process broadcaster before that check, not after, purely to avoid a
+  narrow race where a fast verification's one completion event could be
+  published in the gap between the check and the subscription; subscribing
+  itself discloses nothing since no event is ever forwarded before the
+  check passes.) The broadcaster's publish path never blocks, decoupling
+  the verification worker from however slow or absent an SSE client is.
+- **Verification is structurally read-only against `audit_log`** — no
+  code path in the job ever `UPDATE`s, `DELETE`s, reorders, or "repairs" a
+  chain entry; a detected problem is reported, never fixed.
+- **The dashboard is real, not simulated**: the pre-existing
+  `/app/audit` "Blockchain Graph" tab's `setInterval`-driven fake
+  verification sweep (built as scaffolding before this system's backend
+  existed) is replaced with a genuine `POST`/poll-or-SSE/render-result
+  flow against these endpoints — the frontend never computes `VERIFIED`
+  or a progress percentage itself.
 
 ## Principles
 

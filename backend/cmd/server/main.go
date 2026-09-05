@@ -25,12 +25,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hibiken/asynq"
 	"github.com/joho/godotenv"
 
 	"evidentia/backend/internal/app"
 	"evidentia/backend/internal/audit"
 	"evidentia/backend/internal/bootstrap"
 	"evidentia/backend/internal/httpserver"
+	"evidentia/backend/internal/jobs"
 )
 
 // startupTimeout bounds how long connecting to every infrastructure
@@ -79,9 +81,25 @@ func startup(ctx context.Context) (*app.App, error) {
 	return application, nil
 }
 
+// run serves both the HTTP API and System 11's Asynq worker from this ONE
+// process/binary — there is no separate "worker" deployment unit in this
+// project's docker-compose (see docker-compose.yml: postgres/redis/minio/
+// backend, nothing else), and audit-chain verification's own workload
+// (a handful of sequential batched reads against the same PostgreSQL pool
+// the HTTP server already shares) does not warrant the operational
+// complexity of a second container/binary just to run asynq.Server.Run in
+// its own process. A future system with a genuinely different scaling
+// profile can still introduce `cmd/worker` later without this file's
+// HTTP-serving half needing to change at all — jobs.NewServer/NewMux take
+// no dependency on httpserver or vice versa.
 func run(ctx context.Context, a *app.App) {
 	router := httpserver.NewRouter(a)
 	server := httpserver.New(a.Config.Server, router)
+
+	redisOpt := asynq.RedisClientOpt{Addr: a.Config.Redis.Addr, Password: a.Config.Redis.Password, DB: a.Config.Redis.DB}
+	errorHandler := jobs.NewAuditVerificationErrorHandler(a.AuditService, a.Logger)
+	worker := jobs.NewServer(redisOpt, errorHandler, a.Logger)
+	mux := jobs.NewMux(jobs.NewAuditVerificationHandler(a.AuditService, a.Logger))
 
 	a.Logger.Info("starting server",
 		slog.String("addr", a.Config.Server.Addr()),
@@ -98,12 +116,21 @@ func run(ctx context.Context, a *app.App) {
 		serverErr <- nil
 	}()
 
+	workerErr := make(chan error, 1)
+	go func() {
+		workerErr <- worker.Run(mux)
+	}()
+
 	select {
 	case <-ctx.Done():
 		a.Logger.Info("shutdown signal received")
 	case err := <-serverErr:
 		if err != nil {
 			a.Logger.Error("server failed", slog.String("error", err.Error()))
+		}
+	case err := <-workerErr:
+		if err != nil {
+			a.Logger.Error("audit verification worker failed", slog.String("error", err.Error()))
 		}
 	}
 
@@ -115,6 +142,14 @@ func run(ctx context.Context, a *app.App) {
 	} else {
 		a.Logger.Info("http server stopped accepting requests")
 	}
+
+	// Shutdown waits for any in-flight task's ProcessTask to return before
+	// stopping — a verification already RUNNING is allowed to reach its
+	// own next checkpoint (batch boundary) rather than being killed
+	// mid-batch, so it never leaves audit_verifications in a state neither
+	// "properly progressed" nor "properly failed".
+	worker.Shutdown()
+	a.Logger.Info("audit verification worker stopped")
 
 	a.Close()
 	a.Logger.Info("shutdown complete")

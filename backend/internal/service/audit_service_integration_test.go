@@ -1,10 +1,18 @@
 //go:build integration
 
 // Run with: go test -tags=integration ./internal/service/...
-// Requires the docker-compose postgres service up, migrated, seeded. See
-// case_service_integration_test.go for the shared helpers
+// Requires the docker-compose postgres/redis services up, migrated,
+// seeded. See case_service_integration_test.go for the shared helpers
 // (migratorPool, appPool, truncateCaseTables, newUserWithRole, authUser,
 // utilsAsAppError, discardLogger, paginationForTest) this file reuses.
+//
+// System 11's verification tests call AuditService.RunVerification
+// DIRECTLY (synchronously, in the test goroutine) rather than going
+// through a real Asynq worker/Redis round trip — RunVerification IS the
+// exact function jobs.AuditVerificationHandler.ProcessTask calls, so
+// testing it directly exercises the real verification logic without
+// this package needing its own Asynq server; the full HTTP+real-worker
+// flow is covered by internal/httpserver/audit_flow_integration_test.go.
 package service
 
 import (
@@ -14,13 +22,16 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	auditpkg "evidentia/backend/internal/audit"
 	"evidentia/backend/internal/authz"
+	"evidentia/backend/internal/jobs"
 	"evidentia/backend/internal/models"
+	"evidentia/backend/internal/realtime"
 )
 
 // newChainWriterForTest wires a real audit.ChainWriter against the live
@@ -31,11 +42,25 @@ func newChainWriterForTest(t *testing.T) *auditpkg.ChainWriter {
 	return auditpkg.NewChainWriter(appPool(t), discardLogger())
 }
 
+// testJobClient builds a real jobs.Client against the docker-compose Redis
+// — StartVerification's EnqueueVerifyAuditChain call needs a real
+// connection even though these tests never run a worker to consume the
+// resulting task (nothing here waits on that task actually completing;
+// RunVerification is called directly instead — see this file's own
+// package doc comment).
+func testJobClient(t *testing.T) *jobs.Client {
+	t.Helper()
+	addr := envOr("REDIS_ADDR", "localhost:6379")
+	client := jobs.NewClient(asynq.RedisClientOpt{Addr: addr})
+	t.Cleanup(func() { _ = client.Close() })
+	return client
+}
+
 func newAuditServiceForTest(t *testing.T, recorder auditpkg.Recorder) *AuditService {
 	t.Helper()
 	appDB := appPool(t)
 	authzService := authz.NewService(appDB, recorder)
-	return NewAuditService(appDB, authzService, recorder)
+	return NewAuditService(appDB, authzService, recorder, testJobClient(t), realtime.NewBroadcaster(), discardLogger())
 }
 
 // fetchAuditRowsOrdered reads every audit_log row (as the privileged
@@ -130,12 +155,6 @@ func TestChainWriter_ConcurrentWritesDoNotFork(t *testing.T) {
 	rows := fetchAuditRowsOrdered(t, migrator)
 	require.Len(t, rows, writers, "every concurrent Record call must have committed exactly one entry — none lost, none duplicated")
 
-	// Convert to generated.AuditLog-shaped verification via the public
-	// service path rather than re-deriving verification logic here: use
-	// AuditService.VerifyChain, exercised fully in its own tests below.
-	// This test's own, independent check is the raw invariant itself —
-	// no two rows share a prev_hash, and every row's prev_hash matches
-	// SOME other row's hash (or is the unique genesis).
 	seenAsPrev := make(map[string]int)
 	hashes := make(map[string]bool)
 	genesisCount := 0
@@ -233,144 +252,6 @@ func TestAuditService_List_FilterByAction(t *testing.T) {
 	}
 }
 
-func TestAuditService_VerifyChain_FreshChainVerifies(t *testing.T) {
-	migrator := migratorPool(t)
-	truncateCaseTables(t, migrator)
-	writer := newChainWriterForTest(t)
-	svc := newAuditServiceForTest(t, writer)
-	ctx := context.Background()
-
-	admin := newUserWithRole(t, migrator, "audit-verify-admin5@example.com", models.RoleAdmin)
-
-	for i := 0; i < 10; i++ {
-		writer.Record(ctx, auditpkg.Event{Action: "DOCUMENT_DOWNLOADED", ResourceType: "document", UserID: &admin, Role: models.RoleAdmin})
-	}
-
-	result, err := svc.VerifyChain(ctx, authUser(admin, models.RoleAdmin), 0, 0)
-	require.NoError(t, err)
-	assert.Equal(t, auditpkg.VerificationStatusVerified, result.Status)
-	assert.Nil(t, result.NextSeq)
-	assert.GreaterOrEqual(t, result.EntriesChecked, int64(10))
-}
-
-func TestAuditService_VerifyChain_NonAdminDenied(t *testing.T) {
-	migrator := migratorPool(t)
-	truncateCaseTables(t, migrator)
-	writer := newChainWriterForTest(t)
-	svc := newAuditServiceForTest(t, writer)
-	ctx := context.Background()
-
-	officer := newUserWithRole(t, migrator, "audit-verify-officer6@example.com", models.RolePolice)
-
-	_, err := svc.VerifyChain(ctx, authUser(officer, models.RolePolice), 0, 0)
-	require.Error(t, err)
-	appErr, ok := utilsAsAppError(err)
-	require.True(t, ok)
-	assert.Equal(t, 403, appErr.Status, "audit:verify is ADMIN-only per the seed data")
-}
-
-// TestAuditService_VerifyChain_DetectsTamperingViaPrivilegedConnection is
-// the mandatory tamper test: modify a committed row using a PRIVILEGED
-// connection (the migrator role, which — unlike evidentia_app — is a
-// superuser and can UPDATE audit_log directly, simulating an attacker
-// who somehow obtained privileged database access, or an operator error)
-// and confirm chain verification detects it. This does not weaken
-// production permissions: evidentia_app itself still cannot UPDATE
-// audit_log at all (see db_audit_privileges_test.go) — this test uses a
-// DIFFERENT, deliberately privileged connection specifically to prove
-// the cryptographic chain is a genuine SECOND layer of defense, not
-// merely decorative given the DB grants already deny writes.
-func TestAuditService_VerifyChain_DetectsTamperingViaPrivilegedConnection(t *testing.T) {
-	migrator := migratorPool(t)
-	truncateCaseTables(t, migrator)
-	writer := newChainWriterForTest(t)
-	svc := newAuditServiceForTest(t, writer)
-	ctx := context.Background()
-
-	admin := newUserWithRole(t, migrator, "audit-tamper-admin7@example.com", models.RoleAdmin)
-
-	for i := 0; i < 5; i++ {
-		writer.Record(ctx, auditpkg.Event{Action: "DOCUMENT_DOWNLOADED", ResourceType: "document", UserID: &admin, Role: models.RoleAdmin})
-	}
-
-	pre, err := svc.VerifyChain(ctx, authUser(admin, models.RoleAdmin), 0, 0)
-	require.NoError(t, err)
-	require.Equal(t, auditpkg.VerificationStatusVerified, pre.Status, "the chain must verify BEFORE tampering")
-
-	// Tamper: as the migrator (privileged, RLS-exempt) role, directly
-	// modify the action of the middle (3rd) entry.
-	_, err = migrator.Exec(ctx, `UPDATE audit_log SET action = 'TAMPERED_ACTION' WHERE seq = 3`)
-	require.NoError(t, err)
-
-	post, err := svc.VerifyChain(ctx, authUser(admin, models.RoleAdmin), 0, 0)
-	require.NoError(t, err)
-	assert.Equal(t, auditpkg.VerificationStatusIntegrityFailure, post.Status)
-	require.NotNil(t, post.FailedSeq)
-	assert.Equal(t, int64(3), *post.FailedSeq)
-	assert.NotEmpty(t, post.ExpectedHash)
-	assert.NotEmpty(t, post.ActualHash)
-	assert.NotEqual(t, post.ExpectedHash, post.ActualHash)
-}
-
-func TestAuditService_VerifyChain_DetectsDeletedEntry(t *testing.T) {
-	migrator := migratorPool(t)
-	truncateCaseTables(t, migrator)
-	writer := newChainWriterForTest(t)
-	svc := newAuditServiceForTest(t, writer)
-	ctx := context.Background()
-
-	admin := newUserWithRole(t, migrator, "audit-tamper-admin8@example.com", models.RoleAdmin)
-	for i := 0; i < 5; i++ {
-		writer.Record(ctx, auditpkg.Event{Action: "DOCUMENT_DOWNLOADED", ResourceType: "document", UserID: &admin, Role: models.RoleAdmin})
-	}
-
-	_, err := migrator.Exec(ctx, `DELETE FROM audit_log WHERE seq = 3`)
-	require.NoError(t, err)
-
-	result, err := svc.VerifyChain(ctx, authUser(admin, models.RoleAdmin), 0, 0)
-	require.NoError(t, err)
-	assert.Equal(t, auditpkg.VerificationStatusIntegrityFailure, result.Status, "deleting a committed entry must be detected as a broken chain link")
-}
-
-func TestAuditService_VerifyChain_EmptyChainVerifies(t *testing.T) {
-	migrator := migratorPool(t)
-	truncateCaseTables(t, migrator)
-	writer := newChainWriterForTest(t)
-	svc := newAuditServiceForTest(t, writer)
-	ctx := context.Background()
-
-	admin := newUserWithRole(t, migrator, "audit-empty-admin9@example.com", models.RoleAdmin)
-
-	result, err := svc.VerifyChain(ctx, authUser(admin, models.RoleAdmin), 0, 0)
-	require.NoError(t, err)
-	assert.Equal(t, auditpkg.VerificationStatusVerified, result.Status, "an empty chain is vacuously valid")
-	assert.Equal(t, int64(0), result.EntriesChecked)
-}
-
-func TestAuditService_VerifyChain_ResumableAcrossCalls(t *testing.T) {
-	migrator := migratorPool(t)
-	truncateCaseTables(t, migrator)
-	writer := newChainWriterForTest(t)
-	svc := newAuditServiceForTest(t, writer)
-	ctx := context.Background()
-
-	admin := newUserWithRole(t, migrator, "audit-resume-admin10@example.com", models.RoleAdmin)
-	for i := 0; i < 10; i++ {
-		writer.Record(ctx, auditpkg.Event{Action: "DOCUMENT_DOWNLOADED", ResourceType: "document", UserID: &admin, Role: models.RoleAdmin})
-	}
-
-	first, err := svc.VerifyChain(ctx, authUser(admin, models.RoleAdmin), 0, 4)
-	require.NoError(t, err)
-	assert.Equal(t, auditpkg.VerificationStatusVerified, first.Status)
-	assert.Equal(t, int64(4), first.EntriesChecked)
-	require.NotNil(t, first.NextSeq, "more entries remain after checking only 4 of 10+")
-
-	second, err := svc.VerifyChain(ctx, authUser(admin, models.RoleAdmin), *first.NextSeq, 0)
-	require.NoError(t, err)
-	assert.Equal(t, auditpkg.VerificationStatusVerified, second.Status)
-	assert.Nil(t, second.NextSeq, "the second call must reach the end of the chain")
-}
-
 func TestChainWriter_CancelledContextDoesNotLeavePartialEntry(t *testing.T) {
 	migrator := migratorPool(t)
 	truncateCaseTables(t, migrator)
@@ -389,4 +270,383 @@ func TestChainWriter_CancelledContextDoesNotLeavePartialEntry(t *testing.T) {
 
 	rows := fetchAuditRowsOrdered(t, migrator)
 	assert.Empty(t, rows, "a write that fails before COMMIT must leave no row at all — no partial/phantom chain entry")
+}
+
+// ---- System 11: audit-chain verification job ----
+
+// runVerificationToCompletion calls RunVerification directly (see this
+// file's own package doc comment) and returns the final, terminal
+// VerificationDetail via GetVerification.
+func runVerificationToCompletion(t *testing.T, ctx context.Context, svc *AuditService, admin uuid.UUID, verificationID uuid.UUID) VerificationDetail {
+	t.Helper()
+	require.NoError(t, svc.RunVerification(ctx, verificationID))
+	detail, err := svc.GetVerification(ctx, authUser(admin, models.RoleAdmin), verificationID)
+	require.NoError(t, err)
+	return *detail
+}
+
+func TestAuditService_StartVerification_NonAdminDenied(t *testing.T) {
+	migrator := migratorPool(t)
+	truncateCaseTables(t, migrator)
+	writer := newChainWriterForTest(t)
+	svc := newAuditServiceForTest(t, writer)
+	ctx := context.Background()
+
+	officer := newUserWithRole(t, migrator, "verify-officer1@example.com", models.RolePolice)
+
+	_, err := svc.StartVerification(ctx, authUser(officer, models.RolePolice))
+	require.Error(t, err)
+	appErr, ok := utilsAsAppError(err)
+	require.True(t, ok)
+	assert.Equal(t, 403, appErr.Status, "audit:verify is ADMIN-only per the seed data")
+}
+
+func TestAuditService_GetVerification_NonAdminDenied(t *testing.T) {
+	migrator := migratorPool(t)
+	truncateCaseTables(t, migrator)
+	writer := newChainWriterForTest(t)
+	svc := newAuditServiceForTest(t, writer)
+	ctx := context.Background()
+
+	admin := newUserWithRole(t, migrator, "verify-admin-get1@example.com", models.RoleAdmin)
+	officer := newUserWithRole(t, migrator, "verify-officer-get1@example.com", models.RolePolice)
+
+	started, err := svc.StartVerification(ctx, authUser(admin, models.RoleAdmin))
+	require.NoError(t, err)
+
+	_, err = svc.GetVerification(ctx, authUser(officer, models.RolePolice), started.ID)
+	require.Error(t, err)
+	appErr, ok := utilsAsAppError(err)
+	require.True(t, ok)
+	assert.Equal(t, 403, appErr.Status)
+}
+
+func TestAuditService_GetVerification_UnknownIDNotFound(t *testing.T) {
+	migrator := migratorPool(t)
+	truncateCaseTables(t, migrator)
+	writer := newChainWriterForTest(t)
+	svc := newAuditServiceForTest(t, writer)
+	ctx := context.Background()
+
+	admin := newUserWithRole(t, migrator, "verify-admin-404@example.com", models.RoleAdmin)
+
+	_, err := svc.GetVerification(ctx, authUser(admin, models.RoleAdmin), uuid.New())
+	require.Error(t, err)
+	appErr, ok := utilsAsAppError(err)
+	require.True(t, ok)
+	assert.Equal(t, 404, appErr.Status)
+}
+
+func TestAuditService_StartAndRunVerification_FreshChainVerifies(t *testing.T) {
+	migrator := migratorPool(t)
+	truncateCaseTables(t, migrator)
+	writer := newChainWriterForTest(t)
+	svc := newAuditServiceForTest(t, writer)
+	ctx := context.Background()
+
+	admin := newUserWithRole(t, migrator, "verify-admin5@example.com", models.RoleAdmin)
+	for i := 0; i < 10; i++ {
+		writer.Record(ctx, auditpkg.Event{Action: "DOCUMENT_DOWNLOADED", ResourceType: "document", UserID: &admin, Role: models.RoleAdmin})
+	}
+
+	started, err := svc.StartVerification(ctx, authUser(admin, models.RoleAdmin))
+	require.NoError(t, err)
+	assert.Equal(t, auditpkg.VerificationStatusQueued, started.Status)
+
+	detail := runVerificationToCompletion(t, ctx, svc, admin, started.ID)
+	assert.Equal(t, auditpkg.VerificationStatusVerified, detail.Status)
+	assert.GreaterOrEqual(t, detail.EntriesChecked, int64(10))
+	require.NotNil(t, detail.TotalEntries)
+	assert.Equal(t, detail.EntriesChecked, *detail.TotalEntries)
+	require.NotNil(t, detail.ProgressPercent)
+	assert.InDelta(t, 100.0, *detail.ProgressPercent, 0.01)
+	require.NotNil(t, detail.StartedAt)
+	require.NotNil(t, detail.CompletedAt)
+	assert.False(t, detail.CompletedAt.Before(*detail.StartedAt))
+}
+
+func TestAuditService_RunVerification_EmptyChainVerifies(t *testing.T) {
+	migrator := migratorPool(t)
+	truncateCaseTables(t, migrator)
+	writer := newChainWriterForTest(t)
+	svc := newAuditServiceForTest(t, writer)
+	ctx := context.Background()
+
+	admin := newUserWithRole(t, migrator, "verify-empty-admin9@example.com", models.RoleAdmin)
+
+	started, err := svc.StartVerification(ctx, authUser(admin, models.RoleAdmin))
+	require.NoError(t, err)
+
+	// StartVerification itself records an AUDIT_CHAIN_VERIFICATION_REQUESTED
+	// event through the SAME shared audit.Recorder every other operation
+	// uses (no special-cased "don't audit this one" exemption) — so by the
+	// time RunVerification actually scans the chain, that ONE entry (the
+	// request itself) already exists. A chain that was truly empty right
+	// up until the very call that asks to verify it is not otherwise
+	// reachable through the public API — a genuinely zero-row chain is
+	// covered directly, without any database, by
+	// TestVerifyBatch_EmptyChainIsVacuouslyValid in internal/audit.
+	detail := runVerificationToCompletion(t, ctx, svc, admin, started.ID)
+	assert.Equal(t, auditpkg.VerificationStatusVerified, detail.Status, "a chain of only its own request event is trivially valid")
+	assert.Equal(t, int64(1), detail.EntriesChecked)
+	require.NotNil(t, detail.TotalEntries)
+	assert.Equal(t, int64(1), *detail.TotalEntries)
+}
+
+// TestAuditService_RunVerification_DetectsTamperingViaPrivilegedConnection
+// is the mandatory tamper test: modify a committed row using a PRIVILEGED
+// connection (the migrator role, which — unlike evidentia_app — is a
+// superuser and can UPDATE audit_log directly, simulating an attacker who
+// somehow obtained privileged database access, or an operator error) and
+// confirm chain verification detects it. This does not weaken production
+// permissions: evidentia_app itself still cannot UPDATE audit_log at all
+// (see db_audit_privileges_test.go) — this uses a DIFFERENT, deliberately
+// privileged connection specifically to prove the cryptographic chain is
+// a genuine SECOND layer of defense.
+func TestAuditService_RunVerification_DetectsTamperingViaPrivilegedConnection(t *testing.T) {
+	migrator := migratorPool(t)
+	truncateCaseTables(t, migrator)
+	writer := newChainWriterForTest(t)
+	svc := newAuditServiceForTest(t, writer)
+	ctx := context.Background()
+
+	admin := newUserWithRole(t, migrator, "verify-tamper-admin7@example.com", models.RoleAdmin)
+	for i := 0; i < 5; i++ {
+		writer.Record(ctx, auditpkg.Event{Action: "DOCUMENT_DOWNLOADED", ResourceType: "document", UserID: &admin, Role: models.RoleAdmin})
+	}
+
+	pre, err := svc.StartVerification(ctx, authUser(admin, models.RoleAdmin))
+	require.NoError(t, err)
+	preDetail := runVerificationToCompletion(t, ctx, svc, admin, pre.ID)
+	require.Equal(t, auditpkg.VerificationStatusVerified, preDetail.Status, "the chain must verify BEFORE tampering")
+
+	// Tamper: as the migrator (privileged, RLS-exempt) role, directly
+	// modify the action of the middle (3rd) entry.
+	_, err = migrator.Exec(ctx, `UPDATE audit_log SET action = 'TAMPERED_ACTION' WHERE seq = 3`)
+	require.NoError(t, err)
+
+	post, err := svc.StartVerification(ctx, authUser(admin, models.RoleAdmin))
+	require.NoError(t, err)
+	postDetail := runVerificationToCompletion(t, ctx, svc, admin, post.ID)
+	assert.Equal(t, auditpkg.VerificationStatusIntegrityFailure, postDetail.Status)
+	require.NotNil(t, postDetail.FailedSeq)
+	assert.Equal(t, int64(3), *postDetail.FailedSeq)
+	assert.Equal(t, auditpkg.FailureTypeEntryHashMismatch, postDetail.FailureType)
+	assert.NotEmpty(t, postDetail.FailureReason)
+}
+
+func TestAuditService_RunVerification_DetectsDeletedEntry(t *testing.T) {
+	migrator := migratorPool(t)
+	truncateCaseTables(t, migrator)
+	writer := newChainWriterForTest(t)
+	svc := newAuditServiceForTest(t, writer)
+	ctx := context.Background()
+
+	admin := newUserWithRole(t, migrator, "verify-tamper-admin8@example.com", models.RoleAdmin)
+	for i := 0; i < 5; i++ {
+		writer.Record(ctx, auditpkg.Event{Action: "DOCUMENT_DOWNLOADED", ResourceType: "document", UserID: &admin, Role: models.RoleAdmin})
+	}
+
+	_, err := migrator.Exec(ctx, `DELETE FROM audit_log WHERE seq = 3`)
+	require.NoError(t, err)
+
+	started, err := svc.StartVerification(ctx, authUser(admin, models.RoleAdmin))
+	require.NoError(t, err)
+	detail := runVerificationToCompletion(t, ctx, svc, admin, started.ID)
+	assert.Equal(t, auditpkg.VerificationStatusIntegrityFailure, detail.Status, "deleting a committed entry must be detected as a broken chain link")
+	assert.Equal(t, auditpkg.FailureTypePreviousHashMismatch, detail.FailureType)
+}
+
+// TestAuditService_StartVerification_DeduplicatesActiveRun is the
+// mandatory "simultaneous verification requests" concurrency test at the
+// StartVerification level: many goroutines call StartVerification at
+// once, before any of them has been run to completion. Exactly one
+// audit_verifications row must exist afterward, and every goroutine must
+// have received THAT SAME id — the database-level
+// idx_audit_verifications_single_active unique index is what actually
+// guarantees this (see AuditService.StartVerification's own doc comment),
+// not application-level locking.
+func TestAuditService_StartVerification_DeduplicatesActiveRun(t *testing.T) {
+	migrator := migratorPool(t)
+	truncateCaseTables(t, migrator)
+	writer := newChainWriterForTest(t)
+	svc := newAuditServiceForTest(t, writer)
+	ctx := context.Background()
+
+	admin := newUserWithRole(t, migrator, "verify-dedup-admin1@example.com", models.RoleAdmin)
+	user := authUser(admin, models.RoleAdmin)
+
+	const callers = 20
+	ids := make([]uuid.UUID, callers)
+	errs := make([]error, callers)
+	var wg sync.WaitGroup
+	wg.Add(callers)
+	for i := 0; i < callers; i++ {
+		go func(n int) {
+			defer wg.Done()
+			result, err := svc.StartVerification(ctx, user)
+			errs[n] = err
+			if err == nil {
+				ids[n] = result.ID
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	for _, err := range errs {
+		require.NoError(t, err)
+	}
+	first := ids[0]
+	for _, id := range ids {
+		assert.Equal(t, first, id, "every concurrent StartVerification call must return the SAME active verification id")
+	}
+
+	var count int
+	require.NoError(t, migrator.QueryRow(ctx, `SELECT count(*) FROM audit_verifications`).Scan(&count))
+	assert.Equal(t, 1, count, "exactly one verification row may exist while one is QUEUED/RUNNING — idx_audit_verifications_single_active must have rejected every other insert attempt")
+}
+
+// TestAuditService_RunVerification_ConcurrentInvocationsDoNotCorruptState
+// is the "multiple workers" concurrency test: simulates several worker
+// goroutines all picking up (calling RunVerification on) the SAME
+// verification_id concurrently — e.g. a redelivered/duplicate Asynq task.
+// MarkAuditVerificationRunning's `AND status = 'QUEUED'` guard must let
+// exactly ONE of them actually perform the verification; every other
+// call must see the row already RUNNING/terminal and return immediately
+// (nil error, no re-verification, no corrupted counters).
+func TestAuditService_RunVerification_ConcurrentInvocationsDoNotCorruptState(t *testing.T) {
+	migrator := migratorPool(t)
+	truncateCaseTables(t, migrator)
+	writer := newChainWriterForTest(t)
+	svc := newAuditServiceForTest(t, writer)
+	ctx := context.Background()
+
+	admin := newUserWithRole(t, migrator, "verify-multiworker-admin1@example.com", models.RoleAdmin)
+	for i := 0; i < 8; i++ {
+		writer.Record(ctx, auditpkg.Event{Action: "DOCUMENT_DOWNLOADED", ResourceType: "document", UserID: &admin, Role: models.RoleAdmin})
+	}
+
+	started, err := svc.StartVerification(ctx, authUser(admin, models.RoleAdmin))
+	require.NoError(t, err)
+	// +1 beyond the 8 explicit writes above: StartVerification's own
+	// AUDIT_CHAIN_VERIFICATION_REQUESTED event is itself now part of the
+	// chain by the time RunVerification scans it.
+	const wantEntries = 9
+
+	const attempts = 10
+	var wg sync.WaitGroup
+	wg.Add(attempts)
+	for i := 0; i < attempts; i++ {
+		go func() {
+			defer wg.Done()
+			assert.NoError(t, svc.RunVerification(ctx, started.ID))
+		}()
+	}
+	wg.Wait()
+
+	detail, err := svc.GetVerification(ctx, authUser(admin, models.RoleAdmin), started.ID)
+	require.NoError(t, err)
+	assert.Equal(t, auditpkg.VerificationStatusVerified, detail.Status)
+	assert.Equal(t, int64(wantEntries), detail.EntriesChecked, "concurrent duplicate RunVerification invocations must never double-count entries_checked")
+}
+
+func TestAuditService_MarkVerificationOperationallyFailed(t *testing.T) {
+	migrator := migratorPool(t)
+	truncateCaseTables(t, migrator)
+	writer := newChainWriterForTest(t)
+	svc := newAuditServiceForTest(t, writer)
+	ctx := context.Background()
+
+	admin := newUserWithRole(t, migrator, "verify-opfail-admin1@example.com", models.RoleAdmin)
+	started, err := svc.StartVerification(ctx, authUser(admin, models.RoleAdmin))
+	require.NoError(t, err)
+
+	require.NoError(t, svc.MarkVerificationOperationallyFailed(ctx, started.ID, assertAnError{}))
+
+	detail, err := svc.GetVerification(ctx, authUser(admin, models.RoleAdmin), started.ID)
+	require.NoError(t, err)
+	assert.Equal(t, auditpkg.VerificationStatusFailed, detail.Status, "an operational failure must be FAILED, never INTEGRITY_FAILURE — an outage is not evidence of tampering")
+	assert.Equal(t, auditpkg.OperationalFailureDatabaseError, detail.FailureType)
+	assert.NotEmpty(t, detail.FailureReason)
+	require.NotNil(t, detail.CompletedAt)
+}
+
+type assertAnError struct{}
+
+func (assertAnError) Error() string { return "simulated operational failure" }
+
+func TestAuditService_ReconcileStale_RunningWithoutProgressBecomesFailed(t *testing.T) {
+	migrator := migratorPool(t)
+	truncateCaseTables(t, migrator)
+	writer := newChainWriterForTest(t)
+	svc := newAuditServiceForTest(t, writer)
+	ctx := context.Background()
+
+	admin := newUserWithRole(t, migrator, "verify-stale-admin1@example.com", models.RoleAdmin)
+	started, err := svc.StartVerification(ctx, authUser(admin, models.RoleAdmin))
+	require.NoError(t, err)
+
+	// Simulate a worker that picked the job up, then died mid-run: mark it
+	// RUNNING with an updated_at far enough in the past to exceed
+	// staleRunningThreshold, using the privileged migrator connection
+	// (application code never backdates a timestamp like this).
+	_, err = migrator.Exec(ctx, `
+		UPDATE audit_verifications
+		SET status = 'RUNNING', started_at = now() - interval '10 minutes',
+		    updated_at = now() - interval '10 minutes'
+		WHERE id = $1`, started.ID)
+	require.NoError(t, err)
+
+	detail, err := svc.GetVerification(ctx, authUser(admin, models.RoleAdmin), started.ID)
+	require.NoError(t, err)
+	assert.Equal(t, auditpkg.VerificationStatusFailed, detail.Status, "a RUNNING verification with no progress for longer than expected must be reconciled to FAILED, never left RUNNING forever, and never falsely VERIFIED")
+	assert.Equal(t, auditpkg.OperationalFailureStaleTimeout, detail.FailureType)
+
+	// The correction must be PERSISTED, not merely returned — a second,
+	// independent read must see the identical terminal state.
+	var status string
+	require.NoError(t, migrator.QueryRow(ctx, `SELECT status FROM audit_verifications WHERE id = $1`, started.ID).Scan(&status))
+	assert.Equal(t, auditpkg.VerificationStatusFailed, status)
+}
+
+func TestAuditService_GetIntegritySummary(t *testing.T) {
+	migrator := migratorPool(t)
+	truncateCaseTables(t, migrator)
+	writer := newChainWriterForTest(t)
+	svc := newAuditServiceForTest(t, writer)
+	ctx := context.Background()
+
+	admin := newUserWithRole(t, migrator, "verify-summary-admin1@example.com", models.RoleAdmin)
+	for i := 0; i < 3; i++ {
+		writer.Record(ctx, auditpkg.Event{Action: "DOCUMENT_DOWNLOADED", ResourceType: "document", UserID: &admin, Role: models.RoleAdmin})
+	}
+
+	started, err := svc.StartVerification(ctx, authUser(admin, models.RoleAdmin))
+	require.NoError(t, err)
+	runVerificationToCompletion(t, ctx, svc, admin, started.ID)
+
+	summary, err := svc.GetIntegritySummary(ctx, authUser(admin, models.RoleAdmin))
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, summary.TotalEntries, int64(3))
+	require.NotNil(t, summary.ChainHeadSeq)
+	assert.NotEmpty(t, summary.ChainHeadHash)
+	require.NotNil(t, summary.LastVerification)
+	assert.Equal(t, started.ID, summary.LastVerification.ID)
+	assert.Equal(t, auditpkg.VerificationStatusVerified, summary.LastVerification.Status)
+}
+
+func TestAuditService_GetIntegritySummary_NonAdminDenied(t *testing.T) {
+	migrator := migratorPool(t)
+	truncateCaseTables(t, migrator)
+	writer := newChainWriterForTest(t)
+	svc := newAuditServiceForTest(t, writer)
+	ctx := context.Background()
+
+	lawyer := newUserWithRole(t, migrator, "verify-summary-lawyer1@example.com", models.RoleLawyer)
+
+	_, err := svc.GetIntegritySummary(ctx, authUser(lawyer, models.RoleLawyer))
+	require.Error(t, err)
+	appErr, ok := utilsAsAppError(err)
+	require.True(t, ok)
+	assert.Equal(t, 403, appErr.Status)
 }

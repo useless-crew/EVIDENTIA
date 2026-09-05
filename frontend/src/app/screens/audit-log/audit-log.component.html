@@ -9,52 +9,26 @@
     </div>
 
     <button
+      *ngIf="isAdmin()"
       type="button"
       class="btn-primary btn-verify-chain"
-      (click)="verifyChain()"
-      [disabled]="dms.chainRunning()"
+      (click)="onVerifyClick()"
+      [disabled]="isRunning()"
     >
-      <svg *ngIf="!dms.chainRunning()" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <svg *ngIf="!isRunning()" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
       </svg>
-      <span *ngIf="dms.chainRunning()" class="spinner-dot"></span>
-      <span>Verify Full Chain</span>
+      <span *ngIf="isRunning()" class="spinner-dot"></span>
+      <span>{{ isRunning() ? 'Verifying…' : 'Verify Audit Chain' }}</span>
     </button>
   </div>
 
-  <!-- Realtime Verification Progress Banner -->
-  <div *ngIf="dms.chainRunning()" class="chain-progress-card animate-fade-in">
-    <div class="progress-top-row">
-      <span class="chain-spinner"></span>
-      <span class="progress-text font-mono">
-        Verifying cryptographic block {{ dms.chainCount() }} / 1,204…
-      </span>
-      <span class="progress-pct font-mono">
-        {{ (dms.chainCount() / 1204 * 100) | number:'1.0-0' }}%
-      </span>
-    </div>
-    <div class="chain-track">
-      <div class="chain-fill" [style.width.%]="(dms.chainCount() / 1204 * 100)"></div>
-    </div>
+  <div *ngIf="isAdmin() && startError()" class="chain-result-card tampered animate-fade-in">
+    <div class="result-title">Could not start verification</div>
+    <div class="result-sub">{{ startError() }}</div>
   </div>
 
-  <!-- Verification Result Banner -->
-  <div
-    *ngIf="dms.chainDone()"
-    class="chain-result-card animate-fade-in"
-    [class.tampered]="dms.simulateTamper()"
-  >
-    <div class="result-title">
-      {{ dms.simulateTamper() ? '⚠ Chain Tampering Detected at Entry #1,198' : '✓ Cryptographic Chain Intact — 1,204 Entries Verified' }}
-    </div>
-    <div class="result-sub font-mono">
-      {{ dms.simulateTamper()
-        ? 'prev_hash mismatch · expected b0e19470… got 5512ac9d… · REDACTION_APPLIED by unverified key'
-        : 'Zero tampering detected · Full walk completed in 412 ms · Cryptographically signed by ED25519-01' }}
-    </div>
-  </div>
-
-  <!-- Tabs: Table vs Chain Graph -->
+  <!-- Tabs: Table vs Integrity Dashboard -->
   <div class="audit-tabs">
     <button
       type="button"
@@ -70,7 +44,7 @@
       [class.active]="dms.auditTab() === 'graph'"
       (click)="setTab('graph')"
     >
-      Blockchain Graph
+      Audit Integrity
     </button>
   </div>
 
@@ -134,32 +108,123 @@
     </div>
   </div>
 
-  <!-- TAB 2: Blockchain Graph View -->
-  <div *ngIf="dms.auditTab() === 'graph'" class="audit-card graph-card animate-fade-in">
-    <div class="graph-info-banner">
-      Each block represents an immutable audit entry. The connection carries the cryptographic hash of the parent block.
-      Click <strong class="verify-inline-link" (click)="verifyChain()">Verify Full Chain</strong> above to sweep through all 24 visual blocks.
+  <!-- TAB 2: Audit Integrity Dashboard (System 11 — real backend, no simulation) -->
+  <div *ngIf="dms.auditTab() === 'graph'" class="integrity-view animate-fade-in">
+
+    <!-- Non-admin: explain why controls are hidden, not a blank/broken screen -->
+    <div *ngIf="!isAdmin()" class="audit-card integrity-restricted">
+      <p>Audit-chain verification and the integrity dashboard require ADMIN access.</p>
+      <p class="integrity-restricted-sub">Contact an administrator if you believe the audit chain needs to be verified.</p>
     </div>
 
-    <div class="graph-container">
-      <div *ngFor="let row of dms.chainRows()" class="chain-row">
-        <div *ngFor="let node of row.nodes" class="chain-node-wrapper" [style.flex]="node.flex">
-          <div class="node-block" [class.verified]="node.verified" [class.tampered]="node.tampered">
-            <div class="node-badge" [class.verified]="node.verified" [class.tampered]="node.tampered">
-              <span class="node-tick font-mono">{{ node.tick || '·' }}</span>
-            </div>
-            <div class="node-id font-mono">{{ node.id }}</div>
-            <div class="node-frag font-mono">{{ node.frag }}</div>
+    <ng-container *ngIf="isAdmin()">
+      <!-- Overall status card -->
+      <div class="audit-card integrity-status-card" [ngClass]="statusClass(activeStatus())">
+        <div class="integrity-status-row">
+          <span class="integrity-status-icon" aria-hidden="true">
+            <ng-container [ngSwitch]="statusClass(activeStatus())">
+              <span *ngSwitchCase="'status-verified'">✓</span>
+              <span *ngSwitchCase="'status-integrity-failure'">⚠</span>
+              <span *ngSwitchCase="'status-failed'">⚠</span>
+              <span *ngSwitchCase="'status-running'" class="spinner-dot"></span>
+              <span *ngSwitchDefault>·</span>
+            </ng-container>
+          </span>
+          <span class="integrity-status-label">{{ statusLabel(activeStatus()) }}</span>
+        </div>
+
+        <!-- Live progress bar (RUNNING) -->
+        <div *ngIf="isRunning() && live() as running" class="chain-progress-card">
+          <div class="progress-top-row">
+            <span class="chain-spinner"></span>
+            <span class="progress-text font-mono">{{ progressLabel(running) }}</span>
+            <span *ngIf="running.progress_percent !== undefined" class="progress-pct font-mono">
+              {{ running.progress_percent | number:'1.0-0' }}%
+            </span>
+          </div>
+          <div class="chain-track">
+            <div class="chain-fill" [style.width.%]="running.progress_percent ?? 0"></div>
+          </div>
+        </div>
+
+        <!-- Terminal result detail -->
+        <ng-container *ngIf="!isRunning() && live() as done">
+          <div *ngIf="done.status === 'VERIFIED'" class="result-sub">
+            {{ done.entries_checked.toLocaleString() }} entries verified · no tampering detected.
           </div>
 
-          <div
-            *ngIf="node.link"
-            class="node-link-line"
-            [class.verified]="node.verified"
-            [class.tampered]="node.tampered"
-          ></div>
+          <div *ngIf="done.status === 'INTEGRITY_FAILURE'" class="failure-detail">
+            <div class="failure-row"><span class="failure-label">Verification stopped at entry</span><span class="failure-value font-mono">{{ done.failed_entry_id || '—' }}</span></div>
+            <div class="failure-row"><span class="failure-label">Failure</span><span class="failure-value font-mono">{{ done.failure_type || 'UNKNOWN' }}</span></div>
+            <div class="failure-row"><span class="failure-label">Entries checked</span><span class="failure-value font-mono">{{ done.entries_checked.toLocaleString() }}</span></div>
+          </div>
+
+          <div *ngIf="done.status === 'FAILED'" class="failure-detail">
+            <div class="failure-row"><span class="failure-label">Reason</span><span class="failure-value">{{ done.failure_reason || 'An operational error prevented verification from completing.' }}</span></div>
+            <div class="failure-row"><span class="failure-label">Entries checked before failure</span><span class="failure-value font-mono">{{ done.entries_checked.toLocaleString() }}</span></div>
+          </div>
+        </ng-container>
+      </div>
+
+      <!-- Aggregate stats -->
+      <div class="audit-card integrity-stats-card" *ngIf="summary() as s">
+        <div class="integrity-stat">
+          <div class="integrity-stat-label">Total Audit Entries</div>
+          <div class="integrity-stat-value font-mono">{{ s.total_entries.toLocaleString() }}</div>
+        </div>
+        <div class="integrity-stat">
+          <div class="integrity-stat-label">Chain Head</div>
+          <div class="integrity-stat-value font-mono">{{ s.chain_head_seq ?? '—' }}</div>
+        </div>
+        <div class="integrity-stat">
+          <div class="integrity-stat-label">Last Verification</div>
+          <div class="integrity-stat-value">
+            {{ s.last_verification ? statusLabel(s.last_verification.status) : 'Never run' }}
+          </div>
+        </div>
+        <div class="integrity-stat" *ngIf="s.last_verification?.completed_at as completedAt">
+          <div class="integrity-stat-label">Completed</div>
+          <div class="integrity-stat-value font-mono">{{ completedAt | date:'medium' }}</div>
         </div>
       </div>
-    </div>
+
+      <div *ngIf="summaryLoading()" class="integrity-loading">Loading integrity summary…</div>
+      <div *ngIf="summaryError()" class="chain-result-card tampered">
+        <div class="result-title">Could not load integrity summary</div>
+        <div class="result-sub">{{ summaryError() }}</div>
+      </div>
+
+      <!-- Recent Verification History -->
+      <div class="audit-card integrity-history-card">
+        <div class="integrity-history-header">Recent Verification History</div>
+
+        <div *ngIf="historyLoading()" class="integrity-loading">Loading history…</div>
+        <div *ngIf="historyError()" class="chain-result-card tampered">
+          <div class="result-title">Could not load verification history</div>
+          <div class="result-sub">{{ historyError() }}</div>
+        </div>
+
+        <div *ngIf="!historyLoading() && history() as h">
+          <div *ngIf="h.verifications.length === 0" class="integrity-history-empty">
+            No verification has been run yet. Click "Verify Audit Chain" above to run the first one.
+          </div>
+
+          <div *ngIf="h.verifications.length > 0" class="integrity-history-table">
+            <div class="integrity-history-row integrity-history-head font-mono">
+              <span>STATUS</span>
+              <span>STARTED</span>
+              <span>COMPLETED</span>
+              <span>ENTRIES CHECKED</span>
+            </div>
+            <div class="integrity-history-row" *ngFor="let v of h.verifications">
+              <span class="integrity-history-status" [ngClass]="statusClass(v.status)">{{ statusLabel(v.status) }}</span>
+              <span class="font-mono">{{ v.started_at ? (v.started_at | date:'short') : '—' }}</span>
+              <span class="font-mono">{{ v.completed_at ? (v.completed_at | date:'short') : '—' }}</span>
+              <span class="font-mono">{{ v.entries_checked.toLocaleString() }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </ng-container>
   </div>
 </div>

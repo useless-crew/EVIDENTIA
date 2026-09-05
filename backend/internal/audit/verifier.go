@@ -19,6 +19,75 @@ import (
 const (
 	VerificationStatusVerified         = "VERIFIED"
 	VerificationStatusIntegrityFailure = "INTEGRITY_FAILURE"
+
+	// VerificationStatusQueued/Running are System 11's async job-lifecycle
+	// states — a verification exists in one of these two BEFORE it reaches
+	// one of the two terminal outcomes above, or the operational-failure
+	// terminal state below. Defined here, not in internal/service or
+	// internal/jobs, so the complete status vocabulary for "what a
+	// verification's status column may ever contain" has one home,
+	// alongside the outcome constants it precedes.
+	VerificationStatusQueued  = "QUEUED"
+	VerificationStatusRunning = "RUNNING"
+
+	// VerificationStatusFailed is an OPERATIONAL failure (PostgreSQL
+	// unavailable, an unexpected driver/storage error, a worker timeout) —
+	// verification could not complete at all, which is materially
+	// different from VerificationStatusIntegrityFailure (verification DID
+	// complete and found a cryptographic/structural problem). Never use
+	// one to report the other: an outage is not evidence of tampering, and
+	// a definite tamper finding is not a transient error to retry away.
+	VerificationStatusFailed = "FAILED"
+)
+
+// Failure-type categories for VerificationStatusIntegrityFailure — see
+// BatchResult.FailureType. This is deliberately the SMALLEST set VerifyBatch
+// can distinguish with certainty from a linear, seq-ordered scan, not the
+// full vocabulary a threat model might imagine:
+//
+//   - CHAIN_FORK_DETECTED / DUPLICATE_ENTRY are never produced here because
+//     they cannot exist in a successfully committed chain in the first
+//     place: idx_audit_log_prev_hash_unique/idx_audit_log_single_genesis
+//     (see db/migrations/000001_init_schema.up.sql) reject a forking or
+//     duplicate-genesis INSERT at the database level before it can ever
+//     commit — a verifier scanning committed rows structurally cannot
+//     observe a fork attempt's non-existence as a distinct symptom from a
+//     plain broken link.
+//   - CHAIN_ORDER_INVALID / MISSING_ENTRY are not separate categories
+//     either: audit_log.seq is a GENERATED ALWAYS AS IDENTITY column
+//     (monotonic by construction — ORDER BY seq IS chain order, nothing to
+//     misorder), and a deleted middle entry is caught as, and reported
+//     identically to, FailureTypePreviousHashMismatch (the next surviving
+//     entry's prev_hash no longer matches anything) — this is exactly what
+//     it structurally IS: a broken link, whatever real-world event caused
+//     it. Inventing a more specific label here would be false precision
+//     the algorithm cannot actually back up.
+//
+// See docs/AUDIT_CHAIN.md's "Verification" section for the full reasoning.
+const (
+	FailureTypeGenesisInvalid        = "GENESIS_INVALID"
+	FailureTypePreviousHashMismatch  = "PREVIOUS_HASH_MISMATCH"
+	FailureTypeEntryHashMismatch     = "ENTRY_HASH_MISMATCH"
+	FailureTypeCanonicalizationError = "CANONICALIZATION_ERROR"
+)
+
+// Failure-type categories for VerificationStatusFailed — an operational
+// failure, never a cryptographic finding. Populated by internal/service/
+// internal/jobs (this package has no database/network/timeout concerns of
+// its own to classify), listed here purely so the two vocabularies
+// (integrity findings above, operational failures below) live in one place
+// and are visibly, deliberately never mixed.
+const (
+	OperationalFailureDatabaseError = "DATABASE_ERROR"
+	OperationalFailureTimeout       = "TIMEOUT"
+	// OperationalFailureStaleTimeout marks a QUEUED/RUNNING verification
+	// whose worker went silent (no progress update) long enough to be
+	// presumed dead — e.g. the process was killed outright, never reaching
+	// its own completion/failure handling. Detected and applied lazily, at
+	// READ time, by internal/service.AuditService — see that type's
+	// reconcileStale doc comment for why no separate sweeper process
+	// exists for this.
+	OperationalFailureStaleTimeout = "STALE_TIMEOUT"
 )
 
 // BatchResult is the outcome of verifying one ordered, contiguous batch
@@ -32,12 +101,18 @@ const (
 // API client per master prompt's "do not expose sensitive document
 // contents or secrets" for the verification endpoint.
 type BatchResult struct {
-	OK               bool
-	EntriesChecked   int
-	LastHash         []byte // valid only when OK — the new expected prev_hash for the NEXT batch
-	FailedEntryID    *uuid.UUID
-	FailedSeq        *int64
-	Reason           string
+	OK             bool
+	EntriesChecked int
+	LastHash       []byte // valid only when OK — the new expected prev_hash for the NEXT batch
+	FailedEntryID  *uuid.UUID
+	FailedSeq      *int64
+	Reason         string
+	// FailureType is one of the FailureType* constants above — set
+	// whenever OK is false, alongside the free-text Reason (kept for
+	// human-readable detail; FailureType is the stable, machine-readable
+	// category System 11 persists to audit_verifications.failure_type and
+	// exposes over the API).
+	FailureType      string
 	ExpectedPrevHash []byte
 	ActualPrevHash   []byte
 	ExpectedHash     []byte
@@ -64,11 +139,26 @@ func VerifyBatch(entries []generated.AuditLog, expectedPrevHash []byte) BatchRes
 
 	for i, e := range entries {
 		if !bytes.Equal(e.PrevHash, prev) {
+			// Either side of the comparison being nil (never both — that
+			// case IS bytes.Equal and would not have reached here) means
+			// this is a genesis-shaped mismatch: an entry that should be
+			// genesis claims a real predecessor, or an unexpected second
+			// genesis-shaped entry appears mid-chain. Anything else is a
+			// plain broken link between two otherwise-ordinary entries —
+			// see the FailureType* constants' doc comment for why this is
+			// the most specific classification the algorithm can honestly
+			// make (this single category also covers a deleted entry and
+			// an attempted-but-never-committed fork).
+			failureType := FailureTypePreviousHashMismatch
+			if prev == nil || e.PrevHash == nil {
+				failureType = FailureTypeGenesisInvalid
+			}
 			return BatchResult{
 				EntriesChecked:   i,
 				FailedEntryID:    &e.ID,
 				FailedSeq:        e.Seq,
 				Reason:           "prev_hash does not match the preceding entry's hash — chain link broken",
+				FailureType:      failureType,
 				ExpectedPrevHash: prev,
 				ActualPrevHash:   e.PrevHash,
 			}
@@ -81,6 +171,7 @@ func VerifyBatch(entries []generated.AuditLog, expectedPrevHash []byte) BatchRes
 				FailedEntryID:  &e.ID,
 				FailedSeq:      e.Seq,
 				Reason:         "stored metadata could not be canonicalized: " + err.Error(),
+				FailureType:    FailureTypeCanonicalizationError,
 			}
 		}
 
@@ -102,6 +193,7 @@ func VerifyBatch(entries []generated.AuditLog, expectedPrevHash []byte) BatchRes
 				FailedEntryID:    &e.ID,
 				FailedSeq:        e.Seq,
 				Reason:           "recomputed entry hash does not match the stored hash — entry contents modified",
+				FailureType:      FailureTypeEntryHashMismatch,
 				ExpectedHash:     expectedHash,
 				ActualHash:       e.Hash,
 				ExpectedPrevHash: prev,

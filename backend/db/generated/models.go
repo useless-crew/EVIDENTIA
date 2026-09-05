@@ -30,6 +30,29 @@ type AuditLog struct {
 	Hash     []byte `json:"hash"`
 }
 
+// One row per audit-chain verification run (System 11) — the durable, evidentiary record of "was the chain intact as of this check", independent of whatever transport (SSE, polling) a client used to observe it while running. Never mutates audit_log; read-only against it. id is the verification_id every System 11 API/SSE route is keyed by. requested_by_role is captured verbatim at request time, mirroring audit_log.role's own rationale (a user's roles can change after the fact, but this record should reflect what was true when requested).
+type AuditVerification struct {
+	ID                uuid.UUID `json:"id"`
+	RequestedByUserID uuid.UUID `json:"requested_by_user_id"`
+	RequestedByRole   *string   `json:"requested_by_role"`
+	Status            string    `json:"status"`
+	EntriesChecked    int64     `json:"entries_checked"`
+	// Captured ONCE, at job start, from a single COUNT(*) — never re-queried per batch (master prompt: "do not perform an expensive COUNT query repeatedly"). NULL only in the brief QUEUED window before the worker has picked the job up.
+	TotalEntries *int64 `json:"total_entries"`
+	// audit_log.seq of the last entry confirmed valid so far — the live progress cursor, updated at the same throttled cadence as entries_checked (see internal/service.AuditService's progress-update-throttle constant). Never used to RESUME a crashed run (see failure_type's STALE_TIMEOUT case below) — only to report progress.
+	LastSeqChecked *int64     `json:"last_seq_checked"`
+	FailedEntryID  *uuid.UUID `json:"failed_entry_id"`
+	FailedSeq      *int64     `json:"failed_seq"`
+	// For INTEGRITY_FAILURE: one of GENESIS_INVALID, PREVIOUS_HASH_MISMATCH, ENTRY_HASH_MISMATCH, CANONICALIZATION_ERROR (see internal/audit.BatchResult.FailureType — the exact, and only, categories System 10's verifier can DEFINITIVELY distinguish; CHAIN_FORK_DETECTED/DUPLICATE_ENTRY/CHAIN_ORDER_INVALID are prevented at the database level by audit_log's own unique indexes/ identity column and therefore can never be witnessed by a verifier scanning a successfully-committed chain — see docs/AUDIT_CHAIN.md). For FAILED: an operational category such as DATABASE_ERROR, TIMEOUT, or STALE_TIMEOUT (a RUNNING/QUEUED row whose worker went silent long enough to be presumed dead — see AuditService's reconciliation logic) — never confused with a cryptographic finding.
+	FailureType *string `json:"failure_type"`
+	// Safe, human-readable detail only — never a raw SQL error, stack trace, filesystem path, or credential (master prompt: "do not expose... database credentials... SQL statements... internal filesystem paths").
+	FailureReason *string            `json:"failure_reason"`
+	StartedAt     pgtype.Timestamptz `json:"started_at"`
+	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt     time.Time          `json:"created_at"`
+	UpdatedAt     time.Time          `json:"updated_at"`
+}
+
 // Refresh-token sessions. token_hash is SHA-256(raw token) — the raw token itself is never persisted. family_id groups a chain of rotated tokens descending from one login: on rotation the new row keeps the same family_id as its parent, so reuse of a already-rotated (revoked) token can invalidate the whole family, not just the one token presented (see internal/service/auth_service.go). Sessions are ended via UPDATE (revoked_at), never DELETE — consistent with this schema's soft-lifecycle convention elsewhere. ON DELETE CASCADE from users is deliberate here (unlike the RESTRICT used for evidence tables in System 2): a session has no independent evidentiary value, so removing a user's sessions when the user itself is removed is correct, not a data-loss risk.
 type AuthSession struct {
 	ID     uuid.UUID `json:"id"`
