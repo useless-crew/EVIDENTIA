@@ -1,14 +1,14 @@
 <div class="admin-view">
   <header class="page-head">
     <div class="page-head-titles">
-      <span class="page-eyebrow">Administration</span>
-      <h1 class="page-title">User Management</h1>
+      <span class="page-eyebrow">Administration & Infrastructure</span>
+      <h1 class="page-title">Management Hub</h1>
       <p class="page-subtitle">
-        Create accounts and manage roles, status, and passwords for every Evidentia user.
+        System oversight, infrastructure diagnostics, background workers, and access governance for Evidentia.
       </p>
     </div>
 
-    <div class="page-actions">
+    <div class="page-actions" *ngIf="activeTab() === 'users'">
       <button type="button" class="btn-primary" (click)="openCreate()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -19,178 +19,557 @@
     </div>
   </header>
 
-  <div *ngIf="rowActionError()" class="form-alert form-alert-error">
-    <span class="alert-mark" aria-hidden="true"></span>
-    {{ rowActionError() }}
+  <!-- Navigation Sub-Tabs -->
+  <nav class="admin-tabs" aria-label="Admin Sections">
+    <button
+      type="button"
+      class="tab-btn"
+      [class.active]="activeTab() === 'overview'"
+      (click)="setTab('overview')"
+    >
+      System Overview
+    </button>
+    <button
+      type="button"
+      class="tab-btn"
+      [class.active]="activeTab() === 'users'"
+      (click)="setTab('users')"
+    >
+      User Accounts
+    </button>
+    <button
+      type="button"
+      class="tab-btn"
+      [class.active]="activeTab() === 'system'"
+      (click)="setTab('system')"
+    >
+      Infrastructure & Health
+    </button>
+    <button
+      type="button"
+      class="tab-btn"
+      [class.active]="activeTab() === 'jobs'"
+      (click)="setTab('jobs')"
+    >
+      Background Queues
+    </button>
+    <button
+      type="button"
+      class="tab-btn"
+      [class.active]="activeTab() === 'blockchain'"
+      (click)="setTab('blockchain')"
+    >
+      Blockchain Ledger
+    </button>
+    <button
+      type="button"
+      class="tab-btn"
+      [class.active]="activeTab() === 'tools'"
+      (click)="setTab('tools')"
+    >
+      Management Tools
+    </button>
+  </nav>
+
+  <!-- ========================================================================= -->
+  <!-- TAB: System Overview -->
+  <!-- ========================================================================= -->
+  <div *ngIf="activeTab() === 'overview'" class="tab-pane">
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <span class="metric-label">Registered Users</span>
+        <span class="metric-value">{{ stats()?.total_users ?? '—' }}</span>
+        <span class="metric-sub">{{ stats()?.active_users ?? 0 }} active accounts</span>
+      </div>
+
+      <div class="metric-card">
+        <span class="metric-label">Investigative Cases</span>
+        <span class="metric-value">{{ stats()?.total_cases ?? '—' }}</span>
+        <span class="metric-sub">{{ stats()?.active_cases ?? 0 }} active investigations</span>
+      </div>
+
+      <div class="metric-card">
+        <span class="metric-label">Evidence Documents</span>
+        <span class="metric-value">{{ stats()?.total_documents ?? '—' }}</span>
+        <span class="metric-sub">SHA-256 sealed in MinIO</span>
+      </div>
+
+      <div class="metric-card">
+        <span class="metric-label">Audit Log Entries</span>
+        <span class="metric-value">{{ stats()?.total_audit_entries ?? '—' }}</span>
+        <span class="metric-sub">
+          Status: <strong class="badge-status">{{ stats()?.last_audit_status || 'VERIFIED' }}</strong>
+        </span>
+      </div>
+    </div>
+
+    <!-- Infrastructure Status Bar -->
+    <div class="panel">
+      <div class="panel-header">
+        <h2 class="panel-title">Component Health Status</h2>
+        <span class="panel-badge" [class.badge-healthy]="health()?.overall_status === 'HEALTHY'">
+          {{ health()?.overall_status || 'CHECKING...' }}
+        </span>
+      </div>
+
+      <div class="health-grid" *ngIf="health() as h">
+        <div class="health-item" *ngFor="let item of h.components | keyvalue">
+          <div class="health-item-top">
+            <span class="health-name">{{ item.key | uppercase }}</span>
+            <span class="status-pill" [attr.data-status]="item.value.status === 'ok' ? 'active' : 'inactive'">
+              <span class="status-pill-dot"></span>
+              {{ item.value.status }}
+            </span>
+          </div>
+          <div class="health-details">{{ item.value.details }}</div>
+          <div class="health-latency" *ngIf="item.value.latency_ms !== undefined">
+            Latency: {{ item.value.latency_ms }}ms
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <div class="panel">
-    <div class="toolbar">
-      <div class="field field-grow">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="11" cy="11" r="8"></circle>
-          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-        </svg>
-        <input
-          type="text"
-          class="field-input"
-          placeholder="Search name or email…"
-          [value]="searchTerm()"
-          (input)="onSearchInput($any($event.target).value)"
-        />
-      </div>
-
-      <select
-        class="select select-sm"
-        [value]="roleFilter()"
-        (change)="onRoleFilterChange($any($event.target).value)"
-      >
-        <option value="">All roles</option>
-        <option *ngFor="let r of roles" [value]="r">{{ r }}</option>
-      </select>
-
-      <select
-        class="select select-sm"
-        [value]="statusFilter()"
-        (change)="onStatusFilterChange($any($event.target).value)"
-      >
-        <option value="">All statuses</option>
-        <option *ngFor="let s of statuses" [value]="s">{{ s }}</option>
-      </select>
-
-      <div class="toolbar-spacer"></div>
-
-      <span class="toolbar-count" *ngIf="result() as r">
-        {{ r.meta.total }} user{{ r.meta.total === 1 ? '' : 's' }}
-      </span>
+  <!-- ========================================================================= -->
+  <!-- TAB: User Management -->
+  <!-- ========================================================================= -->
+  <div *ngIf="activeTab() === 'users'" class="tab-pane">
+    <div *ngIf="rowActionError()" class="form-alert form-alert-error">
+      <span class="alert-mark" aria-hidden="true"></span>
+      {{ rowActionError() }}
     </div>
 
-    <!-- Loading -->
-    <div *ngIf="loading()" class="skeleton-stack" aria-busy="true">
-      <div class="skeleton-row admin-cols" *ngFor="let row of skeletonRows">
-        <span class="skeleton skeleton-line" style="width: 70%"></span>
-        <span class="skeleton skeleton-line" style="width: 86%"></span>
-        <span class="skeleton skeleton-line" style="width: 60%"></span>
-        <span class="skeleton skeleton-line" style="width: 52%"></span>
-        <span class="skeleton skeleton-line" style="width: 64%"></span>
-        <span class="skeleton skeleton-line" style="width: 78%"></span>
-      </div>
-    </div>
-
-    <!-- Error -->
-    <div *ngIf="!loading() && errorMessage()" class="state-block is-error">
-      <span class="state-icon">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-          <circle cx="12" cy="12" r="10"></circle>
-          <line x1="12" y1="8" x2="12" y2="12"></line>
-          <line x1="12" y1="16" x2="12.01" y2="16"></line>
-        </svg>
-      </span>
-      <span class="state-title">Could not load users</span>
-      <span class="state-text">{{ errorMessage() }}</span>
-    </div>
-
-    <!-- Empty -->
-    <div
-      *ngIf="!loading() && !errorMessage() && result()?.users?.length === 0"
-      class="state-block"
-    >
-      <span class="state-icon">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
-          <circle cx="9" cy="7" r="4"></circle>
-        </svg>
-      </span>
-      <span class="state-title">No users match</span>
-      <span class="state-text">Try clearing the search box or the role and status filters.</span>
-    </div>
-
-    <ng-container *ngIf="!loading() && !errorMessage() && result()?.users?.length">
-      <div class="data-head admin-cols">
-        <span>Name</span>
-        <span>Email</span>
-        <span>Role</span>
-        <span>Status</span>
-        <span>Created</span>
-        <span>Actions</span>
-      </div>
-
-      <div class="admin-table-body">
-        <div *ngFor="let u of result()?.users" class="data-row admin-cols is-static">
-          <span class="cell-strong">{{ displayName(u) }}</span>
-          <span class="cell-mono cell-muted user-email">{{ u.email }}</span>
-
-          <span>
-            <select
-              class="select select-sm role-select"
-              [value]="primaryRole(u)"
-              [disabled]="u.id === currentUserId || rowBusyId() === u.id"
-              (change)="onRoleSelect(u, $any($event.target).value)"
-              [title]="u.id === currentUserId ? 'You cannot change your own role' : 'Change role'"
-            >
-              <option *ngFor="let r of roles" [value]="r">{{ r }}</option>
-            </select>
-          </span>
-
-          <span>
-            <span class="status-pill" [attr.data-status]="u.status">
-              <span class="status-pill-dot" aria-hidden="true"></span>
-              {{ u.status }}
-            </span>
-          </span>
-
-          <span class="cell-muted">{{ u.created_at | date: 'mediumDate' }}</span>
-
-          <span class="row-actions">
-            <button
-              type="button"
-              class="action-link"
-              (click)="openResetPassword(u)"
-              [disabled]="rowBusyId() === u.id"
-            >
-              Reset password
-            </button>
-            <button
-              type="button"
-              class="action-link"
-              [class.action-link-danger]="u.status === 'active'"
-              [disabled]="u.id === currentUserId || rowBusyId() === u.id"
-              [title]="u.id === currentUserId ? 'You cannot change your own status' : ''"
-              (click)="toggleStatus(u)"
-            >
-              {{ u.status === 'active' ? 'Deactivate' : 'Activate' }}
-            </button>
-          </span>
+    <div class="panel">
+      <div class="toolbar">
+        <div class="field field-grow">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input
+            type="text"
+            class="field-input"
+            placeholder="Search name or email…"
+            [value]="searchTerm()"
+            (input)="onSearchInput($any($event.target).value)"
+          />
         </div>
-      </div>
 
-      <div class="pagination" *ngIf="result() as r">
-        <span class="pagination-count">
-          {{ r.meta.total }} user{{ r.meta.total === 1 ? '' : 's' }} · page {{ r.meta.page }} of
-          {{ r.meta.total_pages || 1 }}
+        <select
+          class="select select-sm"
+          [value]="roleFilter()"
+          (change)="onRoleFilterChange($any($event.target).value)"
+        >
+          <option value="">All roles</option>
+          <option *ngFor="let r of roles" [value]="r">{{ r }}</option>
+        </select>
+
+        <select
+          class="select select-sm"
+          [value]="statusFilter()"
+          (change)="onStatusFilterChange($any($event.target).value)"
+        >
+          <option value="">All statuses</option>
+          <option *ngFor="let s of statuses" [value]="s">{{ s }}</option>
+        </select>
+
+        <div class="toolbar-spacer"></div>
+
+        <span class="toolbar-count" *ngIf="result() as r">
+          {{ r.meta.total }} user{{ r.meta.total === 1 ? '' : 's' }}
         </span>
-        <div class="pagination-buttons">
-          <button
-            type="button"
-            class="btn-page"
-            [class.disabled]="r.meta.page <= 1"
-            [disabled]="r.meta.page <= 1"
-            (click)="goToPage(r.meta.page - 1)"
-          >
-            Previous
-          </button>
-          <button
-            type="button"
-            class="btn-page"
-            [class.disabled]="r.meta.page >= r.meta.total_pages"
-            [disabled]="r.meta.page >= r.meta.total_pages"
-            (click)="goToPage(r.meta.page + 1)"
-          >
-            Next
-          </button>
+      </div>
+
+      <!-- Loading -->
+      <div *ngIf="loading()" class="skeleton-stack" aria-busy="true">
+        <div class="skeleton-row admin-cols" *ngFor="let row of skeletonRows">
+          <span class="skeleton skeleton-line" style="width: 70%"></span>
+          <span class="skeleton skeleton-line" style="width: 86%"></span>
+          <span class="skeleton skeleton-line" style="width: 60%"></span>
+          <span class="skeleton skeleton-line" style="width: 52%"></span>
+          <span class="skeleton skeleton-line" style="width: 64%"></span>
+          <span class="skeleton skeleton-line" style="width: 78%"></span>
         </div>
       </div>
-    </ng-container>
+
+      <!-- Error -->
+      <div *ngIf="!loading() && errorMessage()" class="state-block is-error">
+        <span class="state-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+        </span>
+        <span class="state-title">Could not load users</span>
+        <span class="state-text">{{ errorMessage() }}</span>
+      </div>
+
+      <!-- Empty -->
+      <div
+        *ngIf="!loading() && !errorMessage() && result()?.users?.length === 0"
+        class="state-block"
+      >
+        <span class="state-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+          </svg>
+        </span>
+        <span class="state-title">No users match</span>
+        <span class="state-text">Try clearing the search box or the role and status filters.</span>
+      </div>
+
+      <ng-container *ngIf="!loading() && !errorMessage() && result()?.users?.length">
+        <div class="data-head admin-cols">
+          <span>Name</span>
+          <span>Email</span>
+          <span>Role</span>
+          <span>Status</span>
+          <span>Created</span>
+          <span>Actions</span>
+        </div>
+
+        <div class="admin-table-body">
+          <div *ngFor="let u of result()?.users" class="data-row admin-cols is-static">
+            <span class="cell-strong">{{ displayName(u) }}</span>
+            <span class="cell-mono cell-muted user-email">{{ u.email }}</span>
+
+            <span>
+              <select
+                class="select select-sm role-select"
+                [value]="primaryRole(u)"
+                [disabled]="u.id === currentUserId || rowBusyId() === u.id"
+                (change)="onRoleSelect(u, $any($event.target).value)"
+                [title]="u.id === currentUserId ? 'You cannot change your own role' : 'Change role'"
+              >
+                <option *ngFor="let r of roles" [value]="r">{{ r }}</option>
+              </select>
+            </span>
+
+            <span>
+              <span class="status-pill" [attr.data-status]="u.status">
+                <span class="status-pill-dot" aria-hidden="true"></span>
+                {{ u.status }}
+              </span>
+            </span>
+
+            <span class="cell-muted">{{ u.created_at | date: 'mediumDate' }}</span>
+
+            <span class="row-actions">
+              <button
+                type="button"
+                class="action-link"
+                (click)="openResetPassword(u)"
+                [disabled]="rowBusyId() === u.id"
+              >
+                Reset password
+              </button>
+              <button
+                type="button"
+                class="action-link"
+                [class.action-link-danger]="u.status === 'active'"
+                [disabled]="u.id === currentUserId || rowBusyId() === u.id"
+                [title]="u.id === currentUserId ? 'You cannot change your own status' : ''"
+                (click)="toggleStatus(u)"
+              >
+                {{ u.status === 'active' ? 'Deactivate' : 'Activate' }}
+              </button>
+            </span>
+          </div>
+        </div>
+
+        <div class="pagination" *ngIf="result() as r">
+          <span class="pagination-count">
+            {{ r.meta.total }} user{{ r.meta.total === 1 ? '' : 's' }} · page {{ r.meta.page }} of
+            {{ r.meta.total_pages || 1 }}
+          </span>
+          <div class="pagination-buttons">
+            <button
+              type="button"
+              class="btn-page"
+              [class.disabled]="r.meta.page <= 1"
+              [disabled]="r.meta.page <= 1"
+              (click)="goToPage(r.meta.page - 1)"
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              class="btn-page"
+              [class.disabled]="r.meta.page >= r.meta.total_pages"
+              [disabled]="r.meta.page >= r.meta.total_pages"
+              (click)="goToPage(r.meta.page + 1)"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      </ng-container>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- TAB: Infrastructure & Health -->
+  <!-- ========================================================================= -->
+  <div *ngIf="activeTab() === 'system'" class="tab-pane">
+    <div class="panel">
+      <div class="panel-header">
+        <h2 class="panel-title">Component Diagnostics</h2>
+        <button type="button" class="btn-subtle" (click)="fetchSystemHealth()">
+          Refresh
+        </button>
+      </div>
+
+      <div class="health-grid" *ngIf="health() as h">
+        <div class="health-item" *ngFor="let item of h.components | keyvalue">
+          <div class="health-item-top">
+            <span class="health-name">{{ item.key | uppercase }}</span>
+            <span class="status-pill" [attr.data-status]="item.value.status === 'ok' ? 'active' : 'inactive'">
+              <span class="status-pill-dot"></span>
+              {{ item.value.status }}
+            </span>
+          </div>
+          <div class="health-details">{{ item.value.details }}</div>
+          <div class="health-latency" *ngIf="item.value.latency_ms !== undefined">
+            Response latency: {{ item.value.latency_ms }}ms
+          </div>
+          <div class="health-extra" *ngIf="item.value.extra">
+            <div *ngFor="let ex of item.value.extra | keyvalue">
+              <span class="extra-key">{{ ex.key }}:</span> {{ ex.value }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Go Runtime Panel -->
+    <div class="panel" *ngIf="health()?.runtime as rt">
+      <div class="panel-header">
+        <h2 class="panel-title">Go Application Runtime</h2>
+      </div>
+      <div class="runtime-grid">
+        <div class="runtime-item">
+          <span class="runtime-label">Go Version</span>
+          <span class="runtime-val">{{ rt.go_version }}</span>
+        </div>
+        <div class="runtime-item">
+          <span class="runtime-label">Active Goroutines</span>
+          <span class="runtime-val">{{ rt.goroutines }}</span>
+        </div>
+        <div class="runtime-item">
+          <span class="runtime-label">Allocated Memory</span>
+          <span class="runtime-val">{{ rt.memory_alloc_mb | number:'1.2-2' }} MB</span>
+        </div>
+        <div class="runtime-item">
+          <span class="runtime-label">System Memory</span>
+          <span class="runtime-val">{{ rt.memory_sys_mb | number:'1.2-2' }} MB</span>
+        </div>
+        <div class="runtime-item">
+          <span class="runtime-label">CPU Cores</span>
+          <span class="runtime-val">{{ rt.num_cpu }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- TAB: Background Queues (Asynq) -->
+  <!-- ========================================================================= -->
+  <div *ngIf="activeTab() === 'jobs'" class="tab-pane">
+    <div class="panel">
+      <div class="panel-header">
+        <h2 class="panel-title">Asynq Task Queues</h2>
+        <button type="button" class="btn-subtle" (click)="fetchJobs()">
+          Refresh Queues
+        </button>
+      </div>
+
+      <div class="queues-container" *ngIf="jobs() as jb">
+        <div class="queue-card" *ngFor="let q of jb.queues">
+          <div class="queue-head">
+            <span class="queue-name">{{ q.queue | uppercase }} QUEUE</span>
+            <span class="status-pill" [attr.data-status]="q.paused ? 'inactive' : 'active'">
+              {{ q.paused ? 'PAUSED' : 'ACTIVE' }}
+            </span>
+          </div>
+
+          <div class="queue-stats-grid">
+            <div class="q-stat">
+              <span class="q-val">{{ q.size }}</span>
+              <span class="q-lbl">Queue Size</span>
+            </div>
+            <div class="q-stat">
+              <span class="q-val">{{ q.active }}</span>
+              <span class="q-lbl">Running</span>
+            </div>
+            <div class="q-stat">
+              <span class="q-val">{{ q.pending }}</span>
+              <span class="q-lbl">Pending</span>
+            </div>
+            <div class="q-stat">
+              <span class="q-val">{{ q.retry }}</span>
+              <span class="q-lbl">Retrying</span>
+            </div>
+            <div class="q-stat">
+              <span class="q-val">{{ q.completed }}</span>
+              <span class="q-lbl">Completed</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- TAB: Blockchain Ledger -->
+  <!-- ========================================================================= -->
+  <div *ngIf="activeTab() === 'blockchain'" class="tab-pane">
+    <div class="panel">
+      <div class="panel-header">
+        <h2 class="panel-title">Hyperledger Fabric Provenance Anchor Status</h2>
+        <button type="button" class="btn-subtle" (click)="fetchBlockchain()">
+          Refresh Ledger
+        </button>
+      </div>
+
+      <div class="blockchain-details" *ngIf="blockchain() as bc">
+        <div class="bc-status-banner" [class.is-connected]="bc.status === 'CONNECTED'">
+          <span class="bc-status-title">Network Status: {{ bc.status }}</span>
+          <span class="bc-status-desc">
+            {{ bc.enabled ? 'Hyperledger Fabric integration active and verifying evidence anchors.' : 'Fabric integration disabled (FABRIC_ENABLED=false). Evidence verification uses cryptographic SHA-256 and PostgreSQL audit chain.' }}
+          </span>
+        </div>
+
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <span class="metric-label">Total Anchors</span>
+            <span class="metric-value">{{ bc.total_anchors }}</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Confirmed Anchors</span>
+            <span class="metric-value text-success">{{ bc.confirmed_anchors }}</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Pending Anchors</span>
+            <span class="metric-value text-warn">{{ bc.pending_anchors }}</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Failed Anchors</span>
+            <span class="metric-value text-danger">{{ bc.failed_anchors }}</span>
+          </div>
+        </div>
+
+        <div class="bc-metadata-panel" *ngIf="bc.enabled">
+          <div class="bc-meta-row">
+            <span class="bc-meta-k">Channel:</span>
+            <span class="bc-meta-v">{{ bc.channel || '—' }}</span>
+          </div>
+          <div class="bc-meta-row">
+            <span class="bc-meta-k">Chaincode:</span>
+            <span class="bc-meta-v">{{ bc.chaincode || '—' }}</span>
+          </div>
+          <div class="bc-meta-row">
+            <span class="bc-meta-k">MSP ID:</span>
+            <span class="bc-meta-v">{{ bc.msp_id || '—' }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- TAB: Management Tools (Adminer & MinIO) -->
+  <!-- ========================================================================= -->
+  <div *ngIf="activeTab() === 'tools'" class="tab-pane">
+    <div class="tools-grid">
+      <!-- Adminer Card -->
+      <div class="tool-card">
+        <div class="tool-head">
+          <div class="tool-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+              <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+              <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+            </svg>
+          </div>
+          <div class="tool-titles">
+            <h3 class="tool-name">Adminer — Database Management</h3>
+            <span class="tool-badge">PostgreSQL 15</span>
+          </div>
+        </div>
+
+        <p class="tool-desc">
+          Inspect relational schemas, row-level security (RLS) policies, table constraints, and audit-chain rows directly. Bound to local loopback (127.0.0.1:8088).
+        </p>
+
+        <div class="tool-creds-box">
+          <div class="cred-line"><strong>Host / System:</strong> <code>postgres</code> (inside container) or <code>127.0.0.1:5432</code></div>
+          <div class="cred-line"><strong>DBA Superuser:</strong> <code>evidentia</code> (inspects schema and full tables)</div>
+          <div class="cred-line"><strong>App User (RLS):</strong> <code>evidentia_app</code> (NOBYPASSRLS enforced)</div>
+          <div class="cred-line"><strong>Database:</strong> <code>evidentia</code></div>
+        </div>
+
+        <div class="tool-actions">
+          <a
+            href="http://localhost:8088"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="btn-primary"
+          >
+            Launch Adminer
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+              <polyline points="15 3 21 3 21 9"></polyline>
+              <line x1="10" y1="14" x2="21" y2="3"></line>
+            </svg>
+          </a>
+        </div>
+      </div>
+
+      <!-- MinIO Card -->
+      <div class="tool-card">
+        <div class="tool-head">
+          <div class="tool-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+              <line x1="12" y1="22.08" x2="12" y2="12"></line>
+            </svg>
+          </div>
+          <div class="tool-titles">
+            <h3 class="tool-name">MinIO Object Storage Console</h3>
+            <span class="tool-badge">S3-Compatible</span>
+          </div>
+        </div>
+
+        <p class="tool-desc">
+          Manage evidence buckets, storage encryption policies, access keys, and disk utilization for sealed digital files.
+        </p>
+
+        <div class="tool-creds-box">
+          <div class="cred-line"><strong>Console Endpoint:</strong> <code>http://127.0.0.1:9001</code></div>
+          <div class="cred-line"><strong>API Endpoint:</strong> <code>http://127.0.0.1:9000</code></div>
+          <div class="cred-line"><strong>Evidence Bucket:</strong> <code>evidentia-documents</code></div>
+        </div>
+
+        <div class="tool-actions">
+          <a
+            href="http://localhost:9001"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="btn-primary"
+          >
+            Launch MinIO Console
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+              <polyline points="15 3 21 3 21 9"></polyline>
+              <line x1="10" y1="14" x2="21" y2="3"></line>
+            </svg>
+          </a>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 

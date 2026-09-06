@@ -623,3 +623,76 @@ export interface DocumentRedactionEventData {
   result_document_id: string;
   case_id: string;
 }
+
+// ---- Administration & Infrastructure Hub (System 21) ----
+
+export interface AdminDashboardStats {
+  total_users: number;
+  active_users: number;
+  total_cases: number;
+  active_cases: number;
+  total_documents: number;
+  total_audit_entries: number;
+  chain_head_seq?: number;
+  chain_head_hash?: string;
+  last_audit_status?: string;
+  blockchain_enabled: boolean;
+  total_anchors: number;
+  pending_anchors: number;
+  confirmed_anchors: number;
+  failed_anchors: number;
+  timestamp: string;
+}
+
+export interface AdminComponentHealth {
+  status: 'ok' | 'degraded' | 'error' | 'disabled';
+  details?: string;
+  latency_ms?: number;
+  extra?: Record<string, unknown>;
+}
+
+export interface AdminRuntimeInfo {
+  go_version: string;
+  goroutines: number;
+  memory_alloc_mb: number;
+  memory_sys_mb: number;
+  num_cpu: number;
+}
+
+export interface AdminSystemHealth {
+  overall_status: 'HEALTHY' | 'DEGRADED';
+  timestamp: string;
+  components: Record<string, AdminComponentHealth>;
+  runtime: AdminRuntimeInfo;
+}
+
+export interface AdminQueueInfo {
+  queue: string;
+  size: number;
+  active: number;
+  pending: number;
+  scheduled: number;
+  retry: number;
+  archived: number;
+  completed: number;
+  paused: boolean;
+}
+
+export interface AdminJobsSummary {
+  queues: AdminQueueInfo[];
+  timestamp: string;
+}
+
+export interface AdminBlockchainInfo {
+  enabled: boolean;
+  status: 'CONNECTED' | 'DISABLED' | 'UNAVAILABLE';
+  channel?: string;
+  chaincode?: string;
+  msp_id?: string;
+  total_anchors: number;
+  pending_anchors: number;
+  confirmed_anchors: number;
+  failed_anchors: number;
+  timestamp: string;
+}
+

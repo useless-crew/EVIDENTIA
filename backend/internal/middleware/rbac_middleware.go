@@ -64,3 +64,24 @@ func RequirePermission(authorizer Authorizer, action authz.Action) gin.HandlerFu
 		c.Next()
 	}
 }
+
+// RequireAdmin ensures the authenticated caller holds the ADMIN role.
+// Fails closed with 403 Forbidden for any non-admin caller.
+func RequireAdmin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		user, ok := authpkg.CurrentUser(c)
+		if !ok {
+			response.Error(c, http.StatusUnauthorized, utils.CodeUnauthorized, genericUnauthorizedMessage)
+			c.Abort()
+			return
+		}
+
+		if !authz.IsAdmin(user) {
+			response.Error(c, http.StatusForbidden, utils.CodeForbidden, genericForbiddenMessage)
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+

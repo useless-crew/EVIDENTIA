@@ -39,7 +39,8 @@ import (
 // asynq directly, mirroring internal/cache.Cache's identical rationale for
 // go-redis.
 type Client struct {
-	c *asynq.Client
+	c        *asynq.Client
+	redisOpt asynq.RedisConnOpt
 }
 
 // NewClient builds a Client against the same Redis connection parameters
@@ -48,10 +49,23 @@ type Client struct {
 // pooled go-redis client itself, since it manages its own connection pool
 // internally).
 func NewClient(redisOpt asynq.RedisConnOpt) *Client {
-	return &Client{c: asynq.NewClient(redisOpt)}
+	return &Client{
+		c:        asynq.NewClient(redisOpt),
+		redisOpt: redisOpt,
+	}
+}
+
+// Inspector returns a new asynq.Inspector connected to the same Redis instance
+// as Client, used for administrative queue/task inspection.
+func (c *Client) Inspector() *asynq.Inspector {
+	if c == nil || c.redisOpt == nil {
+		return nil
+	}
+	return asynq.NewInspector(c.redisOpt)
 }
 
 // Close releases the client's Redis connections. Safe to call once during
+
 // graceful shutdown (see internal/app.App.Close) — and safe to call on a
 // nil *Client (a no-op), matching the same tolerant-partial-construction
 // convention internal/app's own tests already rely on for other optional

@@ -11,6 +11,7 @@ import (
 	"evidentia/backend/internal/app"
 	"evidentia/backend/internal/authz"
 	audithandlers "evidentia/backend/internal/handlers/audit"
+	adminhandlers "evidentia/backend/internal/handlers/admin"
 	authhandlers "evidentia/backend/internal/handlers/auth"
 	casehandlers "evidentia/backend/internal/handlers/case"
 	documenthandlers "evidentia/backend/internal/handlers/document"
@@ -198,6 +199,14 @@ func NewRouter(a *app.App) *gin.Engine {
 	adminGroup.PUT("/users/:id/status", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionUserDeactivate), userhandlers.UpdateStatus(a.UserService))
 	adminGroup.PUT("/users/:id/password", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionUserUpdate), userhandlers.ResetPassword(a.UserService))
 	adminGroup.GET("/roles", authMW, userhandlers.ListRoles(a.UserService))
+
+	// Administration & Infrastructure monitoring (System 21)
+	// Strictly restricted to ADMIN role.
+	adminGroup.GET("/dashboard/stats", authMW, middleware.RequireAdmin(), adminhandlers.Stats(a.DB.Pool(), a.AuditService, a.BlockchainAnchorService))
+	adminGroup.GET("/system/health", authMW, middleware.RequireAdmin(), adminhandlers.SystemHealth(a.DB, a.Cache, a.Storage, a.BlockchainService))
+	adminGroup.GET("/jobs", authMW, middleware.RequireAdmin(), adminhandlers.Jobs(a.JobClient))
+	adminGroup.GET("/blockchain", authMW, middleware.RequireAdmin(), adminhandlers.Blockchain(a.DB.Pool(), a.BlockchainAnchorService))
+
 
 	// Self-profile: any authenticated user, regardless of role, may view
 	// their own record — see handlers/user/profile.go's doc comment for

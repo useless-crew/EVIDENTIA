@@ -211,6 +211,28 @@ func NewBlockchainAnchorService(
 	}
 }
 
+
+// BlockchainService returns the underlying blockchain.Service.
+func (s *BlockchainAnchorService) BlockchainService() blockchain.Service {
+	return s.blockchain
+}
+
+// Channel returns the configured Fabric channel.
+func (s *BlockchainAnchorService) Channel() string {
+	return s.channel
+}
+
+// Chaincode returns the configured Fabric chaincode name.
+func (s *BlockchainAnchorService) Chaincode() string {
+	return s.chaincode
+}
+
+// MSPID returns the configured local MSP ID.
+func (s *BlockchainAnchorService) MSPID() string {
+	return s.mspID
+}
+
+
 // CreateAnchorForDocument creates a PENDING blockchain_anchors record and
 // enqueues an Asynq task to submit it to the Fabric ledger. Called by
 // DocumentService after a successful document upload.

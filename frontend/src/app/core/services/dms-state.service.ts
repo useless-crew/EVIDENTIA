@@ -163,7 +163,7 @@ export class DmsStateService {
       redact: 'Home / Cases / Case Detail / Document / Redact',
       audit: 'Home / Audit Log',
       access: 'Home / Access Policy Preview',
-      admin: 'Home / Administration / Users',
+      admin: 'Home / Administration / Management Hub',
       shared: 'Home / Shared With Me'
     };
     return map[s] || 'Home';
@@ -177,7 +177,7 @@ export class DmsStateService {
       Judge: ['Dashboard', 'Cases', 'Shared With Me', 'Audit Log'],
       Lawyer: ['Dashboard', 'Cases', 'Shared With Me'],
       Forensics: ['Dashboard', 'Cases', 'Shared With Me', 'Upload Document'],
-      Admin: ['Dashboard', 'Cases', 'Shared With Me', 'Upload Document', 'Audit Log', 'User Management']
+      Admin: ['Dashboard', 'Cases', 'Shared With Me', 'Upload Document', 'Audit Log', 'Administration']
     };
     const list = map[r] || map.Police;
 
@@ -187,6 +187,7 @@ export class DmsStateService {
       'Shared With Me': 'shared',
       'Upload Document': 'upload',
       'Audit Log': 'audit',
+      'Administration': 'admin',
       'User Management': 'admin'
     };
 
@@ -196,6 +197,7 @@ export class DmsStateService {
       'Shared With Me': 'share',
       'Upload Document': 'upload',
       'Audit Log': 'shield',
+      'Administration': 'settings',
       'User Management': 'users'
     };
 

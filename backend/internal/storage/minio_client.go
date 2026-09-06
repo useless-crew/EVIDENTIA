@@ -103,6 +103,12 @@ func (m *MinIOStorage) HealthCheck(ctx context.Context) error {
 	return nil
 }
 
+// Bucket returns the configured bucket name.
+func (m *MinIOStorage) Bucket() string {
+	return m.bucket
+}
+
+
 func isNoSuchKey(err error) bool {
 	resp := minio.ToErrorResponse(err)
 	return resp.Code == "NoSuchKey"

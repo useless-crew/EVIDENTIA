@@ -19,9 +19,15 @@ func hasRole(u auth.AuthenticatedUser, role string) bool {
 	return false
 }
 
-func isAdmin(u auth.AuthenticatedUser) bool {
+// IsAdmin reports whether u holds the ADMIN role.
+func IsAdmin(u auth.AuthenticatedUser) bool {
 	return hasRole(u, models.RoleAdmin)
 }
+
+func isAdmin(u auth.AuthenticatedUser) bool {
+	return IsAdmin(u)
+}
+
 
 // effectiveRole picks the single role name recorded on a PostgreSQL RLS
 // transaction (app.role) for a multi-role user. RLS's own policies
