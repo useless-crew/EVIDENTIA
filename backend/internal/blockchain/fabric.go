@@ -103,14 +103,14 @@ func New(ctx context.Context, cfg config.FabricConfig, log *slog.Logger) (*Fabri
 // GetEvidence, GetEvidenceLatest, and GetEvidenceHistory. Field names must
 // match chaincode/evidentia/chaincode.go exactly.
 type chaincodeRecord struct {
-	EvidenceID    string `json:"evidence_id"`
-	Version       int32  `json:"version"`
-	EventType     string `json:"event_type"`
-	Hash          string `json:"hash"`
-	ActorOrg      string `json:"actor_org"`
-	AnchoredAt    string `json:"anchored_at"`
-	TxID          string `json:"tx_id"`
-	AppRecordID   string `json:"app_record_id"`
+	EvidenceID  string `json:"evidence_id"`
+	Version     int32  `json:"version"`
+	EventType   string `json:"event_type"`
+	Hash        string `json:"hash"`
+	ActorOrg    string `json:"actor_org"`
+	AnchoredAt  string `json:"anchored_at"`
+	TxID        string `json:"tx_id"`
+	AppRecordID string `json:"app_record_id"`
 }
 
 func (s *FabricService) AnchorEvidence(ctx context.Context, req AnchorRequest) (AnchorResult, error) {

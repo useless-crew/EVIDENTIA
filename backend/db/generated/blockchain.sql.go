@@ -33,13 +33,13 @@ RETURNING
 `
 
 type CreateBlockchainAnchorParams struct {
-	DocumentID      uuid.UUID       `json:"document_id"`
-	DocumentVersion int32           `json:"document_version"`
-	EventType       string          `json:"event_type"`
-	DocumentHash    []byte          `json:"document_hash"`
-	FabricChannel   *string         `json:"fabric_channel"`
-	FabricChaincode *string         `json:"fabric_chaincode"`
-	Organization    *string         `json:"organization"`
+	DocumentID      uuid.UUID `json:"document_id"`
+	DocumentVersion int32     `json:"document_version"`
+	EventType       string    `json:"event_type"`
+	DocumentHash    []byte    `json:"document_hash"`
+	FabricChannel   *string   `json:"fabric_channel"`
+	FabricChaincode *string   `json:"fabric_chaincode"`
+	Organization    *string   `json:"organization"`
 }
 
 // Creates a PENDING anchor record immediately after a document event

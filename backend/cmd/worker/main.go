@@ -52,9 +52,19 @@ func main() {
 
 func run(ctx context.Context, a *app.App) {
 	redisOpt := asynq.RedisClientOpt{Addr: a.Config.Redis.Addr, Password: a.Config.Redis.Password, DB: a.Config.Redis.DB}
-	errorHandler := jobs.NewAuditVerificationErrorHandler(a.AuditService, a.Logger)
+
+	// Chain both error handlers — each checks task.Type() before acting, so
+	// exactly one fires per task type, mirroring cmd/server/main.go.
+	auditErrHandler := jobs.NewAuditVerificationErrorHandler(a.AuditService, a.Logger)
+	blockchainErrHandler := jobs.NewBlockchainAnchorErrorHandler(a.BlockchainAnchorService)
+	errorHandler := asynq.ErrorHandlerFunc(func(ctx context.Context, task *asynq.Task, err error) {
+		auditErrHandler.HandleError(ctx, task, err)
+		blockchainErrHandler.HandleError(ctx, task, err)
+	})
+
 	worker := jobs.NewServer(redisOpt, errorHandler, a.Logger)
-	mux := jobs.NewMux(a.Logger, jobs.NewAuditVerificationHandler(a.AuditService))
+	blockchainHandler := jobs.NewBlockchainAnchorHandler(a.BlockchainAnchorService)
+	mux := jobs.NewMux(a.Logger, jobs.NewAuditVerificationHandler(a.AuditService), blockchainHandler)
 
 	a.Logger.Info("starting standalone background worker",
 		slog.String("env", a.Config.App.Env),
@@ -71,13 +81,13 @@ func run(ctx context.Context, a *app.App) {
 		a.Logger.Info("shutdown signal received")
 	case err := <-workerErr:
 		if err != nil {
-			a.Logger.Error("audit verification worker failed", slog.String("error", err.Error()))
+			a.Logger.Error("background worker failed", slog.String("error", err.Error()))
 		}
 	}
 
 	// Same graceful-drain behavior as cmd/server's embedded worker: an
-	// in-flight verification reaches its own next batch checkpoint rather
-	// than being killed mid-batch.
+	// in-flight task reaches its own next checkpoint rather than being
+	// killed mid-flight.
 	worker.Shutdown()
 	a.Logger.Info("worker stopped")
 }

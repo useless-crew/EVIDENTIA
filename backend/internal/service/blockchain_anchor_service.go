@@ -42,9 +42,9 @@ var blockchainWorkerIdentity = repository.AppIdentity{
 // BlockchainEventTypes is the closed vocabulary of event_type values written
 // to blockchain_anchors, matching the database constraint.
 const (
-	BlockchainEventDocumentUploaded   = "DOCUMENT_UPLOADED"
-	BlockchainEventDocumentRedacted   = "DOCUMENT_REDACTED"
-	BlockchainEventCertificateIssued  = "CERTIFICATE_ISSUED"
+	BlockchainEventDocumentUploaded  = "DOCUMENT_UPLOADED"
+	BlockchainEventDocumentRedacted  = "DOCUMENT_REDACTED"
+	BlockchainEventCertificateIssued = "CERTIFICATE_ISSUED"
 )
 
 // BlockchainAnchorStatus mirrors blockchain_anchors.status values.
@@ -59,11 +59,11 @@ const (
 // These values are distinct (master prompt §15/§16) — BLOCKCHAIN_UNAVAILABLE
 // must never collapse to TAMPERED.
 const (
-	BlockchainVerifyStatusVerified       = "VERIFIED"
-	BlockchainVerifyStatusHashMismatch   = "HASH_MISMATCH"
-	BlockchainVerifyStatusChainMismatch  = "BLOCKCHAIN_MISMATCH"
-	BlockchainVerifyStatusUnavailable    = "BLOCKCHAIN_UNAVAILABLE"
-	BlockchainVerifyStatusNotAnchored    = "BLOCKCHAIN_NOT_ANCHORED"
+	BlockchainVerifyStatusVerified      = "VERIFIED"
+	BlockchainVerifyStatusHashMismatch  = "HASH_MISMATCH"
+	BlockchainVerifyStatusChainMismatch = "BLOCKCHAIN_MISMATCH"
+	BlockchainVerifyStatusUnavailable   = "BLOCKCHAIN_UNAVAILABLE"
+	BlockchainVerifyStatusNotAnchored   = "BLOCKCHAIN_NOT_ANCHORED"
 )
 
 // BlockchainAnchorSummary is the safe, API-friendly shape of a
@@ -114,15 +114,17 @@ type BlockchainVerifyResult struct {
 // verification APIs.
 //
 // Separation from DocumentService:
-//   DocumentService owns the document lifecycle and calls
-//   BlockchainAnchorService.CreateAnchor after a successful upload — this
-//   service never touches MinIO or the documents table directly.
+//
+//	DocumentService owns the document lifecycle and calls
+//	BlockchainAnchorService.CreateAnchor after a successful upload — this
+//	service never touches MinIO or the documents table directly.
 //
 // Failure policy:
-//   Blockchain failures NEVER fail the primary document operation. A
-//   PENDING anchor record is always created, and failures are reported
-//   asynchronously. The caller (DocumentService) treats a blockchain anchor
-//   enqueue failure as a loggable warning, not a user-facing error.
+//
+//	Blockchain failures NEVER fail the primary document operation. A
+//	PENDING anchor record is always created, and failures are reported
+//	asynchronously. The caller (DocumentService) treats a blockchain anchor
+//	enqueue failure as a loggable warning, not a user-facing error.
 type BlockchainAnchorService struct {
 	pool       *pgxpool.Pool
 	authz      *authz.Service
@@ -221,9 +223,9 @@ func (s *BlockchainAnchorService) CreateAnchorForDocument(
 		Role:         effectiveCaseRole(user),
 		CaseID:       &caseID,
 		Metadata: map[string]any{
-			"document_id":  documentID.String(),
-			"anchor_id":    anchor.ID.String(),
-			"event_type":   eventType,
+			"document_id":   documentID.String(),
+			"anchor_id":     anchor.ID.String(),
+			"event_type":    eventType,
 			"document_hash": hex.EncodeToString(sha256Hash),
 		},
 	})
@@ -344,8 +346,8 @@ func (s *BlockchainAnchorService) RunAnchor(ctx context.Context, anchorID uuid.U
 		Role:         models.RoleAdmin,
 		CaseID:       &caseID,
 		Metadata: map[string]any{
-			"anchor_id":  anchorID.String(),
-			"tx_id":      result.TransactionID,
+			"anchor_id":   anchorID.String(),
+			"tx_id":       result.TransactionID,
 			"document_id": anchor.DocumentID.String(),
 		},
 	})
