@@ -67,7 +67,8 @@ ON CONFLICT ON CONSTRAINT role_permissions_role_permission_unique DO NOTHING;
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r JOIN permissions p ON p.name IN (
     'case:create', 'case:read', 'case:update',
-    'document:upload', 'document:read', 'document:download', 'document:verify', 'document:share',
+    'document:upload', 'document:read', 'document:download', 'document:verify', 'document:share', 'document:redact',
+    'certificate:read', 'certificate:create',
     'audit:read'
 ) WHERE r.name = 'POLICE'
 ON CONFLICT ON CONSTRAINT role_permissions_role_permission_unique DO NOTHING;
@@ -75,14 +76,17 @@ ON CONFLICT ON CONSTRAINT role_permissions_role_permission_unique DO NOTHING;
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r JOIN permissions p ON p.name IN (
     'case:read',
-    'document:upload', 'document:read', 'document:download', 'document:verify'
+    'document:upload', 'document:read', 'document:download', 'document:verify', 'document:share',
+    'certificate:read', 'certificate:create',
+    'audit:read'
 ) WHERE r.name = 'FORENSICS'
 ON CONFLICT ON CONSTRAINT role_permissions_role_permission_unique DO NOTHING;
 
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r JOIN permissions p ON p.name IN (
     'case:read',
-    'document:read', 'document:download', 'document:share',
+    'document:read', 'document:download', 'document:share', 'document:verify',
+    'certificate:read',
     'audit:read'
 ) WHERE r.name = 'LAWYER'
 ON CONFLICT ON CONSTRAINT role_permissions_role_permission_unique DO NOTHING;

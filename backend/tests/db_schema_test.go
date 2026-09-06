@@ -16,7 +16,7 @@ var expectedTables = []string{
 	"users", "roles", "permissions", "user_roles", "role_permissions",
 	"cases", "case_members", "case_involved_parties",
 	"documents", "redactions", "audit_log", "compliance_certificates",
-	"document_shares", "audit_verifications",
+	"document_shares", "audit_verifications", "blockchain_anchors",
 }
 
 func TestSchema_AllCoreTablesExist(t *testing.T) {
@@ -61,6 +61,7 @@ func TestSchema_ForeignKeysExist(t *testing.T) {
 		{"document_shares", "created_by_user_id", "users"},
 		{"document_shares", "revoked_by_user_id", "users"},
 		{"audit_verifications", "requested_by_user_id", "users"},
+		{"blockchain_anchors", "document_id", "documents"},
 	}
 
 	for _, c := range cases {
