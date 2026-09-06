@@ -18,6 +18,81 @@
     minmax(150px, 1fr);
 }
 
+.shared-cols {
+  grid-template-columns:
+    minmax(200px, 2fr)
+    minmax(140px, 1fr)
+    minmax(120px, 0.8fr)
+    minmax(160px, 1.2fr);
+}
+
+.registry-tabs {
+  display: flex;
+  align-items: center;
+  background: var(--color-neutral-bg, #f1f3f5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-sm, 6px);
+  padding: 3px;
+  gap: 3px;
+}
+
+.registry-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 5px 12px;
+  font-family: var(--font-sans, inherit);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--dur-fast, 0.15s) ease;
+}
+
+.registry-tab-btn:hover {
+  color: var(--color-navy-primary);
+}
+
+.registry-tab-btn.active {
+  background: #ffffff;
+  color: var(--color-navy-primary);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--color-text-secondary);
+}
+
+.registry-tab-btn.active .tab-badge {
+  background: var(--color-accent-blue-light, #e7f0fb);
+  color: var(--color-navy-primary);
+}
+
+.empty-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3, 12px);
+  margin-top: var(--sp-2, 8px);
+}
+
+.toolbar-label {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
 .case-title-text {
   min-width: 0;
   overflow: hidden;
@@ -50,12 +125,15 @@
    Responsive — drop to a stacked card layout rather than a squeezed grid
    ========================================================================== */
 @media (max-width: 860px) {
-  .data-head.cases-cols {
+  .data-head.cases-cols,
+  .data-head.shared-cols {
     display: none;
   }
 
   .data-row.cases-cols,
-  .skeleton-row.cases-cols {
+  .skeleton-row.cases-cols,
+  .data-row.shared-cols,
+  .skeleton-row.shared-cols {
     grid-template-columns: minmax(0, 1fr);
     gap: 7px;
     padding-block: var(--sp-4);

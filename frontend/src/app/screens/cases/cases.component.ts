@@ -3,8 +3,9 @@ import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { DmsStateService } from '../../core/services/dms-state.service';
 import { CaseService } from '../../core/services/case.service';
+import { ShareService } from '../../core/services/share.service';
 import { ApiError } from '../../core/services/api-client.service';
-import { CaseDetail, CaseListResult, CaseStatus, CaseSummary } from '../../core/models/api.models';
+import { CaseDetail, CaseListResult, CaseStatus, CaseSummary, SharedWithMeResult } from '../../core/models/api.models';
 import { CreateCaseModalComponent } from '../../components/create-case-modal/create-case-modal.component';
 import { RevealDirective } from '../../core/directives/reveal.directive';
 
@@ -20,7 +21,10 @@ const PAGE_SIZE = 20;
 export class CasesComponent implements OnInit {
   dms = inject(DmsStateService);
   private readonly caseService = inject(CaseService);
+  private readonly shareService = inject(ShareService);
   private readonly router = inject(Router);
+
+  readonly activeTab = signal<'cases' | 'shared'>('cases');
 
   readonly loading = signal(true);
   readonly errorMessage = signal<string | null>(null);
@@ -30,6 +34,11 @@ export class CasesComponent implements OnInit {
   readonly statusFilter = signal<CaseStatus | ''>('');
   readonly createOpen = signal(false);
 
+  readonly sharedLoading = signal(false);
+  readonly sharedError = signal<string | null>(null);
+  readonly sharedResult = signal<SharedWithMeResult | null>(null);
+  readonly sharedPage = signal(1);
+
   readonly statuses: CaseStatus[] = ['OPEN', 'UNDER_INVESTIGATION', 'SUBMITTED', 'UNDER_REVIEW', 'CLOSED', 'ARCHIVED'];
 
   /** Placeholder rows rendered while the registry loads. */
@@ -37,6 +46,7 @@ export class CasesComponent implements OnInit {
 
   ngOnInit() {
     this.fetch();
+    this.fetchShared();
   }
 
   fetch() {
@@ -106,5 +116,42 @@ export class CasesComponent implements OnInit {
 
   formatStatus(status: string): string {
     return status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
+  setTab(tab: 'cases' | 'shared') {
+    this.activeTab.set(tab);
+    if (tab === 'shared') {
+      this.fetchShared();
+    }
+  }
+
+  fetchShared() {
+    this.sharedLoading.set(true);
+    this.sharedError.set(null);
+    this.shareService.sharedWithMe(this.sharedPage(), PAGE_SIZE).subscribe({
+      next: (res) => {
+        this.sharedResult.set(res);
+        this.sharedLoading.set(false);
+      },
+      error: (err: ApiError) => {
+        this.sharedError.set(err.message);
+        this.sharedLoading.set(false);
+      }
+    });
+  }
+
+  goToSharedPage(p: number) {
+    const meta = this.sharedResult()?.meta;
+    if (!meta || p < 1 || p > meta.total_pages) return;
+    this.sharedPage.set(p);
+    this.fetchShared();
+  }
+
+  openSharedDocument(caseId: string, documentId: string) {
+    this.router.navigate(['/app/cases', caseId, 'documents', documentId]);
+  }
+
+  formatDocType(type: string): string {
+    return type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   }
 }

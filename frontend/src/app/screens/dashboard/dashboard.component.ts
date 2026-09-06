@@ -44,6 +44,10 @@ export class DashboardComponent {
     this.dms.navigateTo('cases');
   }
 
+  goToShared() {
+    this.dms.navigateTo('shared');
+  }
+
   goToAudit() {
     this.dms.navigateTo('audit');
   }

@@ -6,7 +6,7 @@ import { DocumentService } from './document.service';
 import { DocumentType, Role as BackendRole } from '../models/api.models';
 
 export type Role = 'Police' | 'Judge' | 'Lawyer' | 'Forensics' | 'Admin';
-export type Screen = 'landing' | 'login' | 'dash' | 'cases' | 'case' | 'doc' | 'audit' | 'redact' | 'access' | 'admin';
+export type Screen = 'landing' | 'login' | 'dash' | 'cases' | 'case' | 'doc' | 'audit' | 'redact' | 'access' | 'admin' | 'shared';
 
 export interface NavItem {
   label: string;
@@ -81,6 +81,7 @@ export class DmsStateService {
     audit: '/app/audit',
     access: '/app/access-preview',
     admin: '/app/admin',
+    shared: '/app/shared',
   };
 
   constructor() {
@@ -99,6 +100,7 @@ export class DmsStateService {
     if (segs[0] === 'audit') return 'audit';
     if (segs[0] === 'admin') return 'admin';
     if (segs[0] === 'access-preview') return 'access';
+    if (segs[0] === 'shared') return 'shared';
     if (segs[0] === 'cases') {
       if (segs.length <= 1) return 'cases';
       if (segs.length >= 5 && segs[4] === 'redact') return 'redact';
@@ -109,7 +111,7 @@ export class DmsStateService {
   }
 
   /** Navigates for the screens that need no dynamic ID (dashboard, cases
-   * list, audit, admin, access-preview, login, landing). Case/document
+   * list, audit, admin, access-preview, login, landing, shared). Case/document
    * detail navigation happens directly via Router in the component that
    * already has the real ID (CasesComponent.openCase,
    * CaseDetailComponent.openDoc, etc.) — see those files. */
@@ -161,7 +163,8 @@ export class DmsStateService {
       redact: 'Home / Cases / Case Detail / Document / Redact',
       audit: 'Home / Audit Log',
       access: 'Home / Access Policy Preview',
-      admin: 'Home / Administration / Users'
+      admin: 'Home / Administration / Users',
+      shared: 'Home / Shared With Me'
     };
     return map[s] || 'Home';
   });
@@ -170,17 +173,18 @@ export class DmsStateService {
   readonly navItems = computed<NavItem[]>(() => {
     const r = this.role();
     const map: Record<Role, string[]> = {
-      Police: ['Dashboard', 'Cases', 'Upload Document', 'Audit Log'],
-      Judge: ['Dashboard', 'Cases', 'Audit Log'],
-      Lawyer: ['Dashboard', 'Cases'],
-      Forensics: ['Dashboard', 'Cases', 'Upload Document'],
-      Admin: ['Dashboard', 'Cases', 'Upload Document', 'Audit Log', 'User Management']
+      Police: ['Dashboard', 'Cases', 'Shared With Me', 'Upload Document', 'Audit Log'],
+      Judge: ['Dashboard', 'Cases', 'Shared With Me', 'Audit Log'],
+      Lawyer: ['Dashboard', 'Cases', 'Shared With Me'],
+      Forensics: ['Dashboard', 'Cases', 'Shared With Me', 'Upload Document'],
+      Admin: ['Dashboard', 'Cases', 'Shared With Me', 'Upload Document', 'Audit Log', 'User Management']
     };
     const list = map[r] || map.Police;
 
     const screenTargetMap: Record<string, Screen | 'upload'> = {
       'Dashboard': 'dash',
       'Cases': 'cases',
+      'Shared With Me': 'shared',
       'Upload Document': 'upload',
       'Audit Log': 'audit',
       'User Management': 'admin'
@@ -189,6 +193,7 @@ export class DmsStateService {
     const iconMap: Record<string, string> = {
       'Dashboard': 'dashboard',
       'Cases': 'folder',
+      'Shared With Me': 'share',
       'Upload Document': 'upload',
       'Audit Log': 'shield',
       'User Management': 'users'
