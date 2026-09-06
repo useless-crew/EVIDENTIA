@@ -135,3 +135,30 @@ func TestSniffContentType_UsesRealHTTPDetection(t *testing.T) {
 
 	_, _ = io.ReadAll(rest) // drain, no assertion needed here
 }
+
+// TestDeniedUploadMimeTypes_RejectsRealHTMLDetection proves the System 15
+// upload denylist actually matches what http.DetectContentType returns for
+// a real HTML document — not merely an assumed key — so
+// UploadDocument's deniedUploadMimeTypes[detectedMime] lookup in
+// document_service.go is exercised against the real sniffer, the same
+// cross-check TestSniffContentType_UsesRealHTTPDetection performs for the
+// happy path above.
+func TestDeniedUploadMimeTypes_RejectsRealHTMLDetection(t *testing.T) {
+	html := []byte("<!DOCTYPE html><html><body><script>alert(1)</script></body></html>")
+	detected := http.DetectContentType(html)
+
+	assert.True(t, deniedUploadMimeTypes[detected],
+		"http.DetectContentType(%q) = %q must be in deniedUploadMimeTypes", html, detected)
+}
+
+func TestDeniedUploadMimeTypes_AllowsOrdinaryEvidenceTypes(t *testing.T) {
+	for _, content := range [][]byte{
+		{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}, // PNG
+		[]byte("%PDF-1.4 fake pdf header"),            // PDF
+		bytes.Repeat([]byte{0x00, 0x01}, 300),         // arbitrary binary -> application/octet-stream
+	} {
+		detected := http.DetectContentType(content)
+		assert.False(t, deniedUploadMimeTypes[detected],
+			"legitimate evidence content detected as %q must not be denied", detected)
+	}
+}

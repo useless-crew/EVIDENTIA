@@ -24,6 +24,7 @@ type Config struct {
 	Documents   DocumentsConfig
 	Certificate CertificateConfig
 	Bootstrap   BootstrapAdminConfig
+	LoginLimit  LoginRateLimitConfig
 }
 
 // AppConfig describes general application identity.
@@ -55,6 +56,21 @@ type ServerConfig struct {
 	// instead — see body_limit_middleware.go's doc comment for why the
 	// two must not compose.
 	MaxBodyBytes int64
+	// TrustedProxies lists the IPs/CIDRs of reverse proxies/load balancers
+	// this deployment sits behind, whose X-Forwarded-For/X-Real-Ip headers
+	// are trusted when deriving gin.Context.ClientIP() (used for request
+	// logging and — as of System 15 — per-IP login-attempt throttling).
+	// Empty (the default) means TRUST NO PROXY: ClientIP() then falls back
+	// to the request's direct RemoteAddr, which cannot be spoofed by the
+	// client. gin's own zero-value behavior (trust every proxy) is NOT
+	// used here — see httpserver.NewRouter's explicit
+	// engine.SetTrustedProxies call — because trusting an unconfigured set
+	// of proxies would let any client forge its apparent IP via
+	// X-Forwarded-For, defeating IP-based rate limiting outright. Set this
+	// to the exact upstream hop(s) (e.g. the load balancer's IP, or the
+	// Docker bridge CIDR) in any deployment that terminates TLS at a
+	// reverse proxy in front of this service.
+	TrustedProxies []string
 }
 
 // Addr returns the host:port pair the server should bind to.
@@ -158,6 +174,24 @@ type BootstrapAdminConfig struct {
 	Name     string
 }
 
+// LoginRateLimitConfig configures POST /auth/login's brute-force/
+// credential-stuffing throttle (internal/ratelimit, System 15). Two
+// independent counters apply simultaneously — see AuthService.Login:
+// IPMax/IPWindow bound total attempts from one source address regardless
+// of which account is targeted (a credential-stuffing spray), while
+// AccountMax/AccountWindow bound attempts against one account regardless
+// of source address (a distributed brute-force against a single victim).
+// Both are fixed-window, auto-expiring counters — never a permanent
+// lockout — so this cannot become a denial-of-service vector against a
+// legitimate account merely by an attacker repeating failed logins
+// against it.
+type LoginRateLimitConfig struct {
+	IPMax         int
+	IPWindow      time.Duration
+	AccountMax    int
+	AccountWindow time.Duration
+}
+
 // LoggingConfig configures structured operational logging.
 type LoggingConfig struct {
 	Level  string
@@ -220,6 +254,7 @@ func Load() (*Config, error) {
 			IdleTimeout:     getDuration(c, "SERVER_IDLE_TIMEOUT", 60*time.Second),
 			ShutdownTimeout: getDuration(c, "SERVER_SHUTDOWN_TIMEOUT", 15*time.Second),
 			MaxBodyBytes:    int64(getInt(c, "SERVER_MAX_BODY_BYTES", 1<<20)), // 1 MiB
+			TrustedProxies:  getStringSlice("TRUSTED_PROXIES", ""),
 		},
 		CORS: CORSConfig{
 			AllowedOrigins:   getStringSlice("CORS_ALLOWED_ORIGINS", "http://localhost:4200"),
@@ -275,6 +310,12 @@ func Load() (*Config, error) {
 			// comment: unset is a valid, intentional configuration (an
 			// ephemeral in-memory key is used instead), not an error.
 			SigningKeyPEM: getString("CERTIFICATE_SIGNING_KEY", ""),
+		},
+		LoginLimit: LoginRateLimitConfig{
+			IPMax:         getInt(c, "LOGIN_RATE_LIMIT_IP_MAX", 20),
+			IPWindow:      getDuration(c, "LOGIN_RATE_LIMIT_IP_WINDOW", 15*time.Minute),
+			AccountMax:    getInt(c, "LOGIN_RATE_LIMIT_ACCOUNT_MAX", 10),
+			AccountWindow: getDuration(c, "LOGIN_RATE_LIMIT_ACCOUNT_WINDOW", 15*time.Minute),
 		},
 		Bootstrap: BootstrapAdminConfig{
 			// No requireString/default here either — see

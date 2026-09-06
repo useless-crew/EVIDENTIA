@@ -30,10 +30,29 @@ func validate(c *errCollector, cfg *Config) {
 	if len(cfg.CORS.AllowedOrigins) == 0 {
 		c.add("CORS_ALLOWED_ORIGINS must not be empty")
 	}
+	hasWildcardOrigin := false
 	for _, origin := range cfg.CORS.AllowedOrigins {
-		if origin == "*" && cfg.App.IsProduction() {
+		if origin != "*" {
+			continue
+		}
+		hasWildcardOrigin = true
+		if cfg.App.IsProduction() {
 			c.add("CORS_ALLOWED_ORIGINS must not include \"*\" in production")
 		}
+	}
+	// Unlike the production-only wildcard check above, this one applies in
+	// EVERY environment (including development/staging/test): a wildcard
+	// origin combined with credentialed requests is not merely risky, it
+	// defeats the entire point of "credentials" — middleware.CORS reflects
+	// the caller's actual Origin header (with
+	// Access-Control-Allow-Credentials: true) back to ANY site whenever
+	// this combination is configured, since a literal
+	// "Access-Control-Allow-Origin: *" is invalid alongside credentialed
+	// requests per the Fetch spec. A staging/dev environment running real
+	// (non-synthetic) data with this misconfiguration would be exactly as
+	// exposed as production.
+	if hasWildcardOrigin && cfg.CORS.AllowCredentials {
+		c.add("CORS_ALLOWED_ORIGINS must not include \"*\" when CORS_ALLOW_CREDENTIALS=true, in any environment — this combination reflects any origin's requests with credentials enabled, which is never safe")
 	}
 	if len(cfg.CORS.AllowedMethods) == 0 {
 		c.add("CORS_ALLOWED_METHODS must not be empty")
@@ -100,6 +119,15 @@ func validate(c *errCollector, cfg *Config) {
 	if cfg.JWT.BcryptCost < 10 || cfg.JWT.BcryptCost > 31 {
 		c.add("BCRYPT_COST must be between 10 and 31 (got %d) — below 10 is considered too weak for production use", cfg.JWT.BcryptCost)
 	}
+
+	if cfg.LoginLimit.IPMax <= 0 {
+		c.add("LOGIN_RATE_LIMIT_IP_MAX must be greater than 0, got %d", cfg.LoginLimit.IPMax)
+	}
+	validatePositiveDuration(c, "LOGIN_RATE_LIMIT_IP_WINDOW", cfg.LoginLimit.IPWindow)
+	if cfg.LoginLimit.AccountMax <= 0 {
+		c.add("LOGIN_RATE_LIMIT_ACCOUNT_MAX must be greater than 0, got %d", cfg.LoginLimit.AccountMax)
+	}
+	validatePositiveDuration(c, "LOGIN_RATE_LIMIT_ACCOUNT_WINDOW", cfg.LoginLimit.AccountWindow)
 
 	validateBootstrapAdmin(c, cfg.Bootstrap)
 }

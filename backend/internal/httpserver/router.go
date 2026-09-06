@@ -10,10 +10,12 @@ import (
 
 	"evidentia/backend/internal/app"
 	"evidentia/backend/internal/authz"
+	audithandlers "evidentia/backend/internal/handlers/audit"
 	authhandlers "evidentia/backend/internal/handlers/auth"
 	casehandlers "evidentia/backend/internal/handlers/case"
 	documenthandlers "evidentia/backend/internal/handlers/document"
 	"evidentia/backend/internal/handlers/health"
+	sharedhandlers "evidentia/backend/internal/handlers/shared"
 	userhandlers "evidentia/backend/internal/handlers/user"
 	"evidentia/backend/internal/middleware"
 	"evidentia/backend/internal/utils"
@@ -34,9 +36,28 @@ func NewRouter(a *app.App) *gin.Engine {
 	r := gin.New()
 	r.HandleMethodNotAllowed = true
 
+	// gin's zero-value behavior trusts every proxy hop's X-Forwarded-For/
+	// X-Real-Ip when computing ClientIP(), which would let any client
+	// forge its apparent IP unless this deployment happens to sit behind
+	// no proxy at all. SetTrustedProxies(nil) is the explicit, secure
+	// default (trust none — ClientIP() falls back to the direct
+	// RemoteAddr); a deployment behind a reverse proxy/load balancer must
+	// set TRUSTED_PROXIES to that proxy's exact address(es), never a
+	// wildcard. This matters beyond logging as of System 15: ClientIP()
+	// also keys the per-IP login-attempt throttle (internal/ratelimit, see
+	// AuthService.Login) — an attacker able to spoof it could bypass that
+	// throttle entirely.
+	if len(a.Config.Server.TrustedProxies) == 0 {
+		_ = r.SetTrustedProxies(nil)
+	} else if err := r.SetTrustedProxies(a.Config.Server.TrustedProxies); err != nil {
+		a.Logger.Error("invalid TRUSTED_PROXIES configuration, trusting no proxy", "error", err.Error())
+		_ = r.SetTrustedProxies(nil)
+	}
+
 	r.Use(middleware.Recovery(a.Logger))
 	r.Use(middleware.RequestID())
 	r.Use(middleware.RequestLogger(a.Logger))
+	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.CORS(a.Config.CORS))
 	// BodyLimit is deliberately NOT applied engine-wide: document upload
 	// routes (System 6) need a much larger limit than JSON-bodied routes,
@@ -82,6 +103,13 @@ func NewRouter(a *app.App) *gin.Engine {
 	caseGroup.GET("", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionCaseRead), casehandlers.List(a.CaseService))
 	caseGroup.GET("/:id", authMW, middleware.RequireCaseAccess(a.AuthzService, authz.ActionCaseRead, "id"), casehandlers.Get(a.CaseService))
 	caseGroup.PUT("/:id", authMW, middleware.RequireCaseAccess(a.AuthzService, authz.ActionCaseUpdate, "id"), casehandlers.Update(a.CaseService))
+	// Events (System 13): a real-time notification stream for this ONE
+	// case — document verification/certificate/redaction/share activity —
+	// gated by the SAME case:read authorization GET /cases/:id already
+	// requires (RequireCaseAccess re-validates on every new connection,
+	// including the periodic forced reconnect internal/sse.Stream's own
+	// maxConnectionDuration causes — see that package's doc comment).
+	caseGroup.GET("/:id/events", authMW, middleware.RequireCaseAccess(a.AuthzService, authz.ActionCaseRead, "id"), casehandlers.Events(a.SSEManager))
 
 	// Documents (System 6): upload is nested under its case
 	// (/api/v1/cases/:id/documents — :id is the CASE id) and gated by the
@@ -107,6 +135,37 @@ func NewRouter(a *app.App) *gin.Engine {
 	r.POST("/api/v1/documents/:id/verify", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentVerify, "id"), documenthandlers.Verify(a.DocumentService))
 	r.GET("/api/v1/documents/:id/certificate", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionCertificateRead, "id"), documenthandlers.Certificate(a.CertificateService))
 
+	// Redaction: document-scoped (:id is the SOURCE document ID), same
+	// RequireDocumentAccess pattern as verify/certificate above, with
+	// authz.ActionDocumentRedact. Takes a small JSON body (reason +
+	// regions), so — unlike verify (no body) — it needs jsonBodyLimit, the
+	// same limit auth/case/admin routes already share (a redaction
+	// request's region list is nowhere near upload-sized).
+	r.POST("/api/v1/documents/:id/redact", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentRedact, "id"), jsonBodyLimit, documenthandlers.Redact(a.DocumentService))
+
+	// Secure document sharing & access delegation: create/list/revoke are
+	// all document-scoped (:id is the SOURCE document) and gated by the
+	// SAME authz.ActionDocumentShare permission — "authorized to manage
+	// this document's sharing", not narrowed to only the share's original
+	// creator (see internal/service.ShareService.RevokeShare's doc
+	// comment). Create takes a small JSON body, so it gets jsonBodyLimit
+	// like redact does; list/revoke take no body.
+	r.POST("/api/v1/documents/:id/share", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentShare, "id"), jsonBodyLimit, documenthandlers.Share(a.ShareService))
+	r.GET("/api/v1/documents/:id/shares", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentShare, "id"), documenthandlers.ListShares(a.ShareService))
+	r.POST("/api/v1/documents/:id/shares/:shareId/revoke", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentShare, "id"), documenthandlers.RevokeShare(a.ShareService))
+
+	// "Shared With Me" (master prompt §59): a top-level route, not nested
+	// under /documents/:id — it is not scoped to any single document.
+	// Authenticated-only; service.ShareService.ListSharedWithMe's own
+	// query (backed by documents_select's RLS delegated-access branch)
+	// is the only authorization this needs.
+	r.GET("/api/v1/shared/documents", authMW, sharedhandlers.SharedWithMe(a.ShareService))
+
+	// Share-recipient search (master prompt §38/§48): authenticated-only,
+	// deliberately NOT the admin-only user:read permission — see
+	// internal/handlers/user.Search's doc comment.
+	r.GET("/api/v1/users/search", authMW, userhandlers.Search(a.ShareService))
+
 	// Admin user management (System 8): every route requires
 	// authentication; POST/GET/GET-by-id/PUT/status/password additionally
 	// require the matching RBAC user:* permission
@@ -120,6 +179,15 @@ func NewRouter(a *app.App) *gin.Engine {
 	adminGroup.Use(jsonBodyLimit)
 	adminGroup.POST("/users", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionUserCreate), userhandlers.Create(a.UserService))
 	adminGroup.GET("/users", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionUserRead), userhandlers.List(a.UserService))
+	// Events (System 14, on System 13's shared SSE infrastructure): a
+	// real-time notification stream for admin user-management activity —
+	// registered as a static route ("events"), which gin's router
+	// correctly prioritizes over the ":id" parameter route immediately
+	// below at the same path depth, so a literal user ID of "events" is
+	// structurally impossible to collide with (UUIDs never take this
+	// form) and this route is never reached via the :id handler or
+	// vice versa.
+	adminGroup.GET("/users/events", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionUserRead), userhandlers.Events(a.SSEManager))
 	adminGroup.GET("/users/:id", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionUserRead), userhandlers.Get(a.UserService))
 	adminGroup.PUT("/users/:id", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionUserUpdate), userhandlers.Update(a.UserService))
 	adminGroup.PUT("/users/:id/role", authMW, userhandlers.UpdateRole(a.UserService))
@@ -133,10 +201,25 @@ func NewRouter(a *app.App) *gin.Engine {
 	// GET /admin/users/:id does.
 	r.GET("/api/v1/users/me", authMW, userhandlers.Profile(a.UserService))
 
-	// Audit routes (internal/handlers/audit) remain not yet implemented —
-	// a later system's scope. System 4's authorization primitives are
-	// already available for whichever system adds them; see
-	// docs/API_ENDPOINTS.md for the full intended per-route mapping.
+	// Audit trail: GET /audit is a filtered LISTING with no single case/
+	// document ID in its URL (like GET /cases), so it is gated by
+	// RequirePermission (RBAC only) here — row-level visibility beyond
+	// that is PostgreSQL RLS's job (audit_log_select), re-checked
+	// independently by AuditService.List.
+	r.GET("/api/v1/audit", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditRead), audithandlers.List(a.AuditService))
+
+	// Audit-chain verification & integrity dashboard (System 11): every
+	// route below is audit:verify (ADMIN-only per the seed data) —
+	// verifying/inspecting the GLOBAL chain only makes sense against the
+	// complete, unfiltered view, exactly like System 10's original
+	// synchronous POST /audit/verify-chain already required; see
+	// docs/AUDIT_CHAIN.md. None of these take a JSON body (POST has none,
+	// the rest are GETs), so none get jsonBodyLimit.
+	r.POST("/api/v1/audit/verify-chain", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditVerify), audithandlers.VerifyChain(a.AuditService))
+	r.GET("/api/v1/audit/verify-chain/:verificationId", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditVerify), audithandlers.Status(a.AuditService))
+	r.GET("/api/v1/audit/verify-chain/:verificationId/events", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditVerify), audithandlers.Events(a.AuditService, a.SSEManager))
+	r.GET("/api/v1/audit/verifications", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditVerify), audithandlers.History(a.AuditService))
+	r.GET("/api/v1/audit/integrity", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditVerify), audithandlers.Integrity(a.AuditService))
 
 	return r
 }

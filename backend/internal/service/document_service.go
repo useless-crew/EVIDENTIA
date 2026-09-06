@@ -21,6 +21,7 @@ import (
 	"evidentia/backend/internal/audit"
 	"evidentia/backend/internal/auth"
 	"evidentia/backend/internal/authz"
+	"evidentia/backend/internal/events"
 	"evidentia/backend/internal/models"
 	"evidentia/backend/internal/repository"
 	"evidentia/backend/internal/storage"
@@ -55,6 +56,24 @@ const (
 	// up to 512 bytes; peeking more would be wasted).
 	sniffLen = 512
 )
+
+// deniedUploadMimeTypes rejects the handful of http.DetectContentType
+// results that can carry active/executable content with no legitimate
+// evidence use case — see docs/SECURITY.md's "Malicious documents". This
+// is deliberately a DENYlist, not an ALLOWlist: an evidence platform must
+// accept arbitrary forensic file formats (disk images, proprietary report
+// formats, ...) that content sniffing cannot even recognize (falling back
+// to "application/octet-stream"), and DownloadDocument already pairs
+// every response with Content-Disposition: attachment plus
+// X-Content-Type-Options: nosniff, so nothing accepted here is ever
+// rendered/executed by a browser regardless of type. This denylist closes
+// the remaining, narrower gap of storing an HTML document capable of
+// carrying a <script> tag at all — rejected outright rather than merely
+// relying on it never being served inline.
+var deniedUploadMimeTypes = map[string]bool{
+	"text/html; charset=utf-8": true,
+	"text/html":                true,
+}
 
 // errUploadTooLarge is returned by the streaming size guard the moment a
 // read would push the running total past the configured limit — see
@@ -114,10 +133,11 @@ type DocumentService struct {
 	storage       storage.Storage
 	bucket        string
 	maxUploadSize int64
+	publisher     events.Publisher
 	logger        *slog.Logger
 }
 
-func NewDocumentService(pool *pgxpool.Pool, authzService *authz.Service, recorder audit.Recorder, objectStorage storage.Storage, bucket string, maxUploadSize int64, logger *slog.Logger) *DocumentService {
+func NewDocumentService(pool *pgxpool.Pool, authzService *authz.Service, recorder audit.Recorder, objectStorage storage.Storage, bucket string, maxUploadSize int64, publisher events.Publisher, logger *slog.Logger) *DocumentService {
 	return &DocumentService{
 		pool:          pool,
 		authz:         authzService,
@@ -125,6 +145,7 @@ func NewDocumentService(pool *pgxpool.Pool, authzService *authz.Service, recorde
 		storage:       objectStorage,
 		bucket:        bucket,
 		maxUploadSize: maxUploadSize,
+		publisher:     publisher,
 		logger:        logger,
 	}
 }
@@ -189,6 +210,11 @@ func (s *DocumentService) UploadDocument(ctx context.Context, user auth.Authenti
 				fmt.Sprintf("File exceeds the maximum upload size of %d bytes", s.maxUploadSize), nil)
 		}
 		return nil, utils.ErrInternal(fmt.Errorf("store document: %w", err))
+	}
+
+	if deniedUploadMimeTypes[detectedMime] {
+		s.cleanupOrphan(ctx, objectKey, caseID, documentID, "detected content type is not permitted")
+		return nil, utils.ErrUnprocessableEntity(fmt.Sprintf("Files detected as %q are not accepted", detectedMime))
 	}
 
 	ident := repository.AppIdentity{UserID: user.ID, Role: effectiveCaseRole(user)}
@@ -424,6 +450,9 @@ func (s *DocumentService) VerifyDocument(ctx context.Context, user auth.Authenti
 				"computed_hash": result.ComputedHash,
 			},
 		})
+		s.publisher.Publish(ctx, events.TypeDocumentVerificationCompleted, events.ResourceTypeCase, doc.CaseID.String(), events.DocumentVerificationData{
+			DocumentID: doc.ID.String(), CaseID: doc.CaseID.String(), Result: events.DocumentVerificationResultIntegrityFailure,
+		})
 		return result, nil
 	}
 
@@ -436,6 +465,9 @@ func (s *DocumentService) VerifyDocument(ctx context.Context, user auth.Authenti
 		Role:         role,
 		CaseID:       &doc.CaseID,
 		Metadata:     map[string]any{"sha256_hash": result.StoredHash},
+	})
+	s.publisher.Publish(ctx, events.TypeDocumentVerificationCompleted, events.ResourceTypeCase, doc.CaseID.String(), events.DocumentVerificationData{
+		DocumentID: doc.ID.String(), CaseID: doc.CaseID.String(), Result: events.DocumentVerificationResultVerified,
 	})
 	return result, nil
 }
@@ -651,16 +683,17 @@ func (l *limitedReader) Read(p []byte) (int, error) {
 
 func toDocumentSummary(d generated.Document) DocumentSummary {
 	return DocumentSummary{
-		ID:           d.ID,
-		CaseID:       d.CaseID,
-		DocumentType: d.DocumentType,
-		Filename:     d.Filename,
-		Description:  d.Description,
-		MimeType:     d.MimeType,
-		FileSize:     d.FileSize,
-		Sha256Hash:   hex.EncodeToString(d.Sha256Hash),
-		Status:       d.Status,
-		UploadedBy:   d.UploadedBy,
-		UploadedAt:   d.UploadedAt,
+		ID:               d.ID,
+		CaseID:           d.CaseID,
+		DocumentType:     d.DocumentType,
+		Filename:         d.Filename,
+		Description:      d.Description,
+		MimeType:         d.MimeType,
+		FileSize:         d.FileSize,
+		Sha256Hash:       hex.EncodeToString(d.Sha256Hash),
+		Status:           d.Status,
+		ParentDocumentID: d.ParentDocumentID,
+		UploadedBy:       d.UploadedBy,
+		UploadedAt:       d.UploadedAt,
 	}
 }

@@ -5,7 +5,9 @@ package tests
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -30,6 +32,8 @@ func TestAuditPrivileges_RuntimeRoleCannotUpdateOrDelete(t *testing.T) {
 	// attempt to tamper with.
 	err := repository.WithTx(ctx, app, repository.AppIdentity{UserID: userID, Role: models.RoleAdmin}, func(ctx context.Context, q *generated.Queries) error {
 		_, err := q.InsertAuditEntry(ctx, generated.InsertAuditEntryParams{
+			ID:           uuid.New(),
+			Timestamp:    time.Now().UTC(),
 			UserID:       &userID,
 			Action:       "case.create",
 			ResourceType: "case",
@@ -117,6 +121,8 @@ func TestAuditPrivileges_GenesisEntryMustBeUnique(t *testing.T) {
 	insertGenesis := func() error {
 		return repository.WithTx(ctx, app, ident, func(ctx context.Context, q *generated.Queries) error {
 			_, err := q.InsertAuditEntry(ctx, generated.InsertAuditEntryParams{
+				ID:           uuid.New(),
+				Timestamp:    time.Now().UTC(),
 				UserID:       &userID,
 				Action:       "genesis.attempt",
 				ResourceType: "system",
@@ -146,6 +152,8 @@ func TestAuditPrivileges_OnePredecessorPerEntry(t *testing.T) {
 	insertChild := func(hashByte byte) error {
 		return repository.WithTx(ctx, app, ident, func(ctx context.Context, q *generated.Queries) error {
 			_, err := q.InsertAuditEntry(ctx, generated.InsertAuditEntryParams{
+				ID:           uuid.New(),
+				Timestamp:    time.Now().UTC(),
 				UserID:       &userID,
 				Action:       "case.create",
 				ResourceType: "case",

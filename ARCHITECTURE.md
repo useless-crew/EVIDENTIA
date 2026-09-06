@@ -469,6 +469,184 @@ Compliance Certificates" section and [docs/STORAGE.md](./docs/STORAGE.md)'s
 `backend/internal/service/certificate_service_integration_test.go`,
 `backend/internal/httpserver/document_verify_certificate_flow_integration_test.go`.
 
+## Document Redaction (Implemented)
+
+```text
+internal/handlers/document.Redact (POST, JSON body: reason + regions)
+    |
+    v
+internal/service.DocumentService.RedactDocument
+    |
+    +--> authz.Service.CanAccessDocument(ctx, user, sourceID, ActionDocumentRedact)
+    |      (document:redact — ADMIN-only per seed data; no new grant added)
+    +--> validateRedactionReason / validateRedactionRegions — request shape only
+    +--> repository.WithTx: GetDocumentByID (under RLS) — the SOURCE row, read-only
+    +--> supportedRedactionFormats[doc.MimeType] — else 422 (image/png, image/jpeg ONLY)
+    +--> readAllLimited(storage, doc.StorageObjectKey, maxUploadSize)
+    +--> recomputeDocumentHash-equivalent (sha256Sum) + reconcileTamperStatus
+    |      mismatch -> audit DOCUMENT_INTEGRITY_FAILURE, 409, no derivative created
+    +--> image.Decode -> validate regions against REAL bounds -> 400 if out of bounds
+    +--> applyRedactions — draw.Draw(..., draw.Src) destructive pixel replace, in memory
+    +--> re-encode (png.Encode / jpeg.Encode) -> sha256Sum -> H2 (server-computed only)
+    +--> documentObjectKey(caseID, NEW derivativeID) -> storage.Put (new object, new key)
+    +--> repository.WithTx:
+    |      CreateDocument (parent_document_id = source.ID, Sha256Hash = H2)
+    |      CreateRedaction (source_document_id, result_document_id, region_data, reason)
+    |      (transaction failure -> cleanupOrphan, same pattern UploadDocument uses)
+    +--> audit.Recorder — DOCUMENT_REDACTED (both hashes, region count, reason)
+```
+
+The source document (`A`) is only ever read in this flow — never
+UPDATEd, never re-hashed-and-written, never deleted. The derivative (`B`)
+is a completely ordinary `documents` row from the perspective of every
+other System 7 route: `POST /documents/{B}/verify` and
+`GET /documents/{B}/certificate` work unmodified, with zero code changes
+to either `DocumentService.VerifyDocument` or `CertificateService` — the
+independence those two already guaranteed between any two documents'
+hashes/certificates is exactly what makes a redacted derivative safe to
+introduce without touching them.
+
+Routes registered in `internal/httpserver/router.go`:
+
+```text
+POST /api/v1/documents/:id/redact  Auth + RequireDocumentAccess(document:redact, "id") + jsonBodyLimit
+```
+
+**No new authorization primitive was needed**: `CanAccessDocument`
+(System 4) already expressed exactly "RBAC permission AND resource
+relationship"; this system reuses the existing `ActionDocumentRedact`
+constant and `document:redact` seed row (both already present since
+System 2/4, unused by any route until now) rather than adding either.
+`document:redact` remains ADMIN-only — `backend/tests/rbac_test.go`'s
+`TestRBAC_PolicePermissions` already asserted this, and this system does
+not touch `role_permissions`.
+
+**sqlc/migration**: none. `redactions` (table, RLS policies, sqlc
+queries `CreateRedaction`/`GetRedactionByResultDocument`/
+`ListRedactionsBySourceDocument`) and `documents.parent_document_id`
+were already fully in place since System 2 — this system is the first to
+actually call them. The only schema-adjacent change is a new
+`DocumentSummary.parent_document_id` field (Go/JSON only, no migration)
+so API responses that already return document metadata now also surface
+lineage.
+
+**What's genuinely new here**: `internal/service/document_redact.go`
+(image decode/mask/re-encode pipeline, using only Go's standard library
+`image`/`image/draw`/`image/png`/`image/jpeg` — no new dependency beyond
+`TECH_STACK.md`'s existing stack) and
+`internal/handlers/document/redact.go` (previously a TODO stub) are the
+first live redaction business logic; `utils.ErrUnprocessableEntity`
+(422) is a new, small addition to the shared `AppError` helpers for
+"well-formed and authorized, but no safe implementation exists for this
+resource" — distinct from both 400 (malformed request) and 409 (state
+conflict).
+
+**What's deliberately not here**: redaction of any non-raster-image
+format (PDF included) — refused with 422 rather than faked, since no
+approved library in this project's stack can safely strip underlying
+content from those formats yet; the audit hash chain (unchanged); document
+share; expanding `document:redact` beyond ADMIN. Full design:
+[docs/SECURITY.md](./docs/SECURITY.md)'s "Document Redaction" section and
+[docs/STORAGE.md](./docs/STORAGE.md); tests:
+`backend/internal/service/document_redact_test.go`,
+`backend/internal/service/document_redact_integration_test.go`,
+`backend/internal/httpserver/document_redact_flow_integration_test.go`.
+
+## Document Sharing (Implemented)
+
+```text
+internal/handlers/document.Share (POST, JSON body: user_id/permission/expires_at/reason)
+    |
+    v
+internal/service.ShareService.CreateShare
+    |
+    +--> authz.Service.CanAccessDocument(ctx, user, sourceID, ActionDocumentShare)
+    |      (the IDENTICAL RBAC+ABAC check every document route already uses)
+    +--> validate permission (VIEW|VERIFY) / expires_at (future or nil) / not self-share
+    +--> repository.WithTx: GetDocumentByID (under RLS) — confirms case_id, re-authorizes
+    +--> validateRecipient — GetUserByID, must exist AND status = active
+    +--> repository.WithTx: CreateDocumentShare
+    |      (document_shares_active_unique violation -> 409, one active share per pair)
+    +--> audit.Recorder — DOCUMENT_SHARED
+
+internal/authz.Service.CanAccessDocument (EVERY document/certificate route, unchanged call site)
+    |
+    +--> HasPermission(action)                          <- RBAC, unchanged, checked FIRST
+    +--> GetDocumentByID (RLS now ALSO allows a valid share — see below)
+    +--> isAdmin -> allow
+    +--> loadCaseRelationship -> isOwner/isMember -> allow
+    +--> shareGrantsAccess(user, documentID, action)     <- NEW fallback, ABAC path 2
+    |      (only for Read/Download/CertificateRead/Verify — never Redact/Share/
+    |       CertificateCreate, which are simply absent from its action maps)
+    +--> deny
+```
+
+The genuinely new authorization surface is exactly one method,
+`authz.Service.shareGrantsAccess` (`internal/authz/share_policy.go`),
+consulted only once RBAC has already passed AND the existing case-
+relationship check has already failed — a second, narrower fallback, never
+a replacement for either. No new authorization engine; no route's
+existing middleware/handler changed.
+
+Routes registered in `internal/httpserver/router.go`:
+
+```text
+POST /api/v1/documents/:id/share                    Auth + RequireDocumentAccess(document:share, "id") + jsonBodyLimit
+GET  /api/v1/documents/:id/shares                   Auth + RequireDocumentAccess(document:share, "id")
+POST /api/v1/documents/:id/shares/:shareId/revoke   Auth + RequireDocumentAccess(document:share, "id")
+GET  /api/v1/shared/documents                       Auth only ("Shared With Me")
+GET  /api/v1/users/search                           Auth only (recipient picker)
+```
+
+**No new RBAC permission was needed**: `document:share` was already
+seeded (System 2/4) and already granted to POLICE/LAWYER/ADMIN in the
+existing `role_permissions` matrix — unused by any route until now. This
+system does not touch `role_permissions`.
+
+**sqlc/migration**: `000004_document_sharing.up.sql` adds `document_shares`
+(permission/status/expires_at/revoked_at/revoked_by_user_id, a partial
+`UNIQUE (document_id, shared_with_user_id) WHERE status = 'ACTIVE'` index
+doubling as both the hot-path lookup index and the duplicate-active-share
+guard), its own RLS policies, and — the one genuinely novel piece —
+`has_active_document_share`, a `SECURITY DEFINER` function that exists
+solely to break an RLS<->RLS circular dependency: `documents_select`'s
+new delegated-access branch needs to check `document_shares`, but
+`document_shares_select` itself needs to check `documents` (for its own
+case-member visibility rule), and PostgreSQL refuses to evaluate that
+cycle (SQLSTATE 42P17, "infinite recursion detected in policy"). The
+function, owned by the migrator role (a superuser, hence RLS-exempt
+regardless of `FORCE`), queries `document_shares` without re-entering its
+RLS, breaking the cycle cleanly — see
+[docs/SECURITY.md](./docs/SECURITY.md)'s "Document Sharing" for the full
+incident writeup and [docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md)
+for the schema-level summary. Two new queries
+(`GetActiveShareForDocumentAndUser`, `ListSharedWithMe`) support the
+authorization hot path and the "Shared With Me" listing respectively.
+
+**What's genuinely new here**: `internal/service/document_share.go`
+(`ShareService` — create/list/revoke/"Shared With Me"/recipient search),
+`internal/authz/share_policy.go` (the delegated-access check and its
+strict VIEW/VERIFY -> Action maps), `internal/handlers/document/share*.go`,
+the new `internal/handlers/shared` package, and
+`internal/handlers/user.Search` (deliberately NOT gated by the admin-only
+`user:read` permission — a narrower, safer capability any authenticated
+user needs to find a share recipient). `DocumentSummary.parent_document_id`
+(already added by the redaction system) is reused as-is for "Shared With
+Me"'s document metadata — no new document-summary shape was needed.
+
+**What's deliberately not here**: a third `DOWNLOAD` permission tier
+(`VIEW` already covers it — this application has no distinct
+metadata-only view separate from download); public/anonymous links or
+link-plus-password access (strictly authenticated user-to-user, every
+route behind `middleware.Auth`); an "act as user" mechanism for ADMIN;
+rate limiting (this codebase has none for any route yet); the audit hash
+chain. Full design: [docs/SECURITY.md](./docs/SECURITY.md)'s "Document
+Sharing" section; tests:
+`backend/internal/authz/share_policy_test.go`,
+`backend/internal/service/document_share_test.go`,
+`backend/internal/service/document_share_integration_test.go`,
+`backend/internal/httpserver/document_share_flow_integration_test.go`.
+
 ## Request Flow (Intended, Later Systems)
 
 ```text
@@ -588,18 +766,62 @@ Realtime / SSE
   one-time initial-admin bootstrap (`internal/bootstrap`). Every other
   user is created by an existing ADMIN through `POST /admin/users` — see
   [docs/API_ENDPOINTS.md](./docs/API_ENDPOINTS.md)'s Admin section.
-- **Audit Chain** — Immutable, hash-chained audit log of security-sensitive
-  actions. Not yet implemented (`internal/audit/{writer,chain}.go` remain
-  TODO stubs) — user-management actions are still recorded through the
-  same operational-log `audit.SlogRecorder` every other system uses, not
-  yet a durable hash-chained table.
+- **Audit Chain** (implemented) — Immutable, hash-chained audit log of
+  security-sensitive actions (`internal/audit/{writer,chain,verifier}.go`,
+  `internal/service.AuditService`, `internal/handlers/audit`). Every
+  existing `audit.Recorder` call site across every other system now
+  durably persists through `audit.ChainWriter`'s SHA-256 hash chain,
+  rather than the operational-log-only `audit.SlogRecorder` placeholder
+  used until this system landed — see
+  [docs/AUDIT_CHAIN.md](./docs/AUDIT_CHAIN.md) for the full design.
+- **Audit Chain Verification & Integrity Dashboard** (implemented) —
+  Asynchronous audit-chain verification (`internal/jobs`, `internal/
+  realtime`, `internal/service.AuditService.RunVerification`) so a chain
+  of any size verifies via a background job rather than one long-running
+  HTTP request: `POST /audit/verify-chain` returns `202` and dispatches an
+  Asynq task; progress/result are tracked in the durable
+  `audit_verifications` table and streamed live over SSE
+  (`GET /audit/verify-chain/:id/events`). Reuses System 10's hash/
+  canonicalization/verification logic completely, unchanged. See
+  [docs/AUDIT_CHAIN.md](./docs/AUDIT_CHAIN.md)'s "Asynchronous
+  Verification & Integrity Dashboard".
+- **Asynchronous Processing & Background Jobs** (implemented) — System 12
+  generalizes System 11's Asynq integration into reusable infrastructure
+  (`internal/jobs`): queue priority (`QueueCritical`/`QueueDefault`),
+  `LoggingMiddleware`, `FailureCategory`/`Permanent`/`CategoryOf` retry
+  classification, and `DeterministicTaskID` (a traceable `job_id`, now
+  returned alongside `verification_id`, doubling as a second, Asynq-level
+  idempotency guard). `AUDIT_CHAIN_VERIFY` is refactored onto it with no
+  behavior change; no other Systems 1-11 operation was moved to
+  background processing — see
+  [docs/BACKGROUND_JOBS.md](./docs/BACKGROUND_JOBS.md).
 - **Crypto** — SHA-256 integrity hashing (implemented — System 6/7) and
   ECDSA compliance-certificate signing (implemented — System 7,
   `pkg/crypto`); AES-256 encryption and RSA signing remain future.
 - **Storage** — MinIO-backed object storage behind a provider-agnostic
   interface.
-- **Jobs** — Redis/Asynq-backed background processing.
-- **Realtime** — SSE-based progress and notification streaming.
+- **Jobs** (implemented) — System 12's reusable Redis/Asynq background-
+  processing architecture (`internal/jobs`): named priority queues
+  (`critical`/`default`), a shared structured-logging middleware, a
+  TRANSIENT/PERMANENT/SECURITY/INTEGRITY error-classification vocabulary,
+  and deterministic, traceable job IDs — used by System 11's audit-chain
+  verification (its only consumer today; Systems 6-8's hashing,
+  certificate generation, and redaction were each evaluated and
+  deliberately kept synchronous — see
+  [docs/BACKGROUND_JOBS.md](./docs/BACKGROUND_JOBS.md)'s "Task Types" for
+  why). The worker runs embedded in the same process as the HTTP server
+  (`cmd/server/main.go`), not a separate deployment unit.
+- **Real-Time Events & SSE** (implemented) — System 13's reusable,
+  Redis-Pub/Sub-backed event architecture (`internal/events` +
+  `internal/sse`, replacing System 11's original in-process-only
+  `internal/realtime`): a central `Event` envelope, a `Publisher`
+  abstraction every business service/worker calls to notify of a
+  meaningful state change, and a `Manager` that fans out to
+  authorization-scoped, authenticated SSE connections. Powers System 11's
+  audit-chain verification stream (refactored, unchanged behavior) and a
+  new `GET /cases/:id/events` case-activity stream (document
+  verification/certificate generation/redaction/share create-revoke) —
+  see [docs/REALTIME_EVENTS.md](./docs/REALTIME_EVENTS.md).
 
 ## Data Model Overview
 
@@ -626,22 +848,23 @@ The eventual system will enforce:
 11. Secure refresh-token handling
 12. Audit logging of all security-sensitive actions
 
-As of System 7: **1** (JWT) and **11** (refresh-token rotation/revocation)
-were implemented in System 3; **4** (RLS) was implemented in System 2,
-enforced with policies and fail-closed behavior verified by integration
-tests; **2** (RBAC) and **3** (ABAC) are implemented in System 4
+**1** (JWT) and **11** (refresh-token rotation/revocation) were
+implemented in System 3; **4** (RLS) was implemented in System 2, enforced
+with policies and fail-closed behavior verified by integration tests;
+**2** (RBAC) and **3** (ABAC) are implemented in System 4
 (`internal/authz`), composed with RLS as defense-in-depth rather than
-replacing it. Audit entries have their hash/prev_hash storage and
-uniqueness invariants (**7**, **8**) in place, and failed/successful auth
-actions, authorization denials, and now document upload/download/verify
-and certificate generation (**12**, partial — see SECURITY.md) are
-already recorded operationally, but *computing* the actual hash chain and
-verifying it (**9**) is System 8's job. **5** (SHA-256 document
-integrity) is now complete end-to-end: System 6 *computes and persists*
-the initial hash at ingestion (`pkg/hash`, `documents.sha256_hash`), and
-System 7 *recomputes and compares* a stored object's current hash against
-it to detect tampering (`DocumentService.VerifyDocument`), never
-rewriting the canonical value on a mismatch. AES-256 (**6**) and TLS
-(**10**) remain unimplemented. See [docs/SECURITY.md](./docs/SECURITY.md)
-and [docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md) for what each
+replacing it. **7**/**8**/**9** (immutable append-only audit logs,
+hash-chained entries, transactional/concurrency-safe writing) are now
+fully implemented — see [docs/AUDIT_CHAIN.md](./docs/AUDIT_CHAIN.md).
+**12** (audit logging of all security-sensitive actions) now durably
+records through that same hash chain, not just the operational log — see
+SECURITY.md. **5** (SHA-256 document integrity) is complete end-to-end:
+System 6 *computes and persists* the initial hash at ingestion
+(`pkg/hash`, `documents.sha256_hash`), and System 7 *recomputes and
+compares* a stored object's current hash against it to detect tampering
+(`DocumentService.VerifyDocument`), never rewriting the canonical value on
+a mismatch. AES-256 (**6**) and TLS (**10**) remain unimplemented. See
+[docs/SECURITY.md](./docs/SECURITY.md),
+[docs/AUDIT_CHAIN.md](./docs/AUDIT_CHAIN.md), and
+[docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md) for what each
 currently covers.

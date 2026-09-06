@@ -1,0 +1,233 @@
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(14, 32, 56, 0.65);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 20px;
+}
+
+.modal-dialog {
+  width: 540px;
+  max-width: 100%;
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-modal);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+}
+
+.modal-header {
+  padding: 16px 22px;
+  background: var(--color-navy-primary);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.01em;
+}
+
+.modal-subtitle {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.btn-close {
+  background: transparent;
+  border: none;
+  font-size: 20px;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.btn-close:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.modal-body {
+  padding: 22px;
+  background: #ffffff;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.form-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+
+.form-input,
+.form-select {
+  height: 36px;
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  font-family: inherit;
+  color: var(--color-text-primary);
+}
+
+.form-textarea {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--color-text-primary);
+  resize: vertical;
+}
+
+.recipient-picked {
+  height: 36px;
+  background: var(--color-section-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  font-size: 12px;
+  color: var(--color-navy-primary);
+}
+
+.btn-clear-recipient {
+  background: transparent;
+  border: none;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-accent-blue);
+  cursor: pointer;
+}
+
+.search-hint {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.candidate-list {
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+  background: #ffffff;
+}
+
+.candidate-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  background: #ffffff;
+  cursor: pointer;
+  text-align: left;
+}
+
+.candidate-item:last-child {
+  border-bottom: none;
+}
+
+.candidate-item:hover {
+  background: var(--color-section-alt);
+}
+
+.candidate-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-navy-primary);
+}
+
+.candidate-email {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.candidate-role {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.expiration-toggle {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.inline-error {
+  font-size: 12px;
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
+  border-radius: 5px;
+  padding: 8px 12px;
+}
+
+.legal-notice {
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  padding: 10px 12px;
+  background: var(--color-section-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  display: flex;
+  gap: 8px;
+}
+
+.notice-bullet {
+  color: var(--color-accent-blue);
+  font-weight: 700;
+}
+
+.modal-footer {
+  padding: 14px 22px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-section-alt);
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-shrink: 0;
+}

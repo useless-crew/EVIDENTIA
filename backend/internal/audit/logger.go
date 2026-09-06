@@ -1,11 +1,11 @@
 // Package audit defines the minimal integration boundary domain code
 // (starting with authentication in System 3) depends on to record a
-// security-relevant event. It deliberately does NOT implement the
-// hash-chained, tamper-evident audit_log writer — that is System 8's job
-// (see chain.go, verifier.go, writer.go in this package, still TODO
-// placeholders). Recorder exists so calling code never has to change when
-// System 8 lands: it depends on this interface, not a concrete
-// implementation.
+// security-relevant event, plus the hash-chained, tamper-evident
+// audit_log writer/verifier that implements it (System 8/10/11 — see
+// chain.go, verifier.go, writer.go in this package). Recorder is defined
+// as an interface specifically so calling code never had to change when
+// those landed: every service depends on this interface, not a concrete
+// implementation directly.
 package audit
 
 import (

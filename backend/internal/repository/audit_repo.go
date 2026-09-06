@@ -66,3 +66,19 @@ func (r *AuditRepo) ListByDateRange(ctx context.Context, from, to time.Time, lim
 func (r *AuditRepo) Count(ctx context.Context) (int64, error) {
 	return r.q.CountAuditEntries(ctx)
 }
+
+// AcquireChainLock takes the transaction-scoped advisory lock
+// internal/audit.ChainWriter uses to serialize concurrent chain-head
+// reads/writes — see the underlying query's doc comment. Must be called
+// before GetLatest within the same transaction.
+func (r *AuditRepo) AcquireChainLock(ctx context.Context, lockKey int64) error {
+	return r.q.AcquireAuditChainLock(ctx, lockKey)
+}
+
+func (r *AuditRepo) ListFiltered(ctx context.Context, arg generated.ListAuditEntriesFilteredParams) ([]generated.AuditLog, error) {
+	return r.q.ListAuditEntriesFiltered(ctx, arg)
+}
+
+func (r *AuditRepo) CountFiltered(ctx context.Context, arg generated.CountAuditEntriesFilteredParams) (int64, error) {
+	return r.q.CountAuditEntriesFiltered(ctx, arg)
+}

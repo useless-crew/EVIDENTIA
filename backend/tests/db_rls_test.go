@@ -88,6 +88,9 @@ func TestRLS_FailsClosedWithoutIdentity(t *testing.T) {
 
 	require.NoError(t, app.QueryRow(ctx, `SELECT count(*) FROM audit_log`).Scan(&count))
 	assert.Equal(t, 0, count)
+
+	require.NoError(t, app.QueryRow(ctx, `SELECT count(*) FROM audit_verifications`).Scan(&count))
+	assert.Equal(t, 0, count, "audit_verifications_select requires current_app_role() = 'ADMIN' — no identity must mean zero visible rows, exactly like every other RLS-protected table")
 }
 
 func TestRLS_UserSeesOnlyOwnCase(t *testing.T) {

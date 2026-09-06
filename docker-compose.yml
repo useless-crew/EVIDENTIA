@@ -53,6 +53,10 @@ services:
       DATABASE_SSLMODE: disable
 
       REDIS_ADDR: redis:6379
+      # Matches the redis service's --requirepass below (System 15) — both
+      # fall back to the same placeholder, same convention as every other
+      # credential in this file (see the header comment).
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-changeme_example}
 
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-evidentia_minio}
@@ -137,8 +141,14 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-evidentia}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_example}
       POSTGRES_DB: ${POSTGRES_DB:-evidentia}
+    # Bound to loopback only (System 15): postgres is internal
+    # infrastructure the backend/migrator reach over the compose network
+    # (or, for `go run`/`migrate` on the host, via localhost) — it must
+    # never be reachable from outside this machine. Still reachable at
+    # localhost:${POSTGRES_PORT} for the Quick Start's host-run migrate
+    # step above.
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -155,9 +165,15 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-evidentia_minio}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-changeme_example}
     command: server /data --console-address ":9001"
+    # Bound to loopback only (System 15): MinIO is internal object
+    # storage the backend reaches over the compose network. Nothing in
+    # this project issues pre-signed MinIO URLs to a browser (see
+    # docs/STORAGE.md/SECURITY.md — every download streams through the
+    # backend), so there is no legitimate reason for either the S3 API
+    # port or the admin console to be reachable off this machine.
     ports:
-      - "${MINIO_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -170,12 +186,22 @@ services:
 
   redis:
     image: redis:7
+    # --requirepass (System 15): Redis is internal queue/pub-sub/rate-limit
+    # infrastructure (Asynq, SSE fan-out, internal/ratelimit) — even bound
+    # to loopback only (below), requiring a password is cheap defense in
+    # depth against any other process/user on the same host. Same
+    # placeholder-credential convention as every other service in this
+    # file (see the header comment); the backend's REDIS_PASSWORD above
+    # must match.
+    command: redis-server --requirepass ${REDIS_PASSWORD:-changeme_example}
+    # Bound to loopback only: must never be reachable from outside this
+    # machine regardless of the password above.
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme_example}", "--no-auth-warning", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5

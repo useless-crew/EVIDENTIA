@@ -1,0 +1,90 @@
+<div class="modal-backdrop" (click)="cancel()">
+  <div class="modal-dialog" (click)="$event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title-group">
+        <h2 class="modal-title">Share Document</h2>
+        <span class="modal-subtitle font-mono">{{ documentFilename }}</span>
+      </div>
+      <button type="button" class="btn-close" (click)="cancel()">×</button>
+    </div>
+
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">RECIPIENT</label>
+        <div class="recipient-picked" *ngIf="selectedRecipient() as r">
+          <span>{{ r.first_name }} {{ r.last_name }} · {{ r.email }} · {{ r.roles.join(', ') }}</span>
+          <button type="button" class="btn-clear-recipient" (click)="clearRecipient()">Change</button>
+        </div>
+        <input
+          *ngIf="!selectedRecipient()"
+          class="form-input"
+          type="text"
+          placeholder="Search by name or email…"
+          [value]="query"
+          (input)="onQueryInput($any($event.target).value)"
+        />
+        <div *ngIf="searching()" class="search-hint">Searching…</div>
+        <div class="candidate-list" *ngIf="!selectedRecipient() && candidates().length > 0">
+          <button
+            type="button"
+            class="candidate-item"
+            *ngFor="let c of candidates()"
+            (click)="selectRecipient(c)"
+          >
+            <span class="candidate-name">{{ c.first_name }} {{ c.last_name }}</span>
+            <span class="candidate-email font-mono">{{ c.email }}</span>
+            <span class="candidate-role">{{ c.roles.join(', ') }}</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">PERMISSION</label>
+          <select class="form-select" [(ngModel)]="permission" name="permission">
+            <option value="VIEW">View (view &amp; download)</option>
+            <option value="VERIFY">Verify (view, download &amp; verify integrity)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">EXPIRATION</label>
+          <label class="expiration-toggle">
+            <input type="checkbox" [(ngModel)]="hasExpiration" name="hasExpiration" />
+            Set an expiration
+          </label>
+        </div>
+      </div>
+
+      <div class="form-group" *ngIf="hasExpiration">
+        <label class="form-label">EXPIRES AT</label>
+        <input class="form-input" type="datetime-local" [(ngModel)]="expiresAt" name="expiresAt" />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">REASON (OPTIONAL)</label>
+        <textarea
+          class="form-textarea"
+          rows="2"
+          [(ngModel)]="reason"
+          name="reason"
+          placeholder="e.g. Disclosure to defence counsel"
+        ></textarea>
+      </div>
+
+      <div class="inline-error" *ngIf="error()">{{ error() }}</div>
+
+      <div class="legal-notice">
+        <span class="notice-bullet">ℹ</span>
+        <span>Sharing grants controlled access only — it never transfers ownership, and never lets the recipient reshare, redact, or delete this document.</span>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button type="button" class="btn-secondary" (click)="cancel()">Cancel</button>
+      <button type="button" class="btn-primary" [disabled]="submitting()" (click)="submit()">
+        {{ submitting() ? 'Sharing…' : 'Confirm Share' }}
+      </button>
+    </div>
+  </div>
+</div>

@@ -57,6 +57,11 @@ export const routes: Routes = [
           import('./screens/redact-studio/redact-studio.component').then((m) => m.RedactStudioComponent),
       },
       {
+        path: 'shared',
+        loadComponent: () =>
+          import('./screens/shared-with-me/shared-with-me.component').then((m) => m.SharedWithMeComponent),
+      },
+      {
         path: 'access-preview',
         loadComponent: () =>
           import('./screens/access-preview/access-preview.component').then((m) => m.AccessPreviewComponent),

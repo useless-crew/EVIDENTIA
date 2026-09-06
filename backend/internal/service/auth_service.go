@@ -6,8 +6,11 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,7 +20,9 @@ import (
 	"evidentia/backend/db/generated"
 	"evidentia/backend/internal/audit"
 	"evidentia/backend/internal/auth"
+	"evidentia/backend/internal/config"
 	"evidentia/backend/internal/models"
+	"evidentia/backend/internal/ratelimit"
 	"evidentia/backend/internal/repository"
 	"evidentia/backend/internal/utils"
 )
@@ -34,6 +39,12 @@ const genericAuthError = "Invalid email or password"
 // worded for a token rather than credentials but equally non-specific
 // about which check failed.
 const genericRefreshError = "Invalid or expired refresh token"
+
+// loginRateLimitError is returned when either the per-IP or per-account
+// login throttle (internal/ratelimit) is exhausted. Deliberately as
+// generic as genericAuthError, for the same reason: it must not confirm
+// or deny whether the throttle tripped on the IP or the specific account.
+const loginRateLimitError = "Too many login attempts. Please try again later."
 
 // UserSummary is the public-safe subset of a user profile returned by
 // login/refresh — never password_hash, never internal DB fields. Role is
@@ -64,20 +75,45 @@ type AuthResult struct {
 // ABAC authorization (WHAT they may do) is System 4's responsibility, not
 // this type's (master prompt §5).
 type AuthService struct {
-	pool       *pgxpool.Pool
-	jwt        *auth.JWTManager
-	bcryptCost int
-	refreshTTL time.Duration
-	recorder   audit.Recorder
+	pool        *pgxpool.Pool
+	jwt         *auth.JWTManager
+	bcryptCost  int
+	refreshTTL  time.Duration
+	recorder    audit.Recorder
+	loginLimit  ratelimit.Limiter
+	loginLimits config.LoginRateLimitConfig
+	// dummyHash is a bcrypt hash of a fixed, never-used placeholder
+	// password, hashed at the same cost as real user passwords. Login
+	// runs bcrypt against it on the "unknown email" path so that path
+	// costs roughly the same wall-clock time as the "wrong password"
+	// path (which does run a real bcrypt comparison) — otherwise an
+	// attacker could distinguish the two purely by response latency
+	// despite both returning the identical genericAuthError body.
+	dummyHash string
 }
 
-func NewAuthService(pool *pgxpool.Pool, jwtManager *auth.JWTManager, bcryptCost int, refreshTTL time.Duration, recorder audit.Recorder) *AuthService {
+// NewAuthService wires AuthService's dependencies. loginLimit backs
+// Login's per-IP/per-account brute-force throttle (see that method) —
+// pass a ratelimit.RedisLimiter in production, or a fake Limiter in tests
+// that don't need a real Redis connection; loginLimits configures its
+// thresholds (internal/config.LoginRateLimitConfig's doc comment explains
+// why both dimensions apply simultaneously).
+func NewAuthService(pool *pgxpool.Pool, jwtManager *auth.JWTManager, bcryptCost int, refreshTTL time.Duration, recorder audit.Recorder, loginLimit ratelimit.Limiter, loginLimits config.LoginRateLimitConfig) *AuthService {
+	// bcrypt.GenerateFromPassword only fails for a cost outside [4,31] or
+	// a >72-byte password, neither possible here (config.validate.go
+	// bounds BcryptCost to [10,31]; the literal below is 45 bytes) — an
+	// error is unreachable in practice, so dummyHash simply stays empty
+	// and VerifyPassword against it fails fast rather than panicking.
+	dummyHash, _ := auth.HashPassword("evidentia-timing-normalization-placeholder", bcryptCost)
 	return &AuthService{
-		pool:       pool,
-		jwt:        jwtManager,
-		bcryptCost: bcryptCost,
-		refreshTTL: refreshTTL,
-		recorder:   recorder,
+		pool:        pool,
+		jwt:         jwtManager,
+		bcryptCost:  bcryptCost,
+		refreshTTL:  refreshTTL,
+		recorder:    recorder,
+		loginLimit:  loginLimit,
+		loginLimits: loginLimits,
+		dummyHash:   dummyHash,
 	}
 }
 
@@ -85,7 +121,25 @@ func NewAuthService(pool *pgxpool.Pool, jwtManager *auth.JWTManager, bcryptCost 
 // token and a new refresh-token session. ipAddress/userAgent are stored
 // only as session diagnostic metadata (auth_sessions.ip_address/
 // user_agent).
+//
+// Before touching the database, two independent Redis-backed throttles
+// (internal/ratelimit) must both allow the attempt: one keyed by
+// ipAddress (bounds total attempts from one source, regardless of which
+// account is targeted — a credential-stuffing spray), one keyed by a hash
+// of email (bounds attempts against one account, regardless of source —
+// a distributed brute-force against a single victim). Both are fixed-
+// window, auto-expiring counters (internal/config.LoginRateLimitConfig's
+// doc comment), so an attacker cannot use them to permanently deny a
+// victim access merely by repeatedly failing that victim's login. Every
+// throttled attempt returns the same 429 loginRateLimitError regardless
+// of which counter tripped, for the same anti-enumeration reason
+// genericAuthError exists.
 func (s *AuthService) Login(ctx context.Context, email, password, ipAddress, userAgent string) (*AuthResult, error) {
+	acctKey := "login:acct:" + hashLoginAccountKey(email)
+	if rateLimitErr := s.checkLoginRateLimit(ctx, ipAddress, acctKey); rateLimitErr != nil {
+		return nil, rateLimitErr
+	}
+
 	var authRow generated.GetUserByEmailForAuthRow
 	found, err := s.fetchAuthRow(ctx, email, &authRow)
 	if err != nil {
@@ -93,6 +147,9 @@ func (s *AuthService) Login(ctx context.Context, email, password, ipAddress, use
 	}
 
 	if !found {
+		// Run bcrypt against a placeholder hash even though there is no
+		// real one to check — see dummyHash's doc comment.
+		_ = auth.VerifyPassword(s.dummyHash, password)
 		s.recordAuthFailure(ctx, "AUTH_LOGIN_FAILED", nil, "unknown_email")
 		return nil, utils.ErrUnauthorized(genericAuthError)
 	}
@@ -138,6 +195,14 @@ func (s *AuthService) Login(ctx context.Context, email, password, ipAddress, use
 		return nil, utils.ErrInternal(err)
 	}
 	result.User = UserSummary{ID: profile.ID, Email: profile.Email, FirstName: profile.FirstName, LastName: profile.LastName, Role: primaryRole}
+
+	// A successful login clears this account's failed-attempt count,
+	// giving the legitimate owner a full quota again immediately rather
+	// than staying penalized by earlier typos for the rest of the window.
+	// The per-IP counter is deliberately NOT reset here — it tracks
+	// aggregate request volume from a source, independent of which
+	// account (if any) it eventually succeeds against.
+	_ = s.loginLimit.Reset(ctx, acctKey)
 
 	s.recorder.Record(ctx, audit.Event{Action: "AUTH_LOGIN_SUCCESS", ResourceType: "user", UserID: &authRow.ID, Role: primaryRole})
 	return &result.AuthResult, nil
@@ -395,6 +460,29 @@ func (s *AuthService) fetchSessionByHash(ctx context.Context, tokenHash []byte) 
 	return session, found, err
 }
 
+// checkLoginRateLimit runs both of Login's throttle checks (see that
+// method's doc comment) and returns a ready-to-return 429 *utils.AppError
+// if either is exhausted, or nil if the attempt may proceed — including
+// when a throttle backend error occurred, which fails OPEN (see
+// ratelimit.RedisLimiter.Allow's doc comment) rather than blocking login
+// outright. Split out from Login as its own method specifically so it can
+// be unit-tested without a database connection: it never touches s.pool.
+func (s *AuthService) checkLoginRateLimit(ctx context.Context, ipAddress, acctKey string) *utils.AppError {
+	if ipAddress != "" {
+		if allowed, retryAfter, limitErr := s.loginLimit.Allow(ctx, "login:ip:"+ipAddress, s.loginLimits.IPMax, s.loginLimits.IPWindow); limitErr == nil && !allowed {
+			s.recordAuthFailure(ctx, "AUTH_LOGIN_RATE_LIMITED", nil, "ip_rate_limited")
+			return utils.ErrTooManyRequests(loginRateLimitError).WithRetryAfter(retryAfter)
+		}
+	}
+
+	if allowed, retryAfter, limitErr := s.loginLimit.Allow(ctx, acctKey, s.loginLimits.AccountMax, s.loginLimits.AccountWindow); limitErr == nil && !allowed {
+		s.recordAuthFailure(ctx, "AUTH_LOGIN_RATE_LIMITED", nil, "account_rate_limited")
+		return utils.ErrTooManyRequests(loginRateLimitError).WithRetryAfter(retryAfter)
+	}
+
+	return nil
+}
+
 // recordAuthFailure records a failed authentication attempt with a
 // specific, non-public reason category — see genericAuthError/
 // genericRefreshError for why the reason never reaches the client.
@@ -419,4 +507,17 @@ func stringPtrOrNil(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// hashLoginAccountKey derives the Redis key suffix for the per-account
+// login throttle from email, so the raw email address is never stored as
+// a Redis key (data minimization) — a fast, non-adaptive hash is
+// appropriate here for the same reason it is for refresh tokens
+// (internal/auth.HashRefreshToken's doc comment): this is not a secret
+// being protected against offline brute-forcing, only an identifier being
+// kept out of Redis in cleartext. Lowercased first so the same account
+// cannot get two independent counters via case variation of its email.
+func hashLoginAccountKey(email string) string {
+	sum := sha256.Sum256([]byte(strings.ToLower(email)))
+	return hex.EncodeToString(sum[:])
 }

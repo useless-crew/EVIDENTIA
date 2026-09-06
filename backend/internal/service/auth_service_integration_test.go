@@ -28,6 +28,7 @@ import (
 
 	"evidentia/backend/internal/audit"
 	"evidentia/backend/internal/auth"
+	"evidentia/backend/internal/config"
 	"evidentia/backend/internal/models"
 )
 
@@ -113,7 +114,12 @@ func seedUser(t *testing.T, migrator *pgxpool.Pool, email, status, roleName stri
 
 func newTestAuthService(app *pgxpool.Pool) *AuthService {
 	jwtManager := auth.NewJWTManager("test-signing-key-at-least-32-characters-long", "evidentia-api", "evidentia-client", 15*time.Minute)
-	return NewAuthService(app, jwtManager, 4, 7*24*time.Hour, audit.NewSlogRecorder(discardLogger()))
+	// Limits high enough that no existing test's handful of Login calls
+	// could ever trip the throttle by accident — tests exercising the
+	// throttle itself live in auth_service_ratelimit_test.go and build
+	// their own AuthService with tight limits.
+	limits := config.LoginRateLimitConfig{IPMax: 1000, IPWindow: time.Minute, AccountMax: 1000, AccountWindow: time.Minute}
+	return NewAuthService(app, jwtManager, 4, 7*24*time.Hour, audit.NewSlogRecorder(discardLogger()), newFakeLimiter(), limits)
 }
 
 func TestAuthService_Login_ValidCredentialsSucceed(t *testing.T) {

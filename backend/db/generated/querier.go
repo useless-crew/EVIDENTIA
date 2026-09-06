@@ -11,6 +11,36 @@ import (
 )
 
 type Querier interface {
+	// System 14's "last active Administrator" safeguard
+	// (internal/service.UserService.ensureNotLastActiveAdmin) — a
+	// PostgreSQL transaction-scoped advisory lock (automatically released at
+	// COMMIT/ROLLBACK, never leaked across a pooled connection), acquired
+	// BEFORE CountActiveUsersWithRole below and held through the role/status
+	// UPDATE that follows it in the SAME transaction. This is what makes the
+	// guard correct under concurrency, not merely "correct for one caller at
+	// a time": two admins concurrently demoting/deactivating two DIFFERENT
+	// remaining admins would otherwise each independently observe "2 active
+	// admins, safe to proceed" and both commit, leaving zero — this lock
+	// serializes any such pair of operations so the second one to run
+	// re-counts AFTER the first has already committed. The key is a fixed,
+	// arbitrary constant distinct from internal/audit's own
+	// auditChainLockKey (see that package's identical idiom) — it names no
+	// row and touches no other lock table.
+	AcquireAdminGuardLock(ctx context.Context, lockKey int64) error
+	// A PostgreSQL transaction-scoped advisory lock (automatically released
+	// at COMMIT/ROLLBACK, never leaked across a pooled connection) —
+	// internal/audit.ChainWriter takes this BEFORE reading the current chain
+	// head, so at most one transaction at a time can be "between" reading
+	// the head and inserting the entry that claims it as its predecessor.
+	// This is the authoritative, database-level guarantee that concurrent
+	// writers cannot fork the chain (master prompt: "the authoritative
+	// concurrency guarantee must exist at the database/transaction level",
+	// not an application-level mutex, which would do nothing across
+	// multiple backend processes/pooled connections anyway). The key is an
+	// arbitrary, fixed constant (see chain.go's auditChainLockKey) reserved
+	// solely for this purpose — it names no row and touches no other lock
+	// table.
+	AcquireAuditChainLock(ctx context.Context, lockKey int64) error
 	// Evidentia — Case Membership Queries
 	//
 	// See case_members_select's policy comment in the migration: a caller can
@@ -25,16 +55,55 @@ type Querier interface {
 	AdminUserExists(ctx context.Context) (bool, error)
 	AssignPermissionToRole(ctx context.Context, arg AssignPermissionToRoleParams) error
 	AssignRoleToUser(ctx context.Context, arg AssignRoleToUserParams) error
+	// Sets the terminal state exactly once. failed_entry_id/failed_seq/
+	// failure_type/failure_reason are NULL for VERIFIED (see the table's own
+	// audit_verifications_failure_fields_check constraint, which rejects any
+	// other combination).
+	CompleteAuditVerification(ctx context.Context, arg CompleteAuditVerificationParams) (AuditVerification, error)
+	// The count internal/service.UserService.ensureNotLastActiveAdmin reads
+	// (only after AcquireAdminGuardLock above) to decide whether a
+	// role/status change may proceed — ACTIVE users only, since an already
+	// INACTIVE/SUSPENDED admin was never a "usable" administrator to begin
+	// with and removing THEIR admin status/further deactivating them cannot
+	// newly cause a lockout. Note users.status's own established convention
+	// is lowercase ('active'/'inactive'/'suspended' — see
+	// users_status_check, models.UserStatusActive), unlike some other
+	// status-bearing tables in this schema — matched exactly here, not
+	// assumed.
+	CountActiveUsersWithRole(ctx context.Context, roleID uuid.UUID) (int64, error)
+	// The chain's total row count — used by chain verification to report
+	// total_entries alongside entries_checked, and cheap (a single index/
+	// heap estimate-free count) since it is only ever called once per
+	// verification request, never per-row.
 	CountAuditEntries(ctx context.Context) (int64, error)
+	// Same filters as ListAuditEntriesFiltered — the caller's authorized,
+	// filtered total for pagination metadata, not an unfiltered table count.
+	CountAuditEntriesFiltered(ctx context.Context, arg CountAuditEntriesFilteredParams) (int64, error)
+	CountAuditVerificationsFiltered(ctx context.Context, arg CountAuditVerificationsFilteredParams) (int64, error)
 	CountCases(ctx context.Context) (int64, error)
 	// Same filters as ListCasesFiltered — the caller's authorized, filtered
 	// total for pagination metadata, not an unfiltered table count.
 	CountCasesFiltered(ctx context.Context, arg CountCasesFilteredParams) (int64, error)
 	CountDocumentsByCase(ctx context.Context, caseID uuid.UUID) (int64, error)
+	CountSharedWithMe(ctx context.Context, sharedWithUserID uuid.UUID) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	// Same filters as ListUsersFiltered — the caller's filtered total for
 	// pagination metadata, not an unfiltered table count.
 	CountUsersFiltered(ctx context.Context, arg CountUsersFilteredParams) (int64, error)
+	// Evidentia — Audit Chain Verification Job Queries (System 11)
+	//
+	// These queries only persist/retrieve the LIFECYCLE of a verification run
+	// (audit_verifications). The actual cryptographic check — reading
+	// audit_log in chain order and recomputing hashes — reuses System 10's
+	// existing audit.sql queries (InsertAuditEntry's neighbors:
+	// GetLatestAuditEntry, ListAuditEntriesFromSeq, CountAuditEntries)
+	// unchanged; nothing here duplicates that.
+	// Always attempted first by AuditService.StartVerification; a unique-
+	// violation on idx_audit_verifications_single_active (at most one
+	// QUEUED/RUNNING row at a time) means a verification is already active —
+	// the caller catches that specific conflict and calls
+	// GetActiveAuditVerification instead of treating it as an error.
+	CreateAuditVerification(ctx context.Context, arg CreateAuditVerificationParams) (AuditVerification, error)
 	// Evidentia — Auth Session (Refresh Token) Queries
 	//
 	// token_hash is always SHA-256(raw refresh token) — the raw token itself
@@ -87,6 +156,15 @@ type Querier interface {
 	// master prompt §16's upload ordering) and this INSERT records where it
 	// ended up.
 	CreateDocument(ctx context.Context, arg CreateDocumentParams) (Document, error)
+	// Evidentia — Document Sharing Queries
+	//
+	// Shares are immutable history once created: the only mutation is
+	// RevokeDocumentShare's single ACTIVE -> REVOKED transition (WHERE
+	// status = 'ACTIVE', so revoking an already-revoked share is a documented
+	// no-op — zero rows affected, never an error). There is no
+	// UpdateDocumentShare/DeleteDocumentShare query, and the runtime role
+	// holds no DELETE grant on this table (see the migration).
+	CreateDocumentShare(ctx context.Context, arg CreateDocumentShareParams) (DocumentShare, error)
 	// Evidentia — Case Involved-Party Queries
 	//
 	// metadata is documented as sensitive on the table itself (see migration).
@@ -106,8 +184,17 @@ type Querier interface {
 	// so its one legitimate caller (System 3's login flow) is unmistakable at
 	// every call site. Every other query below deliberately omits it.
 	CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error)
+	// At most one row can ever match (idx_audit_verifications_single_active),
+	// so LIMIT 1 is defensive rather than load-bearing.
+	GetActiveAuditVerification(ctx context.Context) (AuditVerification, error)
 	GetActiveCaseMembership(ctx context.Context, arg GetActiveCaseMembershipParams) (CaseMember, error)
+	// The authorization hot path (internal/authz/share_policy.go) — mirrors
+	// documents_select's RLS OR-branch exactly (see the migration). Expiry is
+	// evaluated in SQL (now()) rather than in Go, so it can never drift from
+	// what the database itself would independently allow via RLS.
+	GetActiveShareForDocumentAndUser(ctx context.Context, arg GetActiveShareForDocumentAndUserParams) (DocumentShare, error)
 	GetAuditEntryByID(ctx context.Context, id uuid.UUID) (AuditLog, error)
+	GetAuditVerificationByID(ctx context.Context, id uuid.UUID) (AuditVerification, error)
 	GetAuthSessionByTokenHash(ctx context.Context, tokenHash []byte) (AuthSession, error)
 	GetCaseByCaseNumber(ctx context.Context, caseNumber string) (Case, error)
 	GetCaseByID(ctx context.Context, id uuid.UUID) (Case, error)
@@ -121,10 +208,23 @@ type Querier interface {
 	GetCertificateByDocumentID(ctx context.Context, documentID uuid.UUID) (ComplianceCertificate, error)
 	GetCertificateByID(ctx context.Context, id uuid.UUID) (ComplianceCertificate, error)
 	GetDocumentByID(ctx context.Context, id uuid.UUID) (Document, error)
+	// Scoped by document_id as well as id — see ShareService.RevokeShare's
+	// doc comment for why this is the IDOR-safety-relevant lookup (master
+	// prompt §16/§50: "cannot use another share ID" against a different
+	// document must not even resolve the row).
+	GetDocumentShareByID(ctx context.Context, arg GetDocumentShareByIDParams) (DocumentShare, error)
 	GetInvolvedPartyByID(ctx context.Context, id uuid.UUID) (CaseInvolvedParty, error)
-	// The current chain head — System 8's writer reads this to learn the
-	// prev_hash for the next entry it constructs.
+	// The current chain head — the writer reads this (AFTER acquiring the
+	// advisory lock above, within the same transaction) to learn the
+	// prev_hash for the next entry it constructs. Backed by
+	// audit_log_seq_unique's implicit index — an index-only backward scan
+	// for LIMIT 1, never a full table scan.
 	GetLatestAuditEntry(ctx context.Context) (AuditLog, error)
+	// The dashboard summary's "last verification status/timestamp" — the
+	// most recently CREATED run regardless of status (a caller wanting only
+	// completed runs filters client-side on the small result, or calls
+	// ListAuditVerificationsFiltered with status set).
+	GetLatestAuditVerification(ctx context.Context) (AuditVerification, error)
 	GetPermissionByID(ctx context.Context, id uuid.UUID) (Permission, error)
 	GetPermissionByName(ctx context.Context, name string) (Permission, error)
 	GetRedactionByResultDocument(ctx context.Context, resultDocumentID uuid.UUID) (Redaction, error)
@@ -138,17 +238,41 @@ type Querier interface {
 	// No update/delete query exists here, and none ever should: the runtime
 	// role holds SELECT + INSERT only on audit_log (see migration and
 	// backend/tests/audit_privileges_test.go). Hash-chain computation itself
-	// (deriving hash from prev_hash + entry content) is System 8's job — these
-	// queries only store/retrieve whatever the caller already computed.
+	// (canonicalizing an entry, deriving hash from prev_hash + content) is
+	// internal/audit's job (see chain.go/writer.go) — these queries only
+	// store/retrieve whatever the caller already computed.
+	// id and "timestamp" are supplied explicitly by the caller (internal/
+	// audit.ChainWriter), NOT left to their column DEFAULTs
+	// (gen_random_uuid()/now()) — the writer must know both values BEFORE
+	// this INSERT runs, since they are themselves inputs to the entry's hash
+	// (you cannot hash a value you haven't decided yet). This mirrors
+	// exactly how CertificateService already generates certID/issuedAt in Go
+	// before signing, for the identical reason. seq is the one field that
+	// genuinely cannot be supplied this way (GENERATED ALWAYS AS IDENTITY
+	// rejects an explicit value) — it is deliberately excluded from the hash
+	// input for that reason; see chain.go's doc comment.
 	InsertAuditEntry(ctx context.Context, arg InsertAuditEntryParams) (AuditLog, error)
 	ListActiveCasesForUser(ctx context.Context, userID uuid.UUID) ([]ListActiveCasesForUserRow, error)
 	ListAuditEntriesByAction(ctx context.Context, arg ListAuditEntriesByActionParams) ([]AuditLog, error)
 	ListAuditEntriesByCase(ctx context.Context, arg ListAuditEntriesByCaseParams) ([]AuditLog, error)
 	ListAuditEntriesByDateRange(ctx context.Context, arg ListAuditEntriesByDateRangeParams) ([]AuditLog, error)
 	ListAuditEntriesByUser(ctx context.Context, arg ListAuditEntriesByUserParams) ([]AuditLog, error)
+	// GET /audit's real query: every filter optional (NULL = "no constraint
+	// on this field") — same convention as ListCasesFiltered/
+	// ListUsersFiltered. This runs under the CALLER's own RLS identity (see
+	// internal/service.AuditService.List) — audit_log_select's policy
+	// (ADMIN, or own user_id, or a case the caller is a member of) narrows
+	// the result set independently of, and beneath, these filters: a filter
+	// can never widen what RLS already restricts, only narrow it further.
+	ListAuditEntriesFiltered(ctx context.Context, arg ListAuditEntriesFilteredParams) ([]AuditLog, error)
 	// Chronological chain traversal starting just after fromSeq (pass 0 to
-	// start from the genesis entry) — for chain verification (System 8).
+	// start from the genesis entry) — the batched read chain verification
+	// uses, so verifying a multi-million-row chain never requires loading it
+	// all into memory at once.
 	ListAuditEntriesFromSeq(ctx context.Context, arg ListAuditEntriesFromSeqParams) ([]AuditLog, error)
+	// GET /audit/verifications: every filter optional (NULL = "no
+	// constraint"), same convention as ListAuditEntriesFiltered.
+	ListAuditVerificationsFiltered(ctx context.Context, arg ListAuditVerificationsFilteredParams) ([]AuditVerification, error)
 	ListCaseMembers(ctx context.Context, caseID uuid.UUID) ([]CaseMember, error)
 	ListCases(ctx context.Context, arg ListCasesParams) ([]Case, error)
 	ListCasesByStatus(ctx context.Context, arg ListCasesByStatusParams) ([]Case, error)
@@ -162,6 +286,7 @@ type Querier interface {
 	ListCertificatesByDocument(ctx context.Context, documentID uuid.UUID) ([]ComplianceCertificate, error)
 	// Derivative (e.g. redacted) documents produced from a given source.
 	ListDocumentDerivatives(ctx context.Context, parentDocumentID *uuid.UUID) ([]Document, error)
+	ListDocumentSharesForDocument(ctx context.Context, documentID uuid.UUID) ([]DocumentShare, error)
 	ListDocumentsByCase(ctx context.Context, arg ListDocumentsByCaseParams) ([]Document, error)
 	ListInvolvedPartiesByCase(ctx context.Context, caseID uuid.UUID) ([]CaseInvolvedParty, error)
 	// Evidentia — Permission & Role-Permission Queries
@@ -171,6 +296,15 @@ type Querier interface {
 	// Evidentia — Role & User-Role Assignment Queries
 	ListRoles(ctx context.Context) ([]Role, error)
 	ListRolesForUser(ctx context.Context, userID uuid.UUID) ([]Role, error)
+	// Documents visibility for the "Shared With Me" view (master prompt
+	// §59): every document for which the caller holds a currently-active,
+	// unexpired share, newest share first. Joins into documents for display
+	// metadata directly — RLS's documents_select policy already permits this
+	// (see the migration's delegated-access OR-branch), so no separate
+	// authorization check is needed beyond "this share row exists and is
+	// valid", but ShareService still runs this under the caller's own RLS
+	// identity, never a privileged bypass.
+	ListSharedWithMe(ctx context.Context, arg ListSharedWithMeParams) ([]ListSharedWithMeRow, error)
 	ListUserIDsForRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error)
 	// Every filter is optional (NULL = "no constraint on this field") — same
@@ -178,6 +312,21 @@ type Querier interface {
 	// EXISTS against user_roles/roles rather than a JOIN, so a user with
 	// multiple roles is never duplicated in the result set.
 	ListUsersFiltered(ctx context.Context, arg ListUsersFilteredParams) ([]ListUsersFilteredRow, error)
+	// The `AND status = 'QUEUED'` guard makes this safe against Asynq ever
+	// redelivering/retrying the same task concurrently: a second attempt to
+	// start an already-RUNNING job matches zero rows (sqlc surfaces this as
+	// pgx.ErrNoRows for :one), which the handler treats as "someone else
+	// already started it" rather than corrupting total_entries/started_at.
+	MarkAuditVerificationRunning(ctx context.Context, arg MarkAuditVerificationRunningParams) (AuditVerification, error)
+	// The read-time self-healing path (AuditService.reconcileStale): a
+	// QUEUED/RUNNING row whose updated_at is older than the staleness
+	// threshold is presumed to belong to a worker that crashed/was killed
+	// without ever reaching CompleteAuditVerification. The `AND status IN
+	// (...)` guard makes this safe to call speculatively on every read of a
+	// non-terminal row — if the real worker completes it in the same instant,
+	// this matches zero rows (pgx.ErrNoRows) and the caller just re-fetches
+	// the now-terminal row instead.
+	MarkAuditVerificationStale(ctx context.Context, arg MarkAuditVerificationStaleParams) (AuditVerification, error)
 	RemoveCaseMember(ctx context.Context, arg RemoveCaseMemberParams) error
 	RemovePermissionFromRole(ctx context.Context, arg RemovePermissionFromRoleParams) error
 	RemoveRoleFromUser(ctx context.Context, arg RemoveRoleFromUserParams) error
@@ -195,6 +344,12 @@ type Querier interface {
 	// as sessionID's family — used when a revoked/rotated token is presented
 	// again (reuse detection: see master prompt §25).
 	RevokeAuthSessionFamily(ctx context.Context, familyID uuid.UUID) error
+	RevokeDocumentShare(ctx context.Context, arg RevokeDocumentShareParams) (DocumentShare, error)
+	// Called at a throttled cadence (see internal/service.AuditService's
+	// progress-update interval), never once per audit_log row — one UPDATE
+	// per verification BATCH (see internal/audit.VerifyBatch), which is
+	// already a small, bounded number of writes even for a very large chain.
+	UpdateAuditVerificationProgress(ctx context.Context, arg UpdateAuditVerificationProgressParams) error
 	UpdateCase(ctx context.Context, arg UpdateCaseParams) (Case, error)
 	UpdateDocumentStatus(ctx context.Context, arg UpdateDocumentStatusParams) error
 	UpdateUserLastLogin(ctx context.Context, id uuid.UUID) error

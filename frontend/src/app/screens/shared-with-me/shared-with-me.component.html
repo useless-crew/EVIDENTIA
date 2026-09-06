@@ -1,0 +1,57 @@
+<div class="shared-view animate-fade-in">
+  <div class="shared-header">
+    <div>
+      <h1 class="shared-title">Shared With Me</h1>
+      <p class="shared-subtitle">Documents another Evidentia user has granted you controlled, revocable access to.</p>
+    </div>
+  </div>
+
+  <div class="shared-card">
+    <div class="filter-bar" *ngIf="result() as r">
+      <span class="result-count font-mono">{{ r.documents.length }} of {{ r.meta.total }} results</span>
+    </div>
+
+    <div class="state-panel" *ngIf="loading()">Loading shared documents…</div>
+
+    <div class="state-panel state-error" *ngIf="!loading() && errorMessage()">
+      {{ errorMessage() }}
+      <button type="button" class="btn-secondary btn-retry" (click)="fetch()">Retry</button>
+    </div>
+
+    <div class="state-panel" *ngIf="!loading() && !errorMessage() && result() && result()!.documents.length === 0">
+      No documents have been shared with you yet.
+    </div>
+
+    <ng-container *ngIf="!loading() && !errorMessage() && result() && result()!.documents.length > 0">
+      <div class="table-header">
+        <span class="col-name">DOCUMENT</span>
+        <span class="col-type">TYPE</span>
+        <span class="col-permission">PERMISSION</span>
+        <span class="col-expires">EXPIRES</span>
+      </div>
+
+      <div class="table-body">
+        <div
+          *ngFor="let entry of result()!.documents"
+          class="table-row"
+          (click)="openDocument(entry.document.case_id, entry.document.id)"
+        >
+          <span class="col-name doc-name-link font-mono">{{ entry.document.filename }}</span>
+          <span class="col-type">{{ formatType(entry.document.document_type) }}</span>
+          <span class="col-permission">
+            <span class="badge-permission">{{ entry.permission }}</span>
+          </span>
+          <span class="col-expires">{{ entry.expires_at ? (entry.expires_at | date: 'medium') : 'No expiration' }}</span>
+        </div>
+      </div>
+
+      <div class="pagination-footer" *ngIf="result()!.meta.total_pages > 1">
+        <span class="page-count">Page {{ result()!.meta.page }} of {{ result()!.meta.total_pages }}</span>
+        <div class="page-buttons">
+          <button type="button" class="btn-page" [class.disabled]="page() <= 1" (click)="goToPage(page() - 1)">Prev</button>
+          <button type="button" class="btn-page" [class.disabled]="page() >= result()!.meta.total_pages" (click)="goToPage(page() + 1)">Next</button>
+        </div>
+      </div>
+    </ng-container>
+  </div>
+</div>

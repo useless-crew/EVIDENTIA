@@ -98,8 +98,8 @@ Full detail in the Authentication section below; summary here:
   only from a validated JWT plus the fresh database lookup. Verified by
   test.
 - **Failed authentication is recorded**: via the `internal/audit.Recorder`
-  interface — see "Audit integration" below for why this logs rather than
-  writes to the hash-chained `audit_log` table (that's System 8's job).
+  interface — see "Audit integration" below; System 8's `ChainWriter` now
+  durably persists this to the hash-chained `audit_log` table.
 
 ## Implemented in System 4 (Authorization — RBAC + ABAC + RLS Integration)
 
@@ -292,22 +292,405 @@ summary here:
   (RBAC) plus `CanAccessDocument` (ABAC), independently re-checked inside
   `DocumentService`/`CertificateService`, not just HTTP middleware.
 - **Audit integration reuses the existing `Recorder`**: `DOCUMENT_VERIFIED`,
-  `DOCUMENT_INTEGRITY_FAILURE`, `CERTIFICATE_CREATED` — no second logging
-  system, no audit hash-chain logic (still System 8's job).
+  `DOCUMENT_INTEGRITY_FAILURE`, `CERTIFICATE_CREATED` — every one of
+  these now durably persist through System 8's hash-chained
+  `audit.ChainWriter` (see below), with no change to this system's code.
+
+## Implemented in System 8 (Audit Trail & Cryptographic Audit Chain)
+
+Full detail in [AUDIT_CHAIN.md](./AUDIT_CHAIN.md); summary here:
+
+- **`audit.ChainWriter` replaces `audit.SlogRecorder`** as the
+  `internal/audit.Recorder` implementation wired into `app.New` — the
+  ENTIRE integration point. Every existing `recorder.Record` call across
+  Systems 3-7 (login/logout/refresh, authorization denials, case
+  create/update, document upload/download/verify/redact/share, admin user
+  management) starts durably, tamper-evidently persisting to `audit_log`
+  with no change to any of those call sites.
+- **One canonical hash function** (`internal/audit.ComputeEntryHash`)
+  computes SHA-256 over a fixed-field-order, labeled canonical string —
+  never Go struct layout, map iteration order, or `json.Marshal`'s
+  ordering on the entry itself — and is the ONLY function in the codebase
+  that computes an audit entry hash; both the writer (on insert) and the
+  verifier (on verification) call it, so the two can never drift apart.
+  JSONB metadata is separately canonicalized (`CanonicalizeMetadata`,
+  sorted keys, recursively) before being hashed or stored, since
+  PostgreSQL's `jsonb` storage does not preserve input byte layout.
+- **Genesis is the row with `prev_hash IS NULL`**, enforced unique by a
+  partial unique index (`idx_audit_log_single_genesis`) established back
+  in System 2's schema; every other entry's `prev_hash` equals its
+  predecessor's own `hash`, and `idx_audit_log_prev_hash_unique` (also
+  System 2) guarantees at most one entry may claim a given predecessor —
+  the database-level fork-prevention invariant, not merely an
+  application-level convention.
+- **Concurrency safety is a PostgreSQL transaction-scoped advisory lock**
+  (`pg_advisory_xact_lock`), acquired before reading the chain head and
+  held for the whole transaction: at most one writer at a time can be
+  "between" reading the current head and inserting the entry that claims
+  it as predecessor. Verified by a concurrent-writers test (40 goroutines,
+  run under `-race`) asserting the result is one unforked chain, not an
+  application-level mutex (which would do nothing across pooled
+  connections/processes anyway).
+- **The chain-head lookup runs under an internal ADMIN-equivalent RLS
+  identity**, not the acting user's own — `audit_log_select`'s RLS policy
+  restricts a non-ADMIN identity to rows it owns (or a shared case), so
+  reading the true chain head (which may belong to a different actor
+  entirely) needs the policy's own already-legitimate unrestricted-
+  visibility branch. This is not an RLS bypass: no other RLS-protected
+  table is touched inside this transaction, and the row's own stored
+  `role`/`user_id` columns still record the real actor, untouched.
+- **Append-only at the database level**: `evidentia_app` holds `SELECT`,
+  `INSERT` only on `audit_log` — no `UPDATE`, no `DELETE`, no
+  `BYPASSRLS`, and does not own the table (verified by
+  `backend/tests/db_audit_privileges_test.go`).
+- **Chain verification streams in bounded-size batches**
+  (`internal/audit.VerifyBatch`, called once per page), never loading the
+  whole chain into memory. As of System 11, verification runs
+  asynchronously (see "Implemented in System 11" below) rather than
+  resuming via a `next_seq` HTTP parameter — the same batching, just no
+  longer bounded by one request's lifetime.
+- **`GET /audit`** is gated by `audit:read` RBAC, with row-level
+  visibility beyond that left entirely to `audit_log_select` RLS — a
+  filter can only narrow what RLS already permits, never widen it
+  (verified against IDOR: an arbitrary `user_id`/`case_id` filter never
+  returns another actor's rows). It records its own `AUDIT_ACCESSED` event
+  once the query has already run, which cannot recurse (`Recorder.Record`
+  only ever inserts one row and never calls back into `AuditService`).
+  `POST /audit/verify-chain` and its companion routes are `audit:verify`
+  (ADMIN-only) — see System 11 below.
+
+## Implemented in System 11 (Audit Chain Verification & Integrity Dashboard)
+
+Full detail in [AUDIT_CHAIN.md](./AUDIT_CHAIN.md)'s "Asynchronous
+Verification & Integrity Dashboard"; summary here:
+
+- **Reuses System 10's verifier completely**: `internal/audit.VerifyBatch`/
+  `ComputeEntryHash`/`CanonicalizeMetadata` are unchanged and called by the
+  new background job exactly as the old synchronous `VerifyChain` called
+  them — one hash/canonicalization/chain-traversal implementation, never
+  two.
+- **Asynchronous by design**: `POST /audit/verify-chain` now dispatches a
+  background job (Asynq, Redis-backed) and returns `202 Accepted`
+  immediately, rather than verifying within the HTTP request — so a chain
+  of any size never requires one long-running synchronous call.
+  `audit_verifications` (migration `000005`) is the durable, PostgreSQL-
+  authoritative record of every run — Redis is used ONLY as Asynq's queue
+  transport, never as a competing state store for the result.
+- **Duplicate-job prevention is database-enforced**:
+  `idx_audit_verifications_single_active` — a unique index on a constant
+  expression filtered to `status IN ('QUEUED', 'RUNNING')`, the identical
+  idiom `audit_log`'s own genesis-uniqueness index already established —
+  guarantees at most one verification runs at a time, independent of
+  application-level locking.
+  `TestAuditService_StartVerification_DeduplicatesActiveRun` proves 20
+  concurrent callers all receive the same run.
+  `MarkAuditVerificationRunning`'s `WHERE status = 'QUEUED'` guard
+  similarly makes a redelivered/duplicate task a safe no-op, never a
+  double-counted re-verification
+  (`TestAuditService_RunVerification_ConcurrentInvocationsDoNotCorruptState`).
+- **`FAILED` (operational) is never confused with `INTEGRITY_FAILURE`
+  (cryptographic)**: a database outage or worker timeout marks a run
+  `FAILED`; only a definite hash/link mismatch marks it
+  `INTEGRITY_FAILURE`. Asynq retries an operational failure per its own
+  configured budget; a `FAILED` status is only persisted once that budget
+  is exhausted (`jobs.NewAuditVerificationErrorHandler`) — a transient
+  blip that succeeds on retry never leaves a stray `FAILED` row.
+- **Stale jobs self-heal on read, not via a second scheduled process**: a
+  `QUEUED`/`RUNNING` row with no progress for longer than expected is
+  reconciled to `FAILED`/`STALE_TIMEOUT` — and that correction is
+  persisted — the first time anyone reads it
+  (`AuditService.reconcileStale`), so a crashed worker can never leave a
+  verification `RUNNING` forever.
+- **SSE is authenticated exactly like every other route** (a normal
+  bearer header — no token in the URL) and re-runs the SAME
+  `audit:verify`+RLS check `GET /verify-chain/:id` uses before ever
+  sending the caller a single byte of data — `verification_id` alone is
+  never trusted as proof of authorization. (The handler registers with
+  System 13's SSE manager before that check, not after, purely to avoid a
+  narrow race where a fast verification's one completion event could be
+  published in the gap between the check and the registration;
+  registering itself discloses nothing since no event is ever forwarded
+  before the check passes.) The manager's dispatch path never blocks,
+  decoupling the verification worker from however slow or absent an SSE
+  client is — see [REALTIME_EVENTS.md](./REALTIME_EVENTS.md) for the full
+  System 13 security review (RBAC/ABAC/RLS on every SSE route,
+  cross-case/cross-resource isolation, connection limits, and Redis's
+  transport-only role).
+- **Verification is structurally read-only against `audit_log`** — no
+  code path in the job ever `UPDATE`s, `DELETE`s, reorders, or "repairs" a
+  chain entry; a detected problem is reported, never fixed.
+- **The dashboard is real, not simulated**: the pre-existing
+  `/app/audit` "Blockchain Graph" tab's `setInterval`-driven fake
+  verification sweep (built as scaffolding before this system's backend
+  existed) is replaced with a genuine `POST`/poll-or-SSE/render-result
+  flow against these endpoints — the frontend never computes `VERIFIED`
+  or a progress percentage itself.
+
+## Implemented in System 12 (Asynchronous Processing & Background Jobs)
+
+Full detail in [BACKGROUND_JOBS.md](./BACKGROUND_JOBS.md); the security
+review this system's own master prompt required, answered directly:
+
+- **A client can never enqueue an arbitrary task, forge a user ID, or
+  forge a role.** There is no generic `POST /jobs/execute` — every route
+  is domain-specific (`POST /audit/verify-chain`), authorizes the caller
+  BEFORE anything is created or enqueued
+  (`AuditService.StartVerification` calls `authz.Service.HasPermission`
+  first), and a job payload carries only a server-generated UUID
+  (`VerifyAuditChainPayload{VerificationID}`) — never a client-supplied
+  `user_id`/`role`/credential of any kind.
+- **A client can never access another user's job** — `GET
+  /audit/verify-chain/:id` re-runs the same RBAC check plus
+  `audit_verifications`' own RLS (`current_app_role() = 'ADMIN'`) System
+  11 already established; System 12 changes none of that.
+- **The worker never bypasses RLS or uses `BYPASSRLS`.** It establishes
+  its own transaction-local `app.user_id`/`app.role` context
+  (`workerIdentity` in `internal/service/audit_service.go`) through the
+  SAME `repository.WithTx` mechanism every HTTP-request-scoped call uses
+  — see BACKGROUND_JOBS.md's "RLS in Workers". `evidentia_app` holds no
+  `BYPASSRLS`, unchanged from every prior system.
+- **A job payload can never contain credentials** — no task type this
+  package defines has ever carried a JWT, password, refresh token,
+  encryption key, or MinIO credential; every payload's own struct
+  definition is small enough to audit by inspection
+  (`VerifyAuditChainPayload` is one field).
+- **Retries cannot duplicate business records** — `asynq.TaskID`
+  (deterministic, per `jobs.DeterministicTaskID`) makes Asynq itself
+  reject a duplicate enqueue for the same entity
+  (`asynq.ErrTaskIDConflict`), underneath (never instead of) each task
+  type's own database-level uniqueness constraint
+  (`idx_audit_verifications_single_active` for `AUDIT_CHAIN_VERIFY`);
+  `MarkAuditVerificationRunning`'s `WHERE status = 'QUEUED'` guard makes a
+  redelivered task attempt a safe no-op, not a second, corrupting run.
+- **A failed job can never remain `RUNNING` forever** — System 11's
+  `reconcileStale` self-heals a stuck `QUEUED`/`RUNNING` row to `FAILED`
+  the first time anyone reads it; System 12 changes nothing here.
+- **A huge document cannot exhaust worker memory** — the one task type
+  that exists (`AUDIT_CHAIN_VERIFY`) never loads a document at all;
+  System 12 evaluated document-processing task types and deliberately did
+  not introduce any (see BACKGROUND_JOBS.md's "Task Types") specifically
+  because the existing synchronous paths are already bounded by
+  `DocumentsConfig.MaxUploadSize` on both the write (upload) and read
+  (redaction) side.
+- **No temporary files exist to leak** — no task type in this package
+  writes one (see BACKGROUND_JOBS.md's "Resource Limits").
+- **Document-processing jobs cannot starve security jobs** — there is no
+  document-processing job today; the queue-priority design
+  (`QueueCritical` weight 6 vs `QueueDefault` weight 2) exists precisely
+  so a future one couldn't, without needing to revisit this decision
+  later.
+- **Verification cannot modify audit records, and workers cannot create
+  recursive audit events** — both unchanged from System 11 (see
+  AUDIT_CHAIN.md's "Concurrency & idempotency" and "Avoiding recursive
+  audit-access events"); System 12 adds no new code path that touches
+  `audit_log` at all.
+- **Redis is never the authoritative source for business state** — it is
+  Asynq's queue transport only; PostgreSQL (`audit_verifications`) is the
+  only place `AuditService` ever reads a verification's status from, and
+  no other task type persists anything to Redis either.
+- **An attacker cannot trigger unlimited expensive jobs** — no dedicated
+  rate-limiting middleware exists in this codebase for any route (a gap
+  master prompt explicitly says not to newly invent a whole system to
+  close), but `POST /audit/verify-chain` is already bounded by
+  `audit:verify` RBAC (ADMIN-only) and, more directly, by
+  `idx_audit_verifications_single_active` — no number of concurrent
+  callers can ever have more than one full-chain verification running at
+  once, platform-wide.
+
+## Implemented in System 13 (Real-Time Events & Server-Sent Events)
+
+Full detail in [REALTIME_EVENTS.md](./REALTIME_EVENTS.md); the security
+review this system's own master prompt required, answered directly:
+
+- **No unauthenticated SSE connection is possible** — both
+  `GET /audit/verify-chain/:id/events` and `GET /cases/:id/events` sit
+  behind the same `authMW` every other route does; a request with no
+  valid session is rejected `401` before anything else runs.
+- **Every event is authorization-scoped, not just authenticated** —
+  `internal/sse.Manager.Register` performs no authorization of its own;
+  every caller re-runs the existing RBAC/ABAC/RLS machinery
+  (`AuditService.GetVerification`'s `audit:verify`+RLS check;
+  `middleware.RequireCaseAccess`'s `case:read`+case-membership/ownership
+  ABAC check) BEFORE registering, and `Manager.dispatch` only ever
+  delivers to the exact matching `resource_type:resource_id` scope — a
+  client can never receive another case's or another verification's
+  events. Verified live (an unrelated POLICE officer gets `403` opening a
+  case's stream; ADMIN's pre-existing, established universal case-read
+  access — the SAME the plain `GET /cases/:id` route already grants — is
+  correctly preserved, not newly introduced) and by
+  `TestCaseEvents_SSE_DeliversShareCreatedAndEnforcesIsolation`'s explicit
+  cross-case check.
+- **A client cannot subscribe to an arbitrary resource** — the scope key
+  passed to `Register` is built from a URL path parameter that has
+  ALREADY been independently authorized; no query parameter or
+  client-supplied field can widen it.
+- **Event payloads cannot leak sensitive document/witness data** — every
+  event type's `data` shape (`internal/events/catalog.go`) was reviewed
+  field-by-field: identifiers, hashes, and classified outcomes only —
+  never raw document content, witness identity, a share's recipient or
+  permission level, credentials, or internal error detail.
+- **No JWT or credential ever appears in a URL** — both SSE clients
+  (`EventStreamService`) use `fetch()` with a normal `Authorization:
+  Bearer` header, never an `EventSource` with a token query parameter.
+- **Redis is never reachable from the frontend and never authoritative**
+  — it is Pub/Sub transport only (`internal/events.Channel`); PostgreSQL
+  remains the source of truth for every fact an event describes, and a
+  Redis outage degrades SSE only (REST continues functioning) rather than
+  corrupting or blocking any persistent state.
+- **A slow or malicious client cannot exhaust server memory or block
+  other clients** — `internal/sse.Manager` bounds both per-connection
+  buffering (`subscriberBufferSize`, oldest-drop-on-full, never blocking
+  `dispatch`) and per-user concurrent connections
+  (`maxConnectionsPerUser`, `429` beyond it).
+- **Disconnected clients cannot remain registered forever** — `Register`'s
+  `unsubscribe` is always deferred from `Stream`, releasing the
+  connection's map entry and per-user count on every exit path (client
+  disconnect, terminal event, or the periodic forced reconnect
+  `maxConnectionDuration` causes for an otherwise-endless stream).
+- **Verification events cannot recursively create audit records, and
+  workers cannot bypass RLS** — both unchanged from Systems 10/11/12: an
+  event notification is a wholly separate, non-durable signal from the
+  cryptographic audit trail, and `AuditService`'s existing
+  `workerIdentity` mechanism (not touched by this system) is what
+  establishes RLS context for the PostgreSQL writes that precede every
+  publish call.
+
+## Implemented in System 14 (Admin & User Management)
+
+Admin user-management (`internal/service.UserService`,
+`internal/handlers/user`, `internal/bootstrap`) already existed and was
+already largely correct — this system's job was reviewing it against a
+fresh, exhaustive checklist, closing the one genuine gap found (below),
+and integrating it with Systems 13's real-time event infrastructure.
+Full detail in `docs/API_ENDPOINTS.md`'s "Admin" section and
+`docs/REALTIME_EVENTS.md`'s event catalog; the security review this
+system's own audit required, answered directly:
+
+- **Only ADMIN ever reaches a `/admin/*` route** — per the seed data,
+  none of POLICE/FORENSICS/LAWYER/JUDGE hold ANY `user:*` permission;
+  `middleware.RequirePermission`/`RequirePermission`-equivalent
+  service-layer checks (`authz.Service.HasPermission`/
+  `CanModifyUserRole`) gate every route, re-checked independently inside
+  `UserService` even where the router's own middleware already enforces
+  it (defense in depth, matching every other service in this codebase).
+- **A user can never assign themselves a role or change their own
+  account status** — `authz.Service.CanModifyUserRole` and
+  `UserService.UpdateStatus` both hard-block `actor.ID == targetID`
+  BEFORE any database write, independent of RBAC — even an ADMIN acting
+  on their own account is refused, logged as `AUTHZ_DENIED`.
+- **Non-admin roles can never be created as ADMIN through a generic
+  endpoint** — there is exactly one user-creation endpoint (`POST
+  /admin/users`), it requires `user:create` (ADMIN-only), and its request
+  DTO (`createUserRequest`) has no `password_hash`/`created_by`/`id`
+  field a client could even populate — every server-controlled value is
+  derived internally, never bound from client JSON (mass-assignment is
+  structurally impossible, not merely filtered).
+- **The last active Administrator account can never be removed — even
+  under a race between two concurrent requests** (NEW, System 14): master
+  prompt's own "an Admin must not accidentally remove the last usable
+  Admin account" was previously unenforced — `UpdateRole`/`UpdateStatus`
+  had no check at all preventing a role change or deactivation from
+  leaving zero active admins. Fixed with a genuine database-level
+  guarantee, not an application-only check:
+  `UserService.ensureNotLastActiveAdmin` acquires a dedicated PostgreSQL
+  advisory lock (`db/queries/roles.sql`'s `AcquireAdminGuardLock` — the
+  identical `pg_advisory_xact_lock` idiom `internal/audit.ChainWriter`
+  already established for chain-fork prevention, reused for an
+  unrelated invariant with its own distinct lock key) BEFORE counting
+  currently-active admins, and holds it through the role/status UPDATE
+  that follows in the SAME transaction — refusing (`409 Conflict`) if the
+  target is the only one. This is what makes the guard correct even when
+  two different admins concurrently target two DIFFERENT remaining
+  admins (each would otherwise independently observe "2 active admins,
+  safe to proceed" and both commit, reaching zero): the lock serializes
+  the pair, so whichever commits second re-counts against the FIRST
+  transaction's already-committed result. Verified by
+  `TestUserService_UpdateRole_ConcurrentDemotionOfBothRemainingAdminsLeavesExactlyOne`
+  (real concurrent goroutines against a live database, run under
+  `-race`) and `TestEnsureNotLastActiveAdmin_BlocksAtExactlyOne`.
+- **Role changes and account deactivation take effect on the very next
+  request — no stale-session window** — `middleware.Auth` re-resolves
+  the caller's CURRENT roles and status from PostgreSQL on every single
+  request (`AuthService.ResolveIdentity`), never trusting the JWT access
+  token's own embedded role claim; a deactivated/suspended account is
+  rejected the moment its status changes, even if its access token has
+  not yet expired, and a role change is visible to every subsequent
+  authorization check immediately. `UpdateStatus`/`ResetPassword`
+  additionally revoke every one of the target's refresh sessions
+  (`RevokeAllAuthSessionsForUser`) as defense in depth against a stolen
+  refresh token minting new access tokens after the fact — belt and
+  suspenders on top of the access-token-level protection that already
+  holds regardless.
+- **Passwords are never persisted, logged, or returned** —
+  `auth.HashPassword` (bcrypt, cost centrally configured) is the ONLY
+  path a plaintext password takes before becoming a hash; no service,
+  handler, audit `Metadata`, or real-time event payload ever carries one
+  (verified by `TestUserService_CreateUser_PasswordNeverInResponse` and,
+  for the new event-publishing path,
+  `TestUserService_CreateUser_PublishesEventAfterCommitWithNoPassword`,
+  which additionally marshals the published payload to JSON and asserts
+  the literal string `"password"` never appears in it).
+- **Duplicate email creation is a database-level guarantee, not an
+  application race** — `users_email_unique`; a concurrent duplicate
+  `CreateUser` is mapped to `409 Conflict`, never a raw constraint error
+  or a silent second row.
+- **The initial Admin bootstrap never appears in source, is idempotent,
+  and never logs its password** —
+  `internal/bootstrap.EnsureBootstrapAdmin`, driven entirely by
+  `EVIDENTIA_BOOTSTRAP_ADMIN_EMAIL`/`_PASSWORD`/`_NAME` (unset by
+  default; the root `.env.example`'s own values are documented
+  placeholders, never used in production), checked-and-created inside
+  ONE transaction (so two replicas starting simultaneously can never
+  create two bootstrap admins), and a permanent no-op once any ADMIN
+  already exists — it never resets an existing account's password.
+- **Admin user-management events integrate with, and never duplicate,**
+  **Systems 10/13** — every state change still goes through the SAME
+  `audit.Recorder`/cryptographic chain (`USER_CREATED`/`USER_UPDATED`/
+  `USER_ROLE_CHANGED`/`USER_STATUS_CHANGED`/`USER_PASSWORD_RESET`,
+  actor/role always server-derived from the authenticated caller, never
+  client input) and the SAME `internal/events.Publisher`/
+  `internal/sse.Manager` real-time infrastructure (`USER_CREATED`/
+  `USER_UPDATED`/`USER_ROLE_CHANGED`/`USER_ACTIVATED`/`USER_DEACTIVATED`/
+  `USER_SUSPENDED` on `GET /admin/users/events`, gated by the same
+  `user:read` RBAC check `GET /admin/users` itself requires) — no second
+  audit log, no second event bus.
+- **`users`/`roles`/`user_roles` carry no RLS policies, and this is
+  intentional, not an oversight**: this is a single-tenant deployment
+  with no per-agency/per-tenant boundary anywhere in this schema (no
+  system through 14 introduces one); admin user management is
+  correctly, explicitly a GLOBAL capability gated entirely by RBAC
+  (`user:read`/`user:create`/`user:update`/`user:deactivate`/`user:role`,
+  ADMIN-only) — there is no narrower, per-row visibility rule to enforce
+  on a global user directory. `evidentia_app` holds no `BYPASSRLS`
+  regardless (unchanged from every prior system) — the tables simply
+  have no policies to bypass. If a future system introduces
+  agency/tenant scoping to `users`, this table's RLS posture must be
+  revisited at that time, not assumed to remain RBAC-only.
 
 ## Principles
 
 The eventual system will enforce all twelve of these. Implemented so far:
-**1** (System 3), **2**/**3** (System 4), **4** (System 2), **11**
-(System 3). Partial: **5** (System 6 computes/persists the initial hash;
-System 7 adds recompute-and-compare verification and tamper detection —
-AES-256 encryption at rest, the other half of principle **6**'s
-neighbor, remains unstarted); **12** (failed/successful auth actions, and
-now authorization denials plus document/certificate events, are recorded
-via `internal/audit.Recorder`, but only to the operational log — see
-"Audit integration" above — not the durable table); **7**/**8**
-(audit_log's storage invariants exist — System 2 — but nothing computes a
-hash chain yet). Not started: 6, 9, 10.
+**1** (System 3), **2**/**3** (System 4), **4** (System 2), **7**/**8**/
+**9** (System 8 — see above), **11** (System 3), **12** (every
+security-sensitive action listed in "Audit integration" throughout this
+document now durably records through System 8's hash chain, not only the
+operational log). Partial: **5** (System 6 computes/persists the initial
+hash; System 7 adds recompute-and-compare verification and tamper
+detection — AES-256 encryption at rest, the other half of principle
+**6**'s neighbor, remains unstarted); **10** (see "Transport Security"
+below — TLS termination is a deployment-time reverse-proxy
+responsibility this application documents and cooperates with via
+`TRUSTED_PROXIES`, but does not implement in-process). Not started: 6.
+System 15 (Security Hardening & Compliance Layer) adds a login
+brute-force/credential-stuffing throttle (`internal/ratelimit`, see
+"Authentication" below), a fixed set of defense-in-depth response
+headers and cache-control on every response (`middleware.SecurityHeaders`),
+explicit reverse-proxy trust configuration for `ClientIP()`, a
+wildcard-CORS-plus-credentials guard, an HTML/active-content upload
+denylist, and infrastructure hardening (Redis authentication,
+loopback-only Postgres/Redis/MinIO port binding in the local
+docker-compose stack) — see "Threat Model" below for how these fit
+together with Systems 1-14's existing controls.
 
 1. JWT authentication
 2. RBAC (Role-Based Access Control)
@@ -434,15 +817,12 @@ Failed authentication (`AUTH_LOGIN_FAILED`, `AUTH_REFRESH_FAILED`,
 (`AUTH_LOGIN_SUCCESS`, `AUTH_REFRESH_SUCCESS`, `AUTH_LOGOUT`) are recorded
 through `internal/audit.Recorder` — an interface, not System 3's own
 implementation of the durable audit trail. The concrete implementation
-today, `audit.SlogRecorder`, writes to the structured operational log, not
-to the hash-chained `audit_log` table: actually computing `hash`/
-`prev_hash` correctly is System 8's job (see DATABASE_SCHEMA.md's
-"Audit-chain storage invariants"), and writing *unchained* rows into that
-table now would risk breaking System 8's eventual chain verification over
-historical data. `AuthService` depends only on the `Recorder` interface,
-so swapping in System 8's real writer later requires no change to
-authentication code. `Recorder.Record` never returns an error: a login or
-refresh must not fail merely because audit logging had a hiccup (see
+today, `audit.ChainWriter` (System 8), durably persists these to the
+hash-chained `audit_log` table with correctly-computed `hash`/`prev_hash`
+(see [AUDIT_CHAIN.md](./AUDIT_CHAIN.md)) — `AuthService` depended only on
+the `Recorder` interface throughout, so wiring in the real writer required
+no change to authentication code. `Recorder.Record` never returns an
+error: a login or refresh must not fail merely because audit logging had a hiccup (see
 master prompt §49) — this also means audit failures are currently
 invisible to the caller by design, a tradeoff explicitly made here rather
 than silently.
@@ -455,12 +835,66 @@ than silently.
   access token (default 15 minutes) plus revocable refresh sessions is
   judged sufficient; a Redis-backed blacklist is explicitly out of scope
   for this system (Redis/Asynq business logic belongs to a later system).
-- **Account lockout / rate limiting** — not implemented, to avoid an
-  easy denial-of-service vector against legitimate users from a naive
-  implementation. `AuthService`'s structure (one method per operation, no
-  hidden global state) does not preclude adding this later.
+- **Permanent account lockout** — deliberately never implemented, in
+  either the original System 3 or System 15's throttle below: a naive
+  lockout would itself be a denial-of-service vector, letting an attacker
+  lock a victim out indefinitely just by repeating failed logins against
+  their account. See "Login brute-force throttle (System 15)" — the
+  actual control added — immediately below for what IS implemented
+  instead: temporary, auto-expiring, fail-open rate limiting.
 - **MFA** — explicitly out of scope per the project requirements (a
   stretch goal for sensitive roles), not precluded by this architecture.
+
+### Login brute-force throttle (System 15)
+
+`AuthService.Login` — via `internal/ratelimit.Limiter`, Redis-backed —
+runs two independent, fixed-window counters before ever querying the
+database, both checked in `checkLoginRateLimit`:
+
+- **Per-IP** (`login:ip:<ClientIP>`, default 20 attempts / 15 minutes) —
+  bounds total login volume from one source regardless of which account
+  it targets (a credential-stuffing spray across many accounts).
+- **Per-account** (`login:acct:<SHA-256(lowercased email)>`, default 10
+  attempts / 15 minutes) — bounds attempts against one account regardless
+  of source IP (a distributed brute-force against a single victim, e.g.
+  rotating through a botnet). The email itself is never used as the Redis
+  key directly (data minimization); a fast, non-adaptive hash is
+  appropriate here for the same reason `HashRefreshToken` uses one — this
+  protects against storing an identifier in cleartext, not against
+  offline brute-forcing of a secret.
+
+Both counters are **fixed-window and auto-expiring** — neither can become
+a permanent lockout, satisfying the constraint above. A successful login
+resets its account counter (`Login`'s `s.loginLimit.Reset(ctx, acctKey)`)
+so a legitimate user who mistyped a password a few times regains a full
+quota immediately; the per-IP counter is deliberately NOT reset on
+success, since it tracks aggregate request volume independent of which
+account eventually succeeds.
+
+Exceeding either limit returns the same generic `429 Too Many Requests`
+(`loginRateLimitError`, "Too many login attempts. Please try again
+later.") with a `Retry-After` header — never revealing which dimension
+tripped, for the same anti-enumeration reason `genericAuthError` is
+generic. The throttled attempt is also recorded through the audit
+`Recorder` as `AUTH_LOGIN_RATE_LIMITED` with a `reason` of
+`ip_rate_limited` or `account_rate_limited` for server-side diagnosis.
+
+**Fails OPEN, never closed, on a Redis error**: `RedisLimiter.Allow`
+returns `(allowed: true, err: non-nil)` when Redis is unreachable, and
+`checkLoginRateLimit` only blocks when `err == nil`. A rate limiter is
+defense-in-depth on top of the bcrypt/account-status checks that remain
+the authoritative gate — an infrastructure outage in Redis must not be
+able to lock every user out of the entire application. Thresholds
+(`LOGIN_RATE_LIMIT_{IP,ACCOUNT}_{MAX,WINDOW}`) are centrally configured
+(`config.LoginRateLimitConfig`), validated positive at startup, never
+scattered as inline constants.
+
+An unknown-email login additionally runs `bcrypt.CompareHashAndPassword`
+against a fixed placeholder hash (`AuthService.dummyHash`, computed once
+at construction at the same configured cost as real passwords) purely to
+spend comparable wall-clock time to the "wrong password" path — otherwise
+the two failure branches would be distinguishable by response latency
+alone despite returning byte-identical bodies.
 
 ## Authorization
 
@@ -736,27 +1170,32 @@ denial), and an internal reason code (`permission_denied`,
 `self_role_modification_forbidden`). As with System 3, `Recorder.Record`
 never returns an error and a recording failure never blocks or alters the
 authorization decision itself (master prompt: audit failures must never
-become an authorization bypass). `audit.SlogRecorder` remains the only
-implementation today — System 8 provides the durable, hash-chained writer
-with no change required here.
+become an authorization bypass). `audit.ChainWriter` (System 8) is the
+`Recorder` implementation today, durably persisting these denials to the
+hash-chained `audit_log` table with no change required here.
 
 ### What System 4 does *not* do
 
-- **Business logic for audit/admin, and most of documents** —
-  `internal/handlers/{audit,user}` and `internal/service/{audit,
-  user}_service.go` remain TODO stubs for later systems, as do
-  `internal/handlers/document/{verify,redact,share,certificate}.go`.
-  Cases (System 5) and document upload/download (System 6) are
-  implemented — see "Implemented in System 5"/"Implemented in System 6"
-  above and "Case Management"/"Document Management" below; both systems
-  used exactly the primitives (`app.App.AuthzService`,
+- **Business logic for audit/admin** —
+  `internal/handlers/audit` and `internal/service/audit_service.go` remain
+  TODO stubs for a later system. Cases (System 5), document
+  upload/download (System 6), verify/certificate (System 7), redact, and
+  document sharing are all implemented today — see "Implemented in
+  System 5"/"Implemented in System 6" above and "Case Management"/"Document Management"/
+  "Document Verification & Compliance Certificates"/"Document Redaction"/
+  "Document Sharing" below; every one of these used exactly the
+  primitives (`app.App.AuthzService`,
   `RequirePermission`/`RequireCaseAccess`/`RequireDocumentAccess`) this
-  one built, with no changes to `internal/authz` itself.
+  system built, with no changes to `internal/authz` itself (document
+  sharing's own delegated-access path is a new METHOD on the existing
+  `authz.Service`, not a new authorization engine — see "Document
+  Sharing" below).
 - **Membership-type-specific action gating** — see "Case-based ABAC"
   above.
 - **Finer-grained protected-information classification** beyond
   `party_type = 'WITNESS'` — see "Protected information" above.
-- **The audit hash chain** — unchanged, still System 8's job.
+- **The audit hash chain** — now implemented; see "Implemented in
+  System 8" above and [AUDIT_CHAIN.md](./AUDIT_CHAIN.md).
 
 ## Case Management
 
@@ -820,11 +1259,13 @@ System 5 section).
 
 `GET /cases/:id`'s `timeline` field is synthesized, at request time, from
 already-loaded `cases.created_at`/`updated_at`, `documents.uploaded_at`,
-and `case_involved_parties.created_at` — never read from `audit_log`,
-which no system populates yet (`audit.SlogRecorder` still writes only to
-the operational log; System 8 owns the durable, hash-chained writer). This
+and `case_involved_parties.created_at` — never read from `audit_log`, even
+though System 8's `ChainWriter` now durably populates that table. This
 avoids exactly the situation master-prompt-driven design explicitly warns
-against: a second, competing "audit-like" table maintained by this system.
+against: a second, competing "audit-like" table maintained by this
+system — the real, authoritative security audit trail for this case is
+`GET /audit?case_id=...` (see [AUDIT_CHAIN.md](./AUDIT_CHAIN.md)), and this
+field never attempts to duplicate or replace it.
 
 ### Case creation transaction
 
@@ -965,20 +1406,23 @@ and deliberately never document contents or storage credentials.
   object's current hash against `documents.sha256_hash` to detect
   tampering is System 7's job (`POST /documents/:id/verify` — see
   "Document Verification & Compliance Certificates" below).
-- **Redaction/derivative documents** — a future redaction system. This
-  system's storage layout (original object never overwritten,
-  `documents.parent_document_id` already present in the schema but
-  unused by any query System 6 added) is deliberately compatible with a
-  future redaction system creating a new document row + new object,
-  never modifying the original.
-- **The audit hash chain** — unchanged, still System 8's job (matching
-  the numbering already established throughout Systems 2-5's code and
-  the applied migration itself); `DOCUMENT_*` events go through the same
-  interface-based `Recorder` any future hash-chained writer will
-  implement, with no change required to `DocumentService`.
+- **Redaction/derivative documents** — this system's storage layout
+  (original object never overwritten, `documents.parent_document_id`
+  already present in the schema but unused by any query System 6 added)
+  was deliberately left compatible with a later redaction system creating
+  a new document row + new object without modifying the original — see
+  "Document Redaction" below for that system, now implemented on exactly
+  this foundation.
+- **The audit hash chain** — now implemented (System 8, see
+  [AUDIT_CHAIN.md](./AUDIT_CHAIN.md)); `DOCUMENT_*` events went through
+  the same interface-based `Recorder` all along, so no change was
+  required to `DocumentService` when the real hash-chained writer was
+  wired in.
 - **Compliance certificates, document sharing** — certificates are now
-  System 7's job (below); `POST /documents/:id/share` remains a TODO
-  stub, a later system's scope.
+  System 7's job (below); document sharing is now also implemented (see
+  "Document Sharing" below), built on the storage layout this system
+  established (a share never touches an object or a hash — see that
+  section's "Sharing must never change document integrity").
 
 ## Document Verification & Compliance Certificates
 
@@ -1156,17 +1600,23 @@ discovered during generation records `DOCUMENT_INTEGRITY_FAILURE`
 instead, identically to a direct verify call) go through the same
 `internal/audit.Recorder` interface every prior system uses — event
 metadata carries the hex-encoded hashes involved, never raw file bytes or
-storage credentials, and no second logging system or audit hash-chain
-logic was introduced (still System 8's job).
+storage credentials, and no second logging system was introduced; the
+hash-chain logic itself lives entirely in System 8 (see below).
 
 ### What System 7 does *not* do
 
 - **The audit hash chain** — `DOCUMENT_*`/`CERTIFICATE_*` events go
-  through the existing interface-based `Recorder`; computing or verifying
-  a hash chain over `audit_log` remains System 8's job.
-- **Redaction, document sharing** — a future redaction system and
-  `POST /documents/:id/share` remain out of scope; System 7 preserves the
-  original object/hash exactly as System 6 left them.
+  through the existing interface-based `Recorder`; computing and verifying
+  the hash chain over `audit_log` is System 8's job (see "Implemented in
+  System 8" above and [AUDIT_CHAIN.md](./AUDIT_CHAIN.md)).
+- **Redaction, document sharing** — both are now implemented (see
+  "Document Redaction" and "Document Sharing" below), built on top of
+  exactly the verify/certificate independence this system established —
+  a redacted derivative gets its own certificate, bound to its own hash,
+  and a shared document's certificate is reachable by its recipient
+  (per the share's permission) with no change to this system's code.
+  System 7 itself preserves the original object/hash exactly as System 6
+  left them.
 - **A public certificate-verification HTTP endpoint** —
   `CertificateService.VerifyCertificateIntegrity` provides the capability
   (used directly by this system's own tests), but no route exposes it
@@ -1176,6 +1626,429 @@ logic was introduced (still System 8's job).
 - **AES-256 encryption at rest, PDF/legal-format certificate rendering,
   a blockchain, or any output format beyond the JSON API response** — all
   explicitly out of this system's scope.
+
+## Document Redaction
+
+`internal/service.DocumentService.RedactDocument`,
+`internal/handlers/document/redact.go` implement
+`POST /documents/:id/redact` — see [API_ENDPOINTS.md](./API_ENDPOINTS.md)'s
+Documents section for the request/response contract. This section covers
+the security-relevant design decisions. The core guarantee this system
+provides:
+
+> A redaction is never an edit to the original evidence. It is a new,
+> cryptographically independent derivative — the original's row, object,
+> hash, and any existing certificate are never modified.
+
+```text
+source document (documents row A, hash H1, object at cases/.../A/original)
+        |
+        | 1. authz.CanAccessDocument(user, A, document:redact)
+        | 2. recompute A's hash from its CURRENT stored object,
+        |    compare to H1 — refuse (409) on mismatch, exactly the
+        |    same anti-tamper check certificate generation performs
+        | 3. decode A's bytes as an image (refuse, 422, if the
+        |    mime_type has no supported redaction implementation)
+        | 4. destructively overwrite each requested region's pixels
+        |    (opaque black, draw.Src — a straight replace, never an
+        |    alpha-blended overlay) on an IN-MEMORY COPY
+        | 5. re-encode, compute H2 (server-side only — never
+        |    client-supplied), upload as a NEW object
+        v
+derivative document (documents row B, hash H2, parent_document_id = A,
+                      object at cases/.../B/original)
+        |
+        +── redactions row: source_document_id=A, result_document_id=B,
+             region_data, reason, created_by
+```
+
+`A` is never touched by any step above — not read-modify-written, not
+even its `status`/`metadata`. `POST /documents/{A}/verify` and
+`GET /documents/{A}/certificate` behave identically before and after the
+redaction; so do the equivalent calls against `B`, which is a completely
+ordinary `documents` row from every other route's perspective.
+
+### Authorization: no new permission granted
+
+`document:redact` was already seeded (System 2/4) but held by **no
+role except ADMIN** until this system existed to exercise it — this
+system reuses that existing grant rather than expanding it.
+`backend/tests/rbac_test.go`'s `TestRBAC_PolicePermissions` explicitly
+asserts POLICE does **not** hold `document:redact`, matching master
+prompt guidance for this system: "do not grant new permissions merely
+because redaction requires it." `RedactDocument` calls
+`authz.Service.CanAccessDocument(user, sourceID, authz.ActionDocumentRedact)`
+— the identical RBAC-permission-AND-case-relationship pattern
+verify/download/certificate already use, independently re-checked at the
+service layer regardless of what HTTP middleware already decided.
+
+### Only two formats get REAL redaction — everything else is refused
+
+The single most important constraint on this system: a "redacted"
+document must not merely *look* redacted. `RedactDocument` supports
+**exactly** `image/png` and `image/jpeg` (the document's server-detected
+`mime_type` from upload — System 6 never trusts a client-declared
+Content-Type). For these, `image/draw`'s `draw.Src` compositing operator
+performs a genuine pixel REPLACE (not an alpha blend) on a decoded,
+in-memory copy before re-encoding — the original pixel values are
+provably gone from the derivative's bytes, verified directly by
+`TestRedactDocument_ContentActuallyRemoved` (decodes the derivative's
+actual re-encoded bytes and asserts the redacted region reads back as
+pure black, never the original color).
+
+Every other `mime_type` — including `application/pdf`, the format most
+real-world "redaction" tooling actually targets — is refused with `422`.
+This project has no library in its approved stack (see
+`TECH_STACK.md`) capable of safely stripping underlying text/vector
+content from a PDF; drawing a black box merely on top of an
+otherwise-unmodified PDF would still leak the "redacted" content to
+anyone who extracts its underlying text, which is **worse** than
+refusing the request outright — master prompt guidance is explicit that
+a fake/incomplete redaction must never be presented as a real one.
+Extending this list to another format requires actually implementing
+(and testing, the same way) genuine content removal for it, never adding
+a permissive map entry.
+
+### Integrity is re-verified before every redaction
+
+Before processing, `RedactDocument` retrieves the source's *current*
+stored object and recomputes its SHA-256, comparing it against the
+canonical `documents.sha256_hash` — the identical check
+`CertificateService.generateCertificate` performs before issuing a
+certificate, shared via the same `reconcileTamperStatus`/
+`recomputeDocumentHash` helpers. A mismatch refuses with `409` rather
+than silently deriving a "redacted" copy from bytes that no longer match
+what was actually ingested — laundering an undetected tampering event
+into a seemingly-clean new document would be far worse than simply
+verifying the document first, which System 7 already made cheap to do.
+
+### The derivative's hash is always server-computed, always different
+
+`H2` (the derivative's `sha256_hash`) is computed by this system, in
+memory, from the actual re-encoded bytes it is about to upload — there is
+no request field for a client-supplied hash anywhere in
+`POST /documents/:id/redact`'s contract. As a final defense-in-depth
+check, `RedactDocument` explicitly refuses (rather than silently
+persisting) the pathological case where `H2` would equal `H1` — not
+reachable given regions are validated as non-empty with positive area,
+but never assumed safe by omission.
+
+### Storage: a new object, never an overwrite
+
+The derivative is written to a brand-new object key
+(`documentObjectKey(caseID, derivativeID)` — the exact same
+System-6 helper/convention every original upload already uses, just with
+a fresh, server-generated document ID) — never the source's key. A
+storage write that succeeds followed by a failed PostgreSQL transaction
+triggers the same best-effort orphan-object cleanup `UploadDocument`
+already established (`DocumentService.cleanupOrphan`); a transaction that
+never runs because storage failed leaves no document/redaction row
+pointing at a nonexistent object.
+
+### Derivative access control and lineage
+
+The derivative inherits the **same** case as its source (`case_id` is
+copied, never re-derived from anything client-supplied), so
+`CanAccessDocument` applies the identical case-relationship rule to it as
+to any other document in that case — "the derivative exists" never
+implies "everyone can now read it"
+(`TestRedactDocument_DerivativeAccessIndependentlyControlled`). Lineage is
+explicit and queryable both directions: `documents.parent_document_id`
+(now also surfaced as `DocumentSummary.parent_document_id` in every API
+response that returns document metadata) points from derivative to
+source; `redactions.source_document_id`/`result_document_id` (with a
+database-level `UNIQUE` constraint on `result_document_id` — a document
+row is the output of at most one redaction) link them the other way,
+alongside `reason`, `created_by`, and `region_data`.
+
+### Audit
+
+Every successful redaction records a `DOCUMENT_REDACTED` event (source/
+result document IDs, reason, region count, both hashes hex-encoded —
+never raw file bytes) through the same `internal/audit.Recorder`
+interface every prior system uses; a mismatch discovered during the
+pre-processing integrity check records `DOCUMENT_INTEGRITY_FAILURE`
+instead, identically to a direct verify call. No cryptographic audit-chain
+logic was introduced here — that remains a separate, later system's job,
+exactly as System 6/7 already established for their own `DOCUMENT_*`/
+`CERTIFICATE_*` events.
+
+### What this system does *not* do
+
+- **PDF or any non-raster-image redaction** — see above; refused safely,
+  never faked.
+- **The audit hash chain** — unchanged.
+- **A standalone `GET /documents/:id`** — remains out of scope; see
+  API_ENDPOINTS.md's "Not yet implemented" (document sharing, a
+  once-planned "not yet" item here, is now implemented — see "Document
+  Sharing" below).
+- **Expanding who may redact** — `document:redact` remains ADMIN-only,
+  per existing System 4 policy; this system does not touch
+  `role_permissions`.
+- **Asynchronous/background processing** — redaction here is synchronous,
+  bounded by the same `MAX_UPLOAD_SIZE` originals are (an in-memory
+  decode/re-encode is unavoidable for real pixel-level content removal);
+  Asynq remains unintroduced, per `TECH_STACK.md`.
+
+## Document Sharing
+
+`internal/service.ShareService`, `internal/handlers/document/share*.go`,
+`internal/handlers/shared`, `internal/handlers/user.Search` implement
+`POST /documents/:id/share`, `GET /documents/:id/shares`,
+`POST /documents/:id/shares/:shareId/revoke`, `GET /shared/documents`, and
+`GET /users/search` — see [API_ENDPOINTS.md](./API_ENDPOINTS.md)'s
+Documents section for the request/response contract. This section covers
+the security-relevant design decisions. The core guarantee:
+
+> A share is a controlled, revocable authorization GRANT — never
+> ownership transfer, never a second, independent access path that
+> bypasses RBAC/ABAC/RLS. It is a second AUTHORIZATION PATH alongside
+> case membership, evaluated by the exact same centralized
+> `authz.Service.CanAccessDocument` every document route already calls.
+
+```text
+documents_select RLS (and CanAccessDocument's Go-side mirror) permits SELECT/access when:
+
+    current_app_role() = 'ADMIN'
+    OR (case member of the document's case)              <- the ORIGINAL authorization path
+    OR has_active_document_share(document.id, caller.id)  <- the NEW, narrower path this system adds
+```
+
+### Authorization: one centralized check, two paths, never a third
+
+`ShareService.CreateShare`/`ListShares`/`RevokeShare` all authorize via
+`authz.Service.CanAccessDocument(user, documentID, authz.ActionDocumentShare)`
+— the identical RBAC-AND-ABAC pattern verify/download/redact/certificate
+already use. No new authorization engine, no hand-rolled role check.
+`document:share` was already seeded (System 2/4) and already held by
+POLICE/LAWYER/ADMIN per the existing role_permissions matrix — this
+system reuses that grant rather than expanding it.
+
+The genuinely new piece is `authz.Service.shareGrantsAccess`
+(`internal/authz/share_policy.go`), consulted only AFTER RBAC passes and
+ONLY once the ORIGINAL case-relationship check has already failed — a
+second, narrower fallback, never a replacement:
+
+```go
+allowed, _ := HasPermission(user, action)     // RBAC — unchanged, checked FIRST
+...
+if rel.isOwner || rel.isMember { allow }       // ABAC path 1 — unchanged
+delegated, _ := shareGrantsAccess(user, documentID, action)
+if delegated { allow }                         // ABAC path 2 — NEW
+deny
+```
+
+Because RBAC is checked first and is completely unaffected by sharing, a
+share can only ever grant an action-TYPE the recipient's ROLE already
+holds via RBAC — it only closes the "which SPECIFIC document" gap, never
+the "which KIND of action" gap. A LAWYER (who holds no `document:verify`
+permission at all, per the seed data) cannot verify a shared document
+even with a `VERIFY`-tier share; a FORENSICS user (who does hold
+`document:verify`) can, once shared with, verify a document outside
+their case. This is a direct, tested consequence of reusing RBAC exactly
+as-is (`TestShareService_DelegatedAccess_VerifyGrantsBoth` uses FORENSICS
+for exactly this reason, not LAWYER).
+
+### RLS: a second authorization path, and the recursion it caused
+
+Master prompt guidance asked for RLS to permit access when "the user is
+directly authorized OR has an active valid delegated access" — implemented
+by adding an OR-branch to the EXISTING `documents_select` and
+`compliance_certificates_select` policies (via `ALTER POLICY`, never a
+DROP+recreate that could silently lose behavior).
+
+The first implementation attempt inlined a raw
+`EXISTS (SELECT 1 FROM document_shares ...)` into that branch — and
+immediately hit PostgreSQL error 42P17, "infinite recursion detected in
+policy for relation documents". The reason: `document_shares` carries its
+OWN RLS policy (`document_shares_select`), which itself joins back into
+`documents` (so a case member can see a document's share list). Evaluating
+`documents_select`'s new branch therefore required evaluating
+`document_shares_select`, which required re-evaluating `documents_select`
+— an unbounded cycle PostgreSQL correctly refuses to run.
+
+The fix: `has_active_document_share(document_id, user_id)`, a
+`SECURITY DEFINER` SQL function owned by the migrator role (a superuser —
+superusers are exempt from RLS unconditionally, `FORCE ROW LEVEL SECURITY`
+notwithstanding). Calling it from `documents_select` queries
+`document_shares` directly, without ever re-entering `document_shares`'s
+own RLS, breaking the cycle. `document_shares_select` itself is
+unaffected and still safely references `documents` in the other
+direction (evaluating `documents_select`, which no longer loops back) —
+see `db/migrations/000004_document_sharing.up.sql`'s inline comment at
+the `CREATE FUNCTION` site for the full mechanical explanation, and
+`TestMigration_UpDownUpIsReproducible` (`backend/tests/db_migration_test.go`)
+for proof the schema still applies cleanly from scratch.
+
+### Permission tiers: VIEW and VERIFY only, deliberately no DOWNLOAD
+
+`document_shares.permission` is `VIEW` or `VERIFY` — not a third
+`DOWNLOAD` tier some early drafts of this feature's spec suggested. This
+application has no distinct "view metadata without downloading bytes"
+capability (no inline document renderer exists — see
+`document-viewer.component.ts`'s own "Inline preview is not available"
+note), so `VIEW` already covers `document:read` + `document:download` +
+`certificate:read` (a certificate is no more sensitive than the hash it
+already contains — master prompt: "certificate access follows document
+view permission"). `VERIFY` is a strict superset, additionally granting
+`document:verify`. Neither tier — at any level — ever grants
+`document:redact`, `document:share` (resharing), `certificate:create`, or
+any write/delete action; this is enforced structurally in
+`internal/authz/share_policy.go`'s `shareViewActions`/`shareVerifyActions`
+maps (an action simply never appears in either map, rather than being
+excluded by a runtime check that could be gotten wrong) and verified
+directly by `TestShareService_DelegatedAccess_CannotRedactViaShare` and
+`TestShareService_DelegatedAccess_CannotReshareViaShare` — the latter
+using a `VERIFY`-tier share (the highest tier) specifically to prove even
+the most privileged share still cannot reshare.
+
+### Expiration and revocation: server-enforced, both layers
+
+`expires_at` is optional (`NULL` = non-expiring) and, when present, must
+be strictly in the future at creation time. Expiry is evaluated
+server-side in TWO independent places that must agree: the SQL query
+`GetActiveShareForDocumentAndUser`/`has_active_document_share` (both
+filter on `expires_at IS NULL OR expires_at > now()`) and
+`shareGrantsAccess`'s own Go-side re-check of the same condition on the
+row it retrieves — belt-and-suspenders, not redundant decoration: neither
+layer trusts that the other already got it right.
+
+Revocation is a single, permanent `ACTIVE -> REVOKED` transition
+(`ShareService.RevokeShare`, backed by
+`UPDATE ... WHERE id = $1 AND document_id = $2 AND status = 'ACTIVE'`) —
+never a DELETE (no DELETE grant/query exists on `document_shares`, exactly
+like `redactions`/`compliance_certificates`), so the historical record of
+who was granted what, by whom, and when, is permanent. There is
+deliberately no "un-revoke": granting access again after revocation means
+creating a brand-new share row, which is what an owner reasonably wants
+anyway — an unbroken, auditable trail of "revoked, then a NEW grant was
+made" rather than a single row silently flipping back and forth.
+
+`TestShareService_DelegatedAccess_RevokedShareDeniesAccess` and
+`...ExpiredShareDeniesAccess` prove both are enforced immediately and
+server-side — a client cannot bypass either by simply not refreshing its
+own UI state, since the NEXT request re-evaluates
+`CanAccessDocument`/RLS from scratch every time (no session-cached
+authorization decision anywhere in this codebase).
+
+### IDOR protection
+
+Every share-touching route is document-scoped and goes through
+`RequireDocumentAccess`/`CanAccessDocument` exactly like every other
+document route — a document the caller has no relationship to (real or
+guessed ID) is denied with the SAME generic 403 as everywhere else in this
+codebase, never a distinguishable response. `RevokeShare`'s share lookup
+(`GetDocumentShareByID`) is additionally scoped to BOTH the share's own ID
+AND the document ID in the URL: a real share ID that happens to belong to
+a DIFFERENT document is treated identically to a nonexistent one (404),
+so a caller cannot probe whether a given share ID exists at all by
+supplying documents they merely guessed.
+`TestShareService_RevokeShare_CrossDocumentShareIDDenied` and the
+`document_share_flow_integration_test.go` HTTP-level IDOR block
+(FORENSICS attempting to list/create/revoke shares on a document it has
+no relationship to; POLICE attempting to revoke a real share through an
+unrelated document ID) cover this directly.
+
+### Recipient validation and enumeration resistance
+
+`ShareService.validateRecipient` confirms the named recipient exists AND
+is currently `active` — a single generic "Invalid or inactive recipient"
+message covers BOTH failure reasons (the same non-enumerating posture
+this codebase already applies to document/case IDOR responses, applied
+here to user IDs). `GET /users/search` (the recipient picker's only data
+source) requires authentication, a real query (minimum 2 characters —
+never a bare listing), returns only a small safe field subset (no phone,
+status, or timestamps), caps results at 10 regardless of match count,
+excludes inactive users, and excludes the caller themself — deliberately
+NOT gated behind the admin-only `user:read` permission (`GET /admin/users`
+remains ADMIN-only global user management, a materially different,
+more sensitive capability — see `UserService.ListUsers`'s own doc
+comment), since any authenticated user legitimately needs to find a share
+recipient.
+
+### Deactivation
+
+A recipient who is deactivated AFTER a share was created loses usable
+access immediately, on their VERY NEXT request — not because this system
+adds a new check, but because `internal/middleware.Auth` already
+re-resolves the caller's CURRENT status from the database on every single
+request (`AuthService.ResolveIdentity`, System 3), rejecting with a
+generic 401 before any document/share-specific authorization even runs.
+This system's own responsibility is narrower and already covered:
+refusing to CREATE a share naming an inactive recipient in the first
+place (see "Recipient validation" above) — the share record itself is
+never deleted when a recipient is later deactivated, preserving the
+historical grant for audit purposes; it simply becomes unusable exactly
+like every other authenticated route already is for that account.
+
+### Redacted-derivative sharing: lineage is never an authorization bypass
+
+A share is created against ONE EXACT `document_id` — the original OR a
+redacted derivative, never both. Sharing derivative `B` (from System 8)
+never grants access to source `A`, and sharing `A` never automatically
+shares `B`: `document_shares.document_id` names exactly one row, and
+`CanAccessDocument`'s delegated-access check only ever looks up a share
+for the SPECIFIC document ID being accessed — `documents.parent_document_id`
+is never consulted by any authorization path in this system.
+`TestShareService_RedactedDerivative_SharingDerivativeDoesNotGrantOriginal`
+proves this directly: a recipient with an active share on the derivative
+can download it, but the identical call against the original returns the
+same 403 anyone with no relationship to that document gets.
+
+### Document integrity is untouched
+
+`ShareService` never imports `internal/storage`, never touches
+`documents.sha256_hash`, and never calls anything that would (no
+`Storage.Put`, no hash recomputation). A share is a
+`document_shares` row and nothing else — sharing changes only access
+metadata. `TestShareService_DocumentIntegrity_SharingDoesNotChangeHash`
+uploads, records H1, shares, downloads and verifies as the recipient, and
+asserts the verification's `stored_hash` is bit-for-bit H1 — proving
+sharing created no new document version and rewrote no canonical hash.
+
+### Audit
+
+Every successful share creation records `DOCUMENT_SHARED` (document ID,
+recipient ID, permission, whether it expires — never raw file content);
+every revocation records `DOCUMENT_SHARE_REVOKED`. Both go through the
+same `internal/audit.Recorder` interface every prior system uses. No
+cryptographic audit-chain logic was introduced here — that remains a
+separate, later system's job, exactly as every prior system already
+established for its own events. Delegated download/verify access is
+audited exactly like any other download/verify — `DocumentService`
+records `DOCUMENT_DOWNLOADED`/`DOCUMENT_VERIFIED`/
+`DOCUMENT_INTEGRITY_FAILURE` identically regardless of whether the
+caller's access came from case membership or a share; there is
+deliberately no separate "accessed via delegation" audit action, since the
+share itself (queryable via `GET /documents/:id/shares`) is already the
+durable record of who was granted what.
+
+### What this system does *not* do
+
+- **A new authorization engine** — `authz.Service.CanAccessDocument` is
+  extended with one new fallback method
+  (`shareGrantsAccess`); RBAC (`HasPermission`) is completely untouched.
+- **Expanding who may share** — `document:share`'s existing
+  role_permissions grants (POLICE, LAWYER, ADMIN, per the seed data) are
+  reused unmodified; this system does not touch `role_permissions`.
+- **Public/anonymous links, link-plus-password access** — sharing is
+  strictly authenticated-user-to-authenticated-user; there is no token-
+  based link anywhere in this system, and no route that skips
+  `middleware.Auth`.
+- **The audit hash chain** — unchanged.
+- **An "act as user"/impersonation mechanism for ADMIN** — ADMIN's broad
+  access (via `isAdmin` in `CanAccessDocument`) is, as always, attributed
+  to ADMIN's own identity in every audit event; sharing adds no new
+  admin capability.
+- **Case-closure-aware share restrictions** — this codebase's existing
+  case lifecycle (`cases.status`) does not gate document access for
+  ANY existing route (upload, download, verify, redact) today; sharing
+  does not invent a new restriction that would apply to it alone and
+  nowhere else.
+- **Rate limiting** — this codebase has no general rate-limiting
+  infrastructure for ANY route yet (a future system's scope, per
+  `TECH_STACK.md`'s "Not yet added" list); sharing does not add one
+  either, consistent with reusing only what already exists.
 
 ## Cryptography
 
@@ -1196,11 +2069,329 @@ logic was introduced (still System 8's job).
   — no system through 7 needs either; `pkg/crypto/aes.go` remains a TODO
   stub.
 
+## HTTP & Infrastructure Hardening (System 15)
+
+Controls added on top of Systems 1-14 that don't belong to any single
+earlier system, gathered here rather than scattered:
+
+- **Security response headers** (`middleware.SecurityHeaders`, applied to
+  every route ahead of `CORS` in `httpserver.NewRouter`) —
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
+  `X-Frame-Options: DENY`, `Cache-Control: no-store` unconditionally, on
+  every response. No `Content-Security-Policy`: this is a pure JSON API
+  with no server-rendered HTML and no cookie session, so a CSP would
+  govern nothing and be dead configuration — see that middleware's own
+  doc comment.
+- **Reverse-proxy trust** (`Server.TrustedProxies`/`TRUSTED_PROXIES`,
+  `httpserver.NewRouter`'s explicit `engine.SetTrustedProxies` call) —
+  gin's zero-value behavior trusts every proxy hop's
+  `X-Forwarded-For`/`X-Real-Ip`, which would let any client forge its
+  apparent `ClientIP()` unless explicitly configured. Default (unset) is
+  **trust none**: `ClientIP()` falls back to the request's direct,
+  unspoofable `RemoteAddr`. This matters beyond request logging as of
+  System 15: `ClientIP()` also keys the per-IP login throttle below — an
+  attacker able to spoof it could bypass that throttle entirely. A
+  deployment behind a real reverse proxy/load balancer must set
+  `TRUSTED_PROXIES` to that proxy's exact address(es), never a wildcard.
+- **CORS wildcard + credentials guard** (`config.validate`) — rejects
+  `CORS_ALLOWED_ORIGINS` containing `"*"` combined with
+  `CORS_ALLOW_CREDENTIALS=true` at startup, in **every** environment
+  (not just production): that combination reflects any origin's
+  credentialed requests, which is never safe regardless of `APP_ENV`.
+  Complements the pre-existing production-only bare-wildcard check.
+- **Upload content-type denylist** (`document.deniedUploadMimeTypes`,
+  `DocumentService.UploadDocument`) — rejects a file whose *sniffed*
+  content (`http.DetectContentType` on the real bytes, not the
+  client-declared `Content-Type` or filename extension) is `text/html`:
+  the one format among those System 6 must accept as arbitrary evidence
+  that can itself carry a `<script>` tag. Deliberately a denylist, not an
+  allowlist — an evidence platform must accept forensic formats content
+  sniffing cannot even recognize (falling back to
+  `application/octet-stream`) — and a narrow one, since every download
+  already pairs `Content-Disposition: attachment` with
+  `X-Content-Type-Options: nosniff` (System 6/7), so nothing accepted
+  here is ever rendered inline by a browser regardless of type. See
+  "Malicious Documents" under the Threat Model below.
+- **Password length ceiling** (`min=8,max=72` on every password-accepting
+  DTO — login, admin user creation, admin password reset) — bcrypt
+  silently ignores/errors on input past 72 bytes
+  (`bcrypt.GenerateFromPassword`'s documented hard limit); rejecting it
+  at the request-validation layer produces a clean `400` instead of
+  surfacing that as an internal `500` from `auth.HashPassword`.
+- **Redis authentication + loopback-only infrastructure ports**
+  (`docker-compose.yml`) — the local-dev Redis service now runs with
+  `--requirepass` (`REDIS_PASSWORD`, same placeholder-credential
+  convention as every other credential in that file), and Postgres,
+  Redis, and MinIO are all bound to `127.0.0.1` rather than `0.0.0.0` —
+  reachable for local development and the migration step, never from
+  another host on the same network. Only the backend's own port remains
+  published on all interfaces, since it is the one service meant to
+  receive external traffic. A production deployment should go further —
+  no published ports at all for these three, communicating with the
+  backend purely over an internal Docker/orchestrator network — this
+  compose file's job is safe local development, not a production
+  topology (see "Deployment Security" considerations below).
+- **Dead security-relevant stubs removed** —
+  `internal/handlers/user/login.go`,
+  `internal/middleware/audit_middleware.go`, and
+  `internal/middleware/validation_middleware.go` were pure `// TODO`
+  placeholders, superseded by `internal/handlers/auth/login.go`,
+  `internal/audit.ChainWriter`, and per-DTO `binding` tags respectively,
+  years before System 15 — but left in the tree they read as an
+  unimplemented security control someone might reasonably expect to find
+  wired in. Removed rather than left as a misleading TODO (master prompt
+  §52).
+
 ## Transport Security
 
-TODO: Document TLS configuration and certificate management.
+**The application does not terminate TLS itself** — `httpserver.Server`
+(see `internal/httpserver/server.go`) listens on plain HTTP, and
+`ServerConfig` carries no certificate/key configuration. This is a
+deliberate, common architecture for a containerized backend, not an
+oversight: TLS termination belongs to whatever sits in front of it in a
+real deployment — a reverse proxy (nginx, Caddy, Envoy), an API gateway,
+or a cloud load balancer — which is also the natural place to manage
+certificate provisioning/rotation (e.g. ACME/Let's Encrypt, or a cloud
+provider's managed-certificate service). **Never run this application
+directly on the public Internet over plain HTTP** — every credential,
+access token, and refresh token this API issues or accepts travels in
+the request/response body or the `Authorization` header, all of which
+plain HTTP exposes to anyone on the network path.
+
+What the application DOES do to cooperate correctly with a TLS-
+terminating proxy in front of it:
+
+- **`TRUSTED_PROXIES`** (see "HTTP & Infrastructure Hardening" above) —
+  configure this to the proxy's address so `ClientIP()` (audit logging,
+  the login throttle) reflects the real client, not the proxy, while
+  still not trusting an arbitrary client-supplied header.
+- **`CORS_ALLOWED_ORIGINS`** should list the scheme the client actually
+  uses (`https://...` in any deployment with real TLS) — `config.validate`
+  does not enforce this (it cannot know your deployment's scheme), but a
+  production `.env` listing an `http://` origin for a site actually
+  served over `https://` is very likely a mistake worth catching in
+  review.
+- **`Cache-Control: no-store`** (see above) is set regardless of
+  transport — it protects against caching by any intermediary,
+  TLS-terminating or not.
+
+Local development (`docker-compose.yml`, `.env.example`) intentionally
+runs everything over plain HTTP on `localhost` — this is safe *because*
+it never leaves the local machine (loopback-only port binding, see
+above), not because plain HTTP is broadly acceptable. Treating a
+development configuration as adequate for a production deployment is
+exactly the mistake this section exists to prevent; see
+[DEPLOYMENT.md](./DEPLOYMENT.md) for the fuller local-vs-production
+distinction.
 
 ## Threat Model
 
-TODO: Document assumptions, trust boundaries, and mitigations relevant to
-investigative/judicial evidence handling.
+Evidentia holds investigative case data and forensic evidence for Indian
+law-enforcement/judicial workflows: material whose evidentiary value
+depends on provable integrity and whose exposure could endanger ongoing
+investigations, witnesses, or a fair trial. The controls documented
+throughout this file exist to defend against realistic, specific threats
+to that material — this section states the assumptions and trust
+boundaries those controls rest on, and maps each threat category to
+where its mitigation actually lives. It is a map, not a duplicate:
+follow the links back to the sections above (and to
+[AUDIT_CHAIN.md](./AUDIT_CHAIN.md), [STORAGE.md](./STORAGE.md),
+[DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md)) for the actual mechanism
+behind each mitigation.
+
+### Trust boundaries and assumptions
+
+- **The client is never trusted.** Every request is treated as
+  potentially hostile regardless of who appears to have sent it. Role,
+  permissions, user ID, and agency ID are NEVER accepted from client
+  input as authoritative — they are re-resolved from server-side state
+  on every request (`AuthService.ResolveIdentity`, "Authentication"
+  above) and re-checked against RBAC+ABAC+RLS on every access
+  ("Authorization" above). A JWT's `role` claim is an unenforced display
+  hint, not an authorization source — restated here because it is the
+  single most consequential trust-boundary decision in this system.
+- **PostgreSQL is the one authoritative store.** Redis (cache, Asynq
+  queues, SSE pub/sub, the System 15 login throttle) and MinIO (blob
+  storage) are both infrastructure the authoritative Postgres-recorded
+  state depends on, never a substitute for it — an evidence record, an
+  audit entry, and an authorization decision all ultimately live in, or
+  are verified against, Postgres. Losing Redis degrades throttling and
+  real-time notifications (fails open/degrades gracefully — see below);
+  it can never silently grant access or fabricate evidence integrity.
+- **The database role the application runs as is deliberately
+  unprivileged.** `evidentia_app` is `NOSUPERUSER NOCREATEDB NOCREATEROLE
+  NOBYPASSRLS NOINHERIT`, with RLS `FORCE`d on every protected table and
+  no `UPDATE`/`DELETE` grant on `audit_log` (see
+  [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md)) — a full SQL-injection
+  compromise of the application's own DB connection still cannot bypass
+  row-level authorization or rewrite audit history, because the
+  privilege to do either was never granted to that connection in the
+  first place, independent of anything the application's Go code does or
+  fails to do correctly.
+- **A background job is not an elevated-trust shortcut.** The audit-chain
+  verification worker (System 12) runs as a fixed, server-constant
+  identity (never client-influenced) scoped to exactly what that job
+  legitimately needs (full-chain read visibility for verification) — see
+  "Asynchronous Processing" above — not as a general RLS bypass.
+- **Operational logs and the cryptographic audit trail are separate
+  systems with separate guarantees.** `logging_middleware.go`'s
+  structured logs are for operators debugging the running service and
+  are not tamper-evident; `audit.ChainWriter`'s hash-chained `audit_log`
+  is the tamper-evident compliance record. Neither substitutes for the
+  other — see "Logging Security" implications throughout this file
+  wherever a Recorder call and a `slog` call appear side by side.
+
+### Threat categories and where each is mitigated
+
+**Authentication** (credential theft, brute force, credential stuffing,
+token theft, refresh-token abuse, session fixation, stale sessions,
+account enumeration) — bcrypt password hashing with a centrally
+configured cost floor; short-lived (≤24h, default 15m) HS256 access
+tokens with algorithm/issuer/audience pinning; opaque, hashed, rotating
+refresh tokens with family-wide reuse-detection revocation; per-request
+account-status re-resolution (a deactivated account's outstanding access
+token stops working on its very next request, not merely at expiry); a
+single generic error string and comparable-latency dummy-hash comparison
+across every failure branch; a fixed-window, fail-open, never-permanent
+per-IP/per-account login throttle. See "Authentication" and "Login
+brute-force throttle (System 15)" above. **Residual risk**: no MFA
+(explicitly out of scope); no access-token revocation list (mitigated by
+short TTL); the per-IP throttle is bypassable by an attacker who controls
+enough distinct source IPs faster than the per-account throttle catches
+them — the two dimensions are complementary, not individually sufficient.
+
+**Authorization** (privilege escalation, IDOR, horizontal/vertical
+escalation, role manipulation, ABAC bypass, RLS bypass, cross-agency
+access) — RBAC permission checks, ABAC case/document-relationship checks,
+and PostgreSQL RLS are three independently-enforced layers (see
+"Authorization" above and [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md)); no
+single layer is trusted alone. Self-role/self-status modification is
+hard-blocked in `UserService`, not merely hidden in the UI. Transaction-
+scoped `set_config(..., true)` for RLS identity means a pooled connection
+can never leak one request's identity into another's query. **Residual
+risk**: correctness of this layer depends on every new handler
+continuing to compose all three checks — a future route added without
+`RequireCaseAccess`/`RequireDocumentAccess` would regress silently unless
+caught in review; there is no automated "every route has an authz
+middleware" check today.
+
+**Evidence integrity** (file tampering, hash substitution, malicious
+uploads, unauthorized downloads, evidence replacement, unsafe redaction,
+certificate forgery, metadata manipulation) — SHA-256 computed
+server-side via streaming hash (never a client-supplied hash, never a
+full-file in-memory read); recompute-and-compare verification against
+the actual stored MinIO object; downloads streamed through an
+authenticated backend handler (no direct/presigned MinIO URL ever
+reaches a client); redaction produces an independently-hashed derivative
+while the original remains untouched; compliance certificates are signed
+from server-derived document/hash/timestamp data only. See "Document
+Verification & Compliance Certificates" and "Document Redaction" above.
+**Residual risk**: redaction's ability to truly remove (not merely
+overlay) sensitive content is bounded by the underlying document
+format/library's capabilities — see that section's own discussion of
+which formats are supported.
+
+**Application-layer attacks** (SQL injection, XSS, CSRF, SSRF, path
+traversal, command injection, unsafe deserialization, mass assignment,
+malicious filenames, oversized payloads) — every query goes through sqlc-
+generated parameterized statements (no string-concatenated SQL anywhere
+in the codebase, no dynamic `ORDER BY`/filter identifiers since none of
+today's sortable listings expose a client-controlled sort field); request
+DTOs are narrow, hand-written structs that never bind a privileged field
+(`role`, `password_hash`, `agency_id`, `created_by`, ...) directly from a
+public request body; uploaded files get a generated storage key, never
+a user-supplied filename, path-joined into object storage; a global
+per-route body-size limit plus a separate, larger upload-specific limit
+bound payload size; the upload MIME denylist above closes the one
+concretely dangerous format (HTML) among accepted evidence types. CSRF
+protection is correctly ABSENT: authentication is bearer-JWT-in-header,
+attached by application code, never an ambiently-sent cookie — there is
+no session for a forged cross-site request to ride on. No feature in
+this codebase accepts an arbitrary client-supplied URL for the backend to
+fetch, so there is no SSRF surface to mitigate; if one is added later, it
+must validate scheme/host against an allowlist and block
+loopback/link-local/cloud-metadata addresses before this threat model can
+claim it is covered.
+
+**Infrastructure** (leaked secrets, excessive DB privileges, exposed
+MinIO/Redis, insecure Docker configuration, weak TLS, insecure CORS) —
+see "HTTP & Infrastructure Hardening" and "Transport Security" above:
+loopback-only Postgres/Redis/MinIO ports, Redis `requirepass`, an
+unprivileged/RLS-forced DB role, a non-root multi-stage Docker build,
+explicit reverse-proxy trust configuration, and a CORS wildcard+
+credentials guard enforced at startup in every environment. Secrets
+(`JWT_SIGNING_KEY`, `DATABASE_PASSWORD`, `MINIO_SECRET_KEY`,
+`REDIS_PASSWORD`, `CERTIFICATE_SIGNING_KEY`, bootstrap-admin credentials)
+are read from environment configuration only, validated non-empty/
+non-trivial at startup where a weak value would be dangerous
+(`JWT_SIGNING_KEY` ≥ 32 chars), and never given a baked-in production-
+usable default — `.env` is gitignored, `.env.example` carries only
+placeholders. **Residual risk**: this repository's docker-compose stack
+is a local-development topology; a real production deployment needs its
+own hardened compose/Kubernetes manifests (no published infrastructure
+ports at all, secrets from a real secret manager, TLS from a real
+reverse proxy) that this repository does not itself provide.
+
+**Audit trail** (audit deletion, modification, chain tampering, hash
+substitution, unauthorized audit access) — `audit_log` grants
+`SELECT, INSERT` only to the application role, with `UPDATE`/`DELETE`
+explicitly revoked at the database level (not merely un-exposed via the
+API) — a full application-layer compromise still cannot rewrite history
+because the underlying database connection lacks the privilege
+regardless. Hash chaining is computed from a single canonical
+serialization function shared by the writer and verifier (no drift
+possible between "what was chained" and "what verification checks");
+a PostgreSQL advisory lock serializes concurrent writers so the
+chain-head read-then-append is race-free. See "Audit trail" and "Audit
+Chain Verification" above, and [AUDIT_CHAIN.md](./AUDIT_CHAIN.md) for the
+full mechanism. **Residual risk**: an attacker with actual database
+superuser access (not the application's own role) could still alter
+`audit_log` directly — no application-layer control can prevent that;
+defending against it is a database-administration/infrastructure-access
+concern (least-privilege access to the Postgres superuser itself),
+outside this application's own threat surface.
+
+**Real-time/SSE** (unauthorized subscriptions, sensitive event leakage,
+event injection, Redis exposure, connection exhaustion) — every SSE route
+sits behind the same `middleware.Auth` + RBAC/ABAC chain as its
+equivalent REST route (e.g. `GET /cases/:id/events` requires the same
+`case:read` + case-relationship check `GET /cases/:id` does, re-checked
+on every reconnect); no route accepts a token via URL query string; every
+published event payload carries only IDs/statuses/hashes, never
+passwords, tokens, credentials, or unnecessary witness identity/evidence
+content (see "Real-Time Events" above and
+[REALTIME_EVENTS.md](./REALTIME_EVENTS.md)). Redis pub/sub itself is
+internal infrastructure, not a client-reachable surface (see
+"Infrastructure" above).
+
+### Malicious documents
+
+Evidentia must accept arbitrary forensic evidence formats it cannot
+always parse or sanitize (disk images, proprietary report formats,
+scanned documents) — the "Malicious documents" principle applied here is
+therefore: **never execute or render accepted content**, and **reject
+outright** the narrow set of formats that could carry active content AND
+would otherwise be rendered. Concretely: every download is
+`Content-Disposition: attachment` with `X-Content-Type-Options: nosniff`
+(never inline rendering, regardless of format); the upload denylist
+(above) rejects sniffed `text/html`, the one common format capable of
+carrying a `<script>` tag that this codebase might otherwise be tempted
+to render inline somewhere. SVG, Office macros, and PDF active content
+are not separately denylisted today because nothing in this codebase
+renders or executes ANY accepted format server-side or client-side
+inline — they are stored and served as opaque, `attachment`-disposed
+bytes exactly like every other evidence file. If a future feature adds
+inline preview/rendering of any format, that feature — not this
+denylist — becomes the place a sanitization or format-restriction
+control must be added; do not assume this denylist alone makes inline
+rendering of arbitrary uploads safe.
+
+### What this threat model does not claim
+
+This document describes technical controls, not certification. It does
+not claim compliance with any specific law, regulation, or forensic-
+evidence standard (Indian Evidence Act, IT Act rules, chain-of-custody
+requirements, or otherwise) — those require a legal/compliance review
+this document is not a substitute for. It documents what the system
+technically does and does not do, so that review has an accurate
+starting point.

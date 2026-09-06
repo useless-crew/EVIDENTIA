@@ -4,6 +4,9 @@
 package response
 
 import (
+	"strconv"
+	"time"
+
 	"github.com/gin-gonic/gin"
 
 	"evidentia/backend/internal/utils"
@@ -49,5 +52,8 @@ func Error(c *gin.Context, status int, code, message string) {
 // status/code/message. The wrapped internal error (AppError.Err) is never
 // serialized — callers are expected to have already logged it.
 func FromAppError(c *gin.Context, err *utils.AppError) {
+	if err.RetryAfter > 0 {
+		c.Header("Retry-After", strconv.Itoa(int((err.RetryAfter+time.Second-1)/time.Second)))
+	}
 	Error(c, err.Status, err.Code, err.Message)
 }

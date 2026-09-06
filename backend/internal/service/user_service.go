@@ -17,6 +17,7 @@ import (
 	"evidentia/backend/internal/audit"
 	"evidentia/backend/internal/auth"
 	"evidentia/backend/internal/authz"
+	"evidentia/backend/internal/events"
 	"evidentia/backend/internal/models"
 	"evidentia/backend/internal/repository"
 	"evidentia/backend/internal/utils"
@@ -37,6 +38,15 @@ const (
 	maxPhoneLen      = 32
 	maxUserSearchLen = 255
 )
+
+// adminGuardLockKey is the fixed PostgreSQL advisory-lock key
+// ensureNotLastActiveAdmin acquires — a distinct, arbitrary constant from
+// internal/audit's own auditChainLockKey (891273465019), reserved solely
+// for this purpose. See db/queries/roles.sql's AcquireAdminGuardLock for
+// why this must be a real database-level lock, not an application-level
+// mutex (which would do nothing across pooled connections or multiple
+// backend processes).
+const adminGuardLockKey int64 = 275108340461
 
 // userRoles/userStatuses mirror the fixed catalogs this project already
 // defines elsewhere (backend/db/seed/001_reference_data.sql's role rows;
@@ -137,12 +147,25 @@ type UserService struct {
 	pool       *pgxpool.Pool
 	authz      *authz.Service
 	recorder   audit.Recorder
+	publisher  events.Publisher
 	bcryptCost int
 }
 
-func NewUserService(pool *pgxpool.Pool, authzService *authz.Service, recorder audit.Recorder, bcryptCost int) *UserService {
-	return &UserService{pool: pool, authz: authzService, recorder: recorder, bcryptCost: bcryptCost}
+func NewUserService(pool *pgxpool.Pool, authzService *authz.Service, recorder audit.Recorder, publisher events.Publisher, bcryptCost int) *UserService {
+	return &UserService{pool: pool, authz: authzService, recorder: recorder, publisher: publisher, bcryptCost: bcryptCost}
 }
+
+// adminUsersScopeID is the fixed, singleton events.ResourceID every
+// admin-user-management event is published under — admin user management
+// is inherently a global resource (there is no per-case/per-agency
+// scoping for the users table itself — see this file's own ListUsers doc
+// comment), so unlike a case or an audit verification (each with a real
+// per-instance ID), there is exactly one scope to subscribe to:
+// events.ScopeKey(events.ResourceTypeAdminUsers, adminUsersScopeID). Only
+// a caller who already holds user:read (RBAC, ADMIN-only per the seed
+// data) is ever authorized to register for it — see
+// internal/handlers/user/events.go.
+const adminUsersScopeID = "global"
 
 // ---- Create ----
 
@@ -246,6 +269,9 @@ func (s *UserService) CreateUser(ctx context.Context, actor auth.AuthenticatedUs
 		Action: "USER_CREATED", ResourceType: "user", ResourceID: &summary.ID,
 		UserID: &actor.ID, Role: effectiveCaseRole(actor),
 		Metadata: map[string]any{"target_email": summary.Email, "role": req.Role, "status": summary.Status},
+	})
+	s.publisher.Publish(ctx, events.TypeUserCreated, events.ResourceTypeAdminUsers, adminUsersScopeID, events.AdminUserEventData{
+		UserID: summary.ID.String(), Email: summary.Email, Roles: summary.Roles, Status: summary.Status,
 	})
 
 	return &summary, nil
@@ -389,6 +415,9 @@ func (s *UserService) UpdateUser(ctx context.Context, actor auth.AuthenticatedUs
 		Action: "USER_UPDATED", ResourceType: "user", ResourceID: &id,
 		UserID: &actor.ID, Role: effectiveCaseRole(actor),
 	})
+	s.publisher.Publish(ctx, events.TypeUserUpdated, events.ResourceTypeAdminUsers, adminUsersScopeID, events.AdminUserEventData{
+		UserID: summary.ID.String(), Email: summary.Email, Roles: summary.Roles, Status: summary.Status,
+	})
 
 	return &summary, nil
 }
@@ -420,7 +449,8 @@ func (s *UserService) UpdateRole(ctx context.Context, actor auth.AuthenticatedUs
 
 	var oldRoleNames []string
 	err = repository.WithTx(ctx, s.pool, ident, func(ctx context.Context, q *generated.Queries) error {
-		if _, err := q.GetUserByID(ctx, targetID); err != nil {
+		target, err := q.GetUserByID(ctx, targetID)
+		if err != nil {
 			return err
 		}
 
@@ -433,6 +463,18 @@ func (s *UserService) UpdateRole(ctx context.Context, actor auth.AuthenticatedUs
 		targetRole, err := q.GetRoleByName(ctx, newRole)
 		if err != nil {
 			return fmt.Errorf("load role: %w", err)
+		}
+
+		// System 14's "last active Administrator" safeguard: only relevant
+		// when this change would actually REMOVE the ADMIN role from a
+		// currently-ACTIVE admin (newRole is something else, and ADMIN is
+		// among current) — a no-op re-assignment of ADMIN, or a change to
+		// an already-inactive/suspended user, can never newly cause a
+		// lockout. See ensureNotLastActiveAdmin's own doc comment.
+		if newRole != models.RoleAdmin && target.Status == models.UserStatusActive && containsRole(oldRoleNames, models.RoleAdmin) {
+			if err := s.ensureNotLastActiveAdmin(ctx, q); err != nil {
+				return err
+			}
 		}
 
 		for _, r := range current {
@@ -449,6 +491,12 @@ func (s *UserService) UpdateRole(ctx context.Context, actor auth.AuthenticatedUs
 		return nil
 	})
 	if err != nil {
+		// ensureNotLastActiveAdmin's own utils.ErrConflict must pass through
+		// unchanged, never re-wrapped as a generic 500 — see that method's
+		// doc comment.
+		if appErr, ok := utils.AsAppError(err); ok {
+			return nil, appErr
+		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, utils.ErrNotFound("User not found")
 		}
@@ -461,7 +509,14 @@ func (s *UserService) UpdateRole(ctx context.Context, actor auth.AuthenticatedUs
 		Metadata: map[string]any{"from": oldRoleNames, "to": newRole},
 	})
 
-	return s.loadUserSummary(ctx, targetID)
+	result, err := s.loadUserSummary(ctx, targetID)
+	if err != nil {
+		return nil, err
+	}
+	s.publisher.Publish(ctx, events.TypeUserRoleChanged, events.ResourceTypeAdminUsers, adminUsersScopeID, events.AdminUserEventData{
+		UserID: targetID.String(), Email: result.Email, Roles: result.Roles, Status: result.Status,
+	})
+	return result, nil
 }
 
 // ---- Status (activate/deactivate/suspend) ----
@@ -503,6 +558,23 @@ func (s *UserService) UpdateStatus(ctx context.Context, actor auth.Authenticated
 		}
 		before = b
 
+		// System 14's "last active Administrator" safeguard: only relevant
+		// when this change would actually make a currently-ACTIVE admin
+		// no longer active (status is moving away from ACTIVE, and the
+		// target currently holds ADMIN) — reactivating someone, or
+		// changing a non-admin's status, can never newly cause a lockout.
+		if status != models.UserStatusActive && b.Status == models.UserStatusActive {
+			targetRoles, err := q.ListRolesForUser(ctx, targetID)
+			if err != nil {
+				return fmt.Errorf("load target roles: %w", err)
+			}
+			if containsRole(roleNames(targetRoles), models.RoleAdmin) {
+				if err := s.ensureNotLastActiveAdmin(ctx, q); err != nil {
+					return err
+				}
+			}
+		}
+
 		if _, err := q.UpdateUserStatus(ctx, generated.UpdateUserStatusParams{ID: targetID, Status: status}); err != nil {
 			return fmt.Errorf("update status: %w", err)
 		}
@@ -515,6 +587,9 @@ func (s *UserService) UpdateStatus(ctx context.Context, actor auth.Authenticated
 		return nil
 	})
 	if err != nil {
+		if appErr, ok := utils.AsAppError(err); ok {
+			return nil, appErr
+		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, utils.ErrNotFound("User not found")
 		}
@@ -527,7 +602,35 @@ func (s *UserService) UpdateStatus(ctx context.Context, actor auth.Authenticated
 		Metadata: map[string]any{"from": before.Status, "to": status},
 	})
 
-	return s.loadUserSummary(ctx, targetID)
+	result, err := s.loadUserSummary(ctx, targetID)
+	if err != nil {
+		return nil, err
+	}
+	s.publisher.Publish(ctx, statusChangeEventType(status), events.ResourceTypeAdminUsers, adminUsersScopeID, events.AdminUserEventData{
+		UserID: targetID.String(), Email: result.Email, Roles: result.Roles, Status: result.Status,
+	})
+	return result, nil
+}
+
+// statusChangeEventType maps a target account-status value to the
+// SCREAMING_SNAKE_CASE event type describing that transition — see
+// internal/events/catalog.go's own doc comment for why ACTIVATED/
+// DEACTIVATED/SUSPENDED are distinct event types rather than one generic
+// "USER_STATUS_CHANGED" (matching this same distinction audit.Event's
+// own "USER_STATUS_CHANGED" action already collapses into one action
+// with a from/to metadata pair — the REAL-TIME event layer is more
+// specific on purpose, since "activated" and "deactivated" are the kind
+// of distinction a live dashboard update benefits from without decoding
+// a from/to pair itself).
+func statusChangeEventType(status string) string {
+	switch status {
+	case models.UserStatusActive:
+		return events.TypeUserActivated
+	case models.UserStatusSuspended:
+		return events.TypeUserSuspended
+	default:
+		return events.TypeUserDeactivated
+	}
 }
 
 // ---- Password reset (admin-initiated) ----
@@ -657,6 +760,47 @@ func roleNames(roles []generated.Role) []string {
 		names[i] = r.Name
 	}
 	return names
+}
+
+func containsRole(roles []string, want string) bool {
+	for _, r := range roles {
+		if r == want {
+			return true
+		}
+	}
+	return false
+}
+
+// ensureNotLastActiveAdmin refuses (utils.ErrConflict) an in-progress
+// role/status change if doing so would leave the system with ZERO active
+// Administrator accounts — master prompt's "an Admin must not accidentally
+// remove the last usable Admin account" / "prevent privilege-loss
+// scenarios that lock the system out". Callers (UpdateRole/UpdateStatus)
+// must call this ONLY when the change in question would actually make a
+// currently-ACTIVE admin no longer an active admin — see each call site's
+// own guard condition — and must call it from WITHIN the same transaction
+// that performs the actual UPDATE, after which q's connection still holds
+// the advisory lock this acquires until that transaction commits or rolls
+// back (see db/queries/roles.sql's AcquireAdminGuardLock for the full
+// concurrency argument: this is what prevents two concurrent operations,
+// each targeting a DIFFERENT remaining admin, from both independently
+// observing "safe to proceed" and jointly reaching zero).
+func (s *UserService) ensureNotLastActiveAdmin(ctx context.Context, q *generated.Queries) error {
+	if err := q.AcquireAdminGuardLock(ctx, adminGuardLockKey); err != nil {
+		return fmt.Errorf("acquire admin guard lock: %w", err)
+	}
+	adminRole, err := q.GetRoleByName(ctx, models.RoleAdmin)
+	if err != nil {
+		return fmt.Errorf("load admin role: %w", err)
+	}
+	count, err := q.CountActiveUsersWithRole(ctx, adminRole.ID)
+	if err != nil {
+		return fmt.Errorf("count active admins: %w", err)
+	}
+	if count <= 1 {
+		return utils.ErrConflict("Cannot remove the last active Administrator account")
+	}
+	return nil
 }
 
 func fromCreateUserRow(r generated.CreateUserRow, roles []string) AdminUserSummary {

@@ -3,10 +3,9 @@
 ## Purpose
 
 TODO: Document the full REST API surface for Evidentia. Cases, Case
-Documents (upload/download/verify/certificate), Authentication, Admin
-(user management), and Health/Readiness are implemented today. Document
-redaction/share and Audit are not implemented yet — that section documents
-the intended surface only.
+Documents (upload/download/verify/certificate/redact/share/shared-with-me),
+Authentication, Admin (user management), Audit, and Health/Readiness are
+implemented today.
 
 ## Authentication (implemented)
 
@@ -81,16 +80,17 @@ expired, or the account has been deactivated since the token was issued.
 {"success": true, "data": null}
 ```
 
-## Cases (implemented — System 5)
+## Cases (implemented — System 5; `/events` — System 13)
 
 ```text
 POST   /api/v1/cases
 GET    /api/v1/cases
 GET    /api/v1/cases/:id
 PUT    /api/v1/cases/:id
+GET    /api/v1/cases/:id/events   (SSE — System 13)
 ```
 
-All four require `Authorization: Bearer <access_token>`. Required
+All five require `Authorization: Bearer <access_token>`. Required
 authorization, per System 4 (`docs/SECURITY.md`'s Authorization section),
 wired via `middleware.RequirePermission`/`RequireCaseAccess`:
 
@@ -100,6 +100,21 @@ wired via `middleware.RequirePermission`/`RequireCaseAccess`:
 | `GET /cases` | `case:read` | list is scoped by PostgreSQL RLS (the caller's own case relationships), not a per-item check here |
 | `GET /cases/:id` | `case:read` | `CanAccessCase` — caller must be ADMIN, the case's creator, or an active `case_members` row |
 | `PUT /cases/:id` | `case:update` | `CanAccessCase` (same relationship check) |
+| `GET /cases/:id/events` | `case:read` | `CanAccessCase` (the identical check `GET /cases/:id` requires, re-run on every new SSE connection) |
+
+### `GET /cases/:id/events` (SSE — System 13)
+
+`text/event-stream` of this case's real-time notifications —
+`DOCUMENT_VERIFICATION_COMPLETED`, `CERTIFICATE_GENERATION_COMPLETED`,
+`DOCUMENT_REDACTION_COMPLETED`, `SHARE_CREATED`, `SHARE_REVOKED` (see
+`docs/REALTIME_EVENTS.md`'s "Event Catalog"). Sends no initial snapshot —
+an event here is a "this case's state may have changed" signal only; the
+client's existing `GET /cases/:id` (and related) queries remain the
+source of current state. Never closes on its own aside from a periodic
+forced reconnect (at most hourly) that re-validates authorization — it
+ends only on client disconnect or server shutdown. Same authentication as
+any other route (bearer header, no token in the URL). `429` if the
+caller already holds too many concurrent SSE connections.
 
 `internal/service.CaseService` independently re-checks the same
 authorization internally (not just the HTTP middleware) — see
@@ -276,11 +291,15 @@ section above):
 
 ```text
 GET  /api/v1/documents/:id/download
-GET  /documents/:id                    (not implemented — see below)
-POST /api/v1/documents/:id/verify      (implemented — System 7)
-POST /documents/:id/redact             (not implemented — a future redaction system)
-POST /documents/:id/share              (not implemented)
-GET  /api/v1/documents/:id/certificate (implemented — System 7)
+GET  /documents/:id                       (not implemented — see below)
+POST /api/v1/documents/:id/verify         (implemented — System 7)
+POST /api/v1/documents/:id/redact         (implemented)
+POST /api/v1/documents/:id/share          (implemented)
+GET  /api/v1/documents/:id/shares         (implemented)
+POST /api/v1/documents/:id/shares/:shareId/revoke (implemented)
+GET  /api/v1/shared/documents             (implemented)
+GET  /api/v1/users/search                 (implemented)
+GET  /api/v1/documents/:id/certificate    (implemented — System 7)
 ```
 
 ### `GET /api/v1/documents/:id/download` (implemented — System 6)
@@ -441,39 +460,380 @@ Every certificate generation records a `CERTIFICATE_CREATED` audit event;
 a discovered mismatch during generation records `DOCUMENT_INTEGRITY_FAILURE`
 (same as verification) instead — see "Audit" in `docs/SECURITY.md`.
 
+### `POST /api/v1/documents/:id/redact` (implemented)
+
+Requires `Authorization: Bearer <access_token>` plus `document:redact`
+(RBAC) and `CanAccessDocument` (ABAC) — the same document-scoped
+authorization pattern as verify/download, re-checked independently at the
+service layer (`DocumentService.RedactDocument`). Per the seed data,
+**only ADMIN** holds `document:redact` today — a deliberate, existing
+System 4 policy decision (see `backend/tests/rbac_test.go`'s
+`TestRBAC_PolicePermissions`), not something this endpoint expands.
+
+```json
+{
+  "reason": "Protect witness identity",
+  "regions": [
+    { "page": 1, "x": 100, "y": 200, "width": 150, "height": 40 }
+  ]
+}
+```
+
+`:id` is the **source** document. `reason` is required (3-2000 UTF-8
+characters). `regions` is required (1-50 entries); each region's
+coordinates are in the source image's own pixel space and are validated
+both structurally (non-negative, finite, positive area, `page == 1`) and,
+once the source is decoded, against its **actual** pixel dimensions.
+
+Produces a brand-new, independent `documents` row (`parent_document_id`
+pointing at the source) plus a linked `redactions` row — **never**
+modifies the source document's row, object, `sha256_hash`, or any existing
+certificate. Supported formats: `image/png` and `image/jpeg` only — every
+region is destructively overwritten (opaque black, a straight pixel
+replace, never an alpha-blended overlay) in the derivative's re-encoded
+bytes before it is hashed and stored, so the "redacted" content is not
+recoverable through normal viewing/extraction of the derivative. Any other
+stored `mime_type` (including `application/pdf`) is refused with `422` —
+this project has no verified, safe way to strip underlying content from
+those formats yet, and a fake redaction (a box drawn merely on top of
+unmodified content) would be strictly worse than refusing outright.
+
+Before processing, the source document's *current* bytes are recomputed
+and compared against its canonical hash — the same anti-tamper check
+`GET /documents/:id/certificate`'s generation path performs — refusing
+with `409` on a mismatch rather than deriving a "redacted" copy from
+unknown/corrupted bytes.
+
+```json
+{
+  "success": true,
+  "data": {
+    "redaction_id": "...",
+    "source_document_id": "...",
+    "reason": "Protect witness identity",
+    "created_at": "2026-01-01T00:00:00Z",
+    "document": {
+      "id": "...",
+      "case_id": "...",
+      "document_type": "WITNESS_STATEMENT",
+      "filename": "redacted_witness.png",
+      "mime_type": "image/png",
+      "file_size": 4096,
+      "sha256_hash": "64-hex-chars... (H2 — always different from the source's H1)",
+      "status": "ACTIVE",
+      "parent_document_id": "...(the source document's ID)",
+      "uploaded_by": "...",
+      "uploaded_at": "2026-01-01T00:00:00Z"
+    }
+  }
+}
+```
+
+The derivative is a completely ordinary document from every other route's
+perspective: `POST /documents/{derivative_id}/verify` and
+`GET /documents/{derivative_id}/certificate` work unmodified, bound to the
+derivative's own hash, independent of the source's. Access to the
+derivative is controlled by the **same** case-relationship rule as any
+document — it never becomes more broadly accessible merely because it was
+produced by a redaction.
+
+- `400` — missing/too-short/too-long `reason`, no regions, too many
+  regions, or a region with negative/non-finite/non-positive/
+  out-of-bounds coordinates.
+- `403` — no relationship to the document's case, OR the document doesn't
+  exist, OR the `:id` isn't a valid UUID, OR the caller lacks
+  `document:redact` — identical response in every case.
+- `409` — the source document failed integrity verification.
+- `422` — the source document's `mime_type` has no supported redaction
+  implementation.
+- `503` — the source object could not be retrieved from storage.
+
+Every successful redaction records a `DOCUMENT_REDACTED` audit event
+(source/result document IDs, reason, region count, both hashes — never
+raw file bytes); a discovered mismatch during the pre-processing integrity
+check records `DOCUMENT_INTEGRITY_FAILURE` instead — see "Audit" in
+`docs/SECURITY.md`.
+
+### `POST /api/v1/documents/:id/share` (implemented)
+
+Requires `Authorization: Bearer <access_token>` plus `document:share`
+(RBAC) and `CanAccessDocument` (ABAC) — the same document-scoped
+authorization pattern as redact, re-checked independently at the service
+layer (`ShareService.CreateShare`). Grants `user_id` a specific, revocable,
+optionally time-bounded permission on **this exact document** — never
+ownership, never resharing (a share's own recipient can never call this
+route successfully using their delegated access, regardless of
+permission tier — see below).
+
+```json
+{
+  "user_id": "recipient-user-id",
+  "permission": "VIEW",
+  "expires_at": "2026-12-31T23:59:59Z",
+  "reason": "Disclosure to defence counsel"
+}
+```
+
+`permission` is `VIEW` (grants `document:read` + `document:download` +
+`certificate:read` — this application has no distinct metadata-only view
+separate from download) or `VERIFY` (VIEW's grants plus
+`document:verify`) — never `EDIT`/`DELETE`/`REDACT`/`RESHARE`. `expires_at`
+is optional (omitted/`null` = non-expiring); if present it must be in the
+future. `reason` is optional. The recipient must be a real, currently
+**active** Evidentia user (found via `GET /users/search` below) and
+cannot be the caller themself.
+
+```json
+{
+  "success": true,
+  "data": {
+    "share_id": "...",
+    "document_id": "...",
+    "recipient_user_id": "...",
+    "created_by_user_id": "...",
+    "permission": "VIEW",
+    "status": "ACTIVE",
+    "effective_status": "ACTIVE",
+    "expires_at": "2026-12-31T23:59:59Z",
+    "created_at": "2026-01-01T00:00:00Z"
+  }
+}
+```
+
+- `400` — invalid `permission`/`expires_at` (in the past)/recipient
+  (nonexistent, inactive, or the caller themself).
+- `403` — no relationship to the document's case, OR the document
+  doesn't exist, OR the caller lacks `document:share` — identical
+  response in every case (this is also what a share's own recipient gets
+  if they try to reshare: `document:share` is never satisfiable through
+  delegated access, at any permission tier).
+- `409` — an ACTIVE share already exists for this exact
+  (document, recipient) pair — enforced by a database-level partial
+  unique index, not just an application check.
+
+Every successful share records a `DOCUMENT_SHARED` audit event (document
+ID, recipient ID, permission — never raw file content); see "Audit" in
+`docs/SECURITY.md`.
+
+### `GET /api/v1/documents/:id/shares` (implemented)
+
+Requires `document:share` + `CanAccessDocument` — the same authority
+needed to create a share. Returns every share ever created for the
+document, newest first, **including revoked/expired ones** (historical
+delegation records are never hidden — only `effective_status` changes to
+reflect the current truth: `ACTIVE`, `EXPIRED`, or `REVOKED`).
+
+```json
+{ "success": true, "data": { "shares": [ { "share_id": "...", "...": "..." } ] } }
+```
+
+A mere recipient (not a case member, not the creator, not ADMIN) gets
+`403` here even for a document shared with them — seeing who ELSE a
+document is shared with is a materially different, more sensitive
+capability than merely using one's own delegated access.
+
+### `POST /api/v1/documents/:id/shares/:shareId/revoke` (implemented)
+
+Requires `document:share` + `CanAccessDocument` (the same authority as
+creating a share — not narrowed to only the share's original creator).
+`shareId` is scoped to `:id` as well as its own ID: a real share ID
+belonging to a **different** document is denied identically to a
+nonexistent one. Transitions the share `ACTIVE -> REVOKED` — immediately
+and permanently; there is no un-revoke. Access via that share is denied
+server-side starting with the very next request the recipient makes
+(never a frontend-only removal).
+
+- `403` — no relationship to the document's case, the document doesn't
+  exist, or the caller lacks `document:share`.
+- `404` — the share doesn't exist, doesn't belong to this document, or
+  was already revoked — one generic response for all three, never
+  distinguishing which.
+
+Every successful revocation records a `DOCUMENT_SHARE_REVOKED` audit
+event.
+
+### `GET /api/v1/shared/documents` (implemented — "Shared With Me")
+
+Requires authentication only. Lists every document for which the caller
+currently holds an **active, unexpired** share — never a document reached
+through case membership alone. This is the recipient's discovery
+mechanism: there is no standalone `GET /documents/:id`, so a recipient
+with no relationship to the document's case has no other way to learn
+its filename/type/hash.
+
+```json
+{
+  "success": true,
+  "data": {
+    "documents": [
+      {
+        "share_id": "...",
+        "permission": "VIEW",
+        "expires_at": null,
+        "shared_at": "2026-01-01T00:00:00Z",
+        "shared_by_user_id": "...",
+        "document": { "id": "...", "filename": "...", "...": "..." }
+      }
+    ],
+    "meta": { "page": 1, "page_size": 20, "total": 1, "total_pages": 1 }
+  }
+}
+```
+
+### `GET /api/v1/users/search` (implemented — recipient picker)
+
+Requires authentication only — deliberately **not** the admin-only
+`user:read` permission (`GET /admin/users`): this is a narrower, safer
+capability any authenticated user needs to find a share recipient.
+`q` (required, minimum 2 characters) matches against email/name
+(case-insensitive substring); results are capped at 10, exclude inactive
+users, and exclude the caller themself. Returns only `id`, `first_name`,
+`last_name`, `display_name`, `email`, `roles` — no phone, status, or
+timestamps.
+
+- `400` — `q` missing, too short, or too long.
+
+### Redaction & sharing lineage
+
+A redacted derivative (System 8) is a completely ordinary document from
+sharing's perspective: it can be shared independently of its source, and
+sharing it **never** grants access to the source, or vice versa — see
+`docs/SECURITY.md`'s "Document Sharing" for why (each document's access is
+resolved independently; there is no "inherit the parent's shares" rule
+anywhere in this system).
+
 ### Not yet implemented
 
 `GET /documents/:id` (standalone metadata — today's only exposure of
-document metadata is via `GET /cases/:id`'s `documents` array, per master
-prompt §27's fallback: "otherwise expose document metadata through the
-existing case detail flow"), `POST /documents/:id/redact` (a future
-redaction system), and `POST /documents/:id/share` remain TODO stubs
-(`internal/handlers/document/{redact,share}.go`). Required authorization
-for each, once implemented:
+document metadata for a case-member is via `GET /cases/:id`'s
+`documents` array, per master prompt §27's fallback: "otherwise expose
+document metadata through the existing case detail flow"; a share
+recipient instead uses `GET /shared/documents` above). Required
+authorization, once implemented:
 
 | Route | Permission (RBAC) | Resource check (ABAC) |
 |---|---|---|
 | `GET /documents/:id` | `document:read` | `CanAccessDocument` |
-| `POST /documents/:id/redact` | `document:redact` | `CanAccessDocument` |
-| `POST /documents/:id/share` | `document:share` | `CanAccessDocument` |
 
 `CanAccessDocument` resolves the document's case and applies the same
 case-relationship check as `CanAccessCase` — see `docs/SECURITY.md`'s
 "Document-based ABAC".
 
-## Audit
+## Audit (implemented — Systems 8 & 11)
 
 ```text
 GET  /audit
 POST /audit/verify-chain
+GET  /audit/verify-chain/:verificationId
+GET  /audit/verify-chain/:verificationId/events   (SSE)
+GET  /audit/verifications
+GET  /audit/integrity
 ```
 
-TODO (business logic — not implemented). Required authorization:
-`GET /audit` needs `audit:read`; `POST /audit/verify-chain` needs
-`audit:verify`. Per the seed data, only ADMIN and POLICE hold `audit:read`
-today (POLICE at case scope, once a future system adds `GET /audit`'s own
-case filtering — this endpoint has no resource ID of its own to run ABAC
-against), and only ADMIN holds `audit:verify`.
+See [AUDIT_CHAIN.md](./AUDIT_CHAIN.md) for the full hash-chain and
+asynchronous-verification architecture; this section covers the HTTP
+contract.
+
+`GET /audit` needs `audit:read`. Every other route below needs
+`audit:verify`. Per the seed data, ADMIN, POLICE, LAWYER, and JUDGE hold
+`audit:read` — but row-level visibility beyond that permission check is
+entirely PostgreSQL RLS's job (`audit_log_select`, see AUDIT_CHAIN.md's
+"Row-Level Security"), not a route-level ABAC middleware: this route has
+no single case/document ID in its URL to check against the way
+`RequireCaseAccess`/`RequireDocumentAccess` do for other resources, since
+it's a filtered LISTING (like `GET /cases`). ADMIN sees every entry;
+every other role sees only its own actions plus entries tied to a case it
+is an active member of — a query filter can only narrow this further,
+never widen it. Only ADMIN holds `audit:verify` — verifying/inspecting
+the chain only makes sense against its complete, unfiltered state.
+
+`GET /audit` query parameters (all optional; a filter can only narrow
+what RLS already permits): `user_id`, `role`, `action`, `resource_type`,
+`resource_id`, `case_id` (UUIDs/exact strings), `from`/`to` (RFC3339
+timestamps, half-open range), `page`/`page_size` (pagination, required —
+this endpoint never returns the whole table). Response: the standard
+envelope wrapping `{entries: [...], meta: {...}}`, where each entry's
+`hash`/`prev_hash` are lowercase-hex-encoded (`prev_hash` empty only for
+the genesis entry).
+
+### `POST /audit/verify-chain` (System 11 — asynchronous; System 12 — background-job infrastructure)
+
+No request body. Dispatches a background job rather than verifying
+synchronously — see AUDIT_CHAIN.md's "Asynchronous Verification" for why,
+and BACKGROUND_JOBS.md for the job infrastructure itself. Always `202
+Accepted`:
+
+```json
+{ "verification_id": "...", "job_id": "audit:verify_chain:...", "status": "QUEUED", "created_at": "..." }
+```
+
+`job_id` is the underlying Asynq task's deterministic, traceable ID
+(`jobs.AuditVerifyChainJobID(verification_id)` — always derivable from
+`verification_id` alone, never a separately-stored value). If a
+verification is already `QUEUED`/`RUNNING`, this returns **that same
+run's** id/job_id/status instead of starting a duplicate scan — two
+concurrent callers are never given two independent verification ids.
+
+### `GET /audit/verify-chain/:verificationId`
+
+Current status/progress/result of one run:
+
+```json
+{
+  "verification_id": "...", "job_id": "audit:verify_chain:...", "status": "RUNNING",
+  "entries_checked": 42381, "total_entries": 100000, "progress_percent": 42.4,
+  "last_seq_checked": 42381,
+  "requested_by_user_id": "...", "requested_by_role": "ADMIN",
+  "started_at": "...", "completed_at": null,
+  "created_at": "...", "updated_at": "..."
+}
+```
+
+On `INTEGRITY_FAILURE`: additionally carries `failed_entry_id`,
+`failed_seq`, `failure_type` (e.g. `ENTRY_HASH_MISMATCH`), and a safe
+`failure_reason` string — never metadata content, SQL text, or a
+filesystem path. On `FAILED`: `failure_type` is an operational category
+(`DATABASE_ERROR`, `TIMEOUT`, `STALE_TIMEOUT`) — never confused with an
+integrity finding. `404` for an unknown/inaccessible id (RLS makes "exists
+but not yours" and "doesn't exist" indistinguishable for a non-ADMIN
+caller, though in practice only ADMIN can ever create one).
+
+### `GET /audit/verify-chain/:verificationId/events` (SSE — System 13 infrastructure)
+
+`text/event-stream` of `AUDIT_VERIFICATION_STARTED` /
+`AUDIT_VERIFICATION_PROGRESS` / `AUDIT_VERIFICATION_COMPLETED` /
+`AUDIT_INTEGRITY_FAILURE` / `AUDIT_VERIFICATION_FAILED` events, each
+following System 13's one event envelope (`event_id`, `event_type`,
+`event_version`, `timestamp`, `resource_type`, `resource_id`, `data`  —
+see `docs/REALTIME_EVENTS.md`). `data` carries a safe, progress-focused
+subset of the plain status endpoint's own fields — `verification_id`,
+`status`, `entries_checked`, `total_entries`, `progress_percent`,
+`failed_entry_id`, `failure_type`, `failure_reason` — using the exact
+same field names (never renamed/reshaped) so client code can read either
+shape without a translation layer. Authenticated exactly like
+every other route (a
+normal `Authorization: Bearer` header — no token in the URL); sends the
+current state immediately on connect, then relays further events until a
+terminal one is sent or the client disconnects. See AUDIT_CHAIN.md's "SSE
+architecture" for the full connection-management/reconnection contract.
+
+### `GET /audit/verifications`
+
+Paginated history. Query parameters: `status`, `requested_by` (UUID),
+`from`/`to` (RFC3339), `page`/`page_size`. Response: `{verifications: [...
+same shape as GET /verify-chain/:id ...], meta: {...}}`.
+
+### `GET /audit/integrity`
+
+Dashboard summary — cheap aggregate data, never a fresh scan:
+
+```json
+{
+  "total_entries": 100234,
+  "chain_head_seq": 100234, "chain_head_hash": "…64 hex chars…",
+  "last_verification": { "verification_id": "...", "status": "VERIFIED", ... }
+}
+```
 
 ## Admin (implemented)
 
@@ -483,6 +843,7 @@ All under `/api/v1/admin`, plus `/api/v1/users/me`. See
 ```text
 POST /api/v1/admin/users
 GET  /api/v1/admin/users
+GET  /api/v1/admin/users/events   (SSE — System 14, on System 13's shared infrastructure)
 GET  /api/v1/admin/users/:id
 PUT  /api/v1/admin/users/:id
 PUT  /api/v1/admin/users/:id/role
@@ -501,16 +862,37 @@ explicit block on an actor modifying their own role — see
 /admin/users/:id/status` needs `user:deactivate` PLUS the same kind of
 block on an actor changing their own status; `PUT
 /admin/users/:id/password` reuses `user:update` (no separate password
-permission); `GET /admin/roles` and `GET /users/me` need no special
-permission beyond authentication — the roles route lists the fixed,
-non-sensitive role catalog, and every user may view their own profile
-regardless of role. Per the seed data, only ADMIN holds `user:create`/
-`user:read`/`user:update`/`user:deactivate`/`user:role` today.
+permission); `GET /admin/users/events` needs `user:read` (the same gate
+`GET /admin/users` itself requires); `GET /admin/roles` and `GET
+/users/me` need no special permission beyond authentication — the roles
+route lists the fixed, non-sensitive role catalog, and every user may
+view their own profile regardless of role. Per the seed data, only ADMIN
+holds `user:create`/`user:read`/`user:update`/`user:deactivate`/
+`user:role` today.
 
 `PUT /admin/users/:id/status` revokes every one of the target user's
 refresh sessions when the new status isn't `active`; `PUT
 /admin/users/:id/password` always revokes them. Neither route nor any
 other in this section ever returns a password or password hash.
+
+**Last-active-Administrator safeguard** (System 14): `PUT
+/admin/users/:id/role` and `PUT /admin/users/:id/status` both refuse
+(`409 Conflict`) a change that would leave zero active ADMIN accounts —
+enforced at the database level (a PostgreSQL advisory lock plus a
+transactional re-count, `internal/service.UserService.
+ensureNotLastActiveAdmin`), not merely an application-level check, so it
+holds even under two concurrent requests each targeting a different
+remaining admin — see `docs/SECURITY.md`'s System 14 section for the
+full concurrency argument.
+
+**Real-time events** (System 14, on System 13's shared infrastructure):
+`POST /admin/users`, `PUT /admin/users/:id`, `PUT /admin/users/:id/role`,
+and `PUT /admin/users/:id/status` each publish (after their own
+transaction commits) `USER_CREATED`/`USER_UPDATED`/`USER_ROLE_CHANGED`/
+`USER_ACTIVATED`/`USER_DEACTIVATED`/`USER_SUSPENDED` on `GET
+/admin/users/events` — see `docs/REALTIME_EVENTS.md`'s event catalog.
+Every event's payload carries only identifiers/role/status, never a
+password or password hash.
 
 The one account provisioned outside this flow is the initial bootstrap
 admin (`internal/bootstrap.EnsureBootstrapAdmin`, run once at server
@@ -570,16 +952,17 @@ System 4 (`internal/authz`) provides the RBAC (`middleware.RequirePermission`)
 and ABAC (`middleware.RequireCaseAccess`/`RequireDocumentAccess`) checks
 layered on top of it, and the per-route requirements are documented inline
 above (Cases/Case Documents/Documents/Audit/Admin). Cases, Case Documents
-(upload/download), document verify/certificate, and Admin (user
-management) routes are all live and wired with exactly that middleware
-(see `internal/httpserver/router.go`); the remaining Documents endpoints
-(redact/share) and Audit routes remain unregistered (their handlers are
-still TODO stubs). Today's non-health routes are
-`/api/v1/auth/{login,refresh,logout}` (no RBAC/ABAC — see "Authentication"
-above), `/api/v1/cases`/`/api/v1/cases/:id`,
+(upload/download/redact/share), document verify/certificate, Admin (user
+management), and Audit routes are all live and wired with exactly that
+middleware (see `internal/httpserver/router.go`). Today's non-health
+routes are `/api/v1/auth/{login,refresh,logout}` (no RBAC/ABAC — see
+"Authentication" above), `/api/v1/cases`/`/api/v1/cases/:id`,
 `/api/v1/cases/:id/documents`, `/api/v1/documents/:id/download`,
 `/api/v1/documents/:id/verify`, `/api/v1/documents/:id/certificate`,
-`/api/v1/admin/users*`, `/api/v1/admin/roles`, and `/api/v1/users/me`.
+`/api/v1/documents/:id/redact`, `/api/v1/documents/:id/share`,
+`/api/v1/documents/:id/shares*`, `/api/v1/shared/documents`,
+`/api/v1/audit`, `/api/v1/audit/verify-chain`, `/api/v1/admin/users*`,
+`/api/v1/admin/roles`, and `/api/v1/users/me`.
 Full authorization design: `docs/SECURITY.md`'s Authorization section.
 
 `401` vs `403`: a request with no/invalid/expired authentication is

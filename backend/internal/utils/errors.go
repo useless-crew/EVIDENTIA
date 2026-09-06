@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 )
 
 // Common, stable error codes returned to API clients. Business-domain codes
@@ -22,6 +23,8 @@ const (
 	CodeUnauthorized          = "UNAUTHORIZED"
 	CodeForbidden             = "FORBIDDEN"
 	CodeConflict              = "CONFLICT"
+	CodeUnprocessableEntity   = "UNPROCESSABLE_ENTITY"
+	CodeTooManyRequests       = "TOO_MANY_REQUESTS"
 )
 
 // AppError is the application-wide error type. Status and Code/Message are
@@ -32,6 +35,13 @@ type AppError struct {
 	Code    string
 	Message string
 	Err     error
+
+	// RetryAfter is optional, non-zero only for a 429 response that knows
+	// how long the caller should wait (e.g. ErrTooManyRequests from
+	// internal/ratelimit-backed login throttling). pkg/response.FromAppError
+	// renders it as a standard Retry-After header, never as response body
+	// content.
+	RetryAfter time.Duration
 }
 
 func (e *AppError) Error() string {
@@ -95,6 +105,39 @@ func ErrForbidden(message string) *AppError {
 // error text.
 func ErrConflict(message string) *AppError {
 	return NewAppError(http.StatusConflict, CodeConflict, message, nil)
+}
+
+// ErrUnprocessableEntity builds a 422 response: the request is well-formed
+// and authorized, but the operation cannot be safely carried out on THIS
+// resource as it stands (e.g. a document whose file type has no safe
+// content-redaction implementation). Distinct from ErrBadRequest (a
+// malformed request) and ErrConflict (a state collision) — this is neither:
+// the request itself is fine, but honoring it would require an
+// implementation that does not exist. message must be safe to show a
+// client.
+func ErrUnprocessableEntity(message string) *AppError {
+	return NewAppError(http.StatusUnprocessableEntity, CodeUnprocessableEntity, message, nil)
+}
+
+// ErrTooManyRequests builds a 429 response. Two independent callers use
+// it today: System 13's SSE connection-limit guard
+// (internal/sse.Manager.Register's ErrTooManyConnections) when a user
+// already holds the maximum number of concurrent event streams, and
+// System 15's login throttle (internal/ratelimit, via
+// AuthService.Login) when a per-IP or per-account attempt budget is
+// exhausted — see WithRetryAfter for the latter's Retry-After header.
+func ErrTooManyRequests(message string) *AppError {
+	return NewAppError(http.StatusTooManyRequests, CodeTooManyRequests, message, nil)
+}
+
+// WithRetryAfter sets d as the error's Retry-After hint and returns the
+// same *AppError for chaining (e.g.
+// utils.ErrTooManyRequests(msg).WithRetryAfter(d)). d is rounded up to the
+// nearest whole second by the caller that renders it (pkg/response.
+// FromAppError) — Retry-After is defined in whole seconds.
+func (e *AppError) WithRetryAfter(d time.Duration) *AppError {
+	e.RetryAfter = d
+	return e
 }
 
 // AsAppError unwraps err looking for an *AppError, so callers that receive a

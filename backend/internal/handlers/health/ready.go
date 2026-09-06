@@ -40,6 +40,14 @@ type readinessResponse struct {
 // dependency and reports which, if any, failed. It never includes
 // connection strings, credentials, or raw driver errors in the response —
 // only ok/error per dependency.
+//
+// @Summary      Readiness probe
+// @Description  Checks Postgres, Redis, and MinIO connectivity (each bounded to a 3s timeout) and reports ok/error per dependency — never a connection string, credential, or raw driver error. Unauthenticated; safe to expose to an orchestrator. 503 means at least one dependency is unreachable.
+// @Tags         health
+// @Produce      json
+// @Success      200  {object}  readinessResponse  "Every dependency reachable"
+// @Failure      503  {object}  readinessResponse  "At least one dependency unreachable — see the per-dependency status"
+// @Router       /ready [get]
 func Readiness(db, cache Pinger, store HealthChecker) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), readinessTimeout)

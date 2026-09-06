@@ -65,12 +65,7 @@ export interface CaseSummary {
 }
 
 export type CaseStatus =
-  | 'OPEN'
-  | 'UNDER_INVESTIGATION'
-  | 'SUBMITTED'
-  | 'UNDER_REVIEW'
-  | 'CLOSED'
-  | 'ARCHIVED';
+  'OPEN' | 'UNDER_INVESTIGATION' | 'SUBMITTED' | 'UNDER_REVIEW' | 'CLOSED' | 'ARCHIVED';
 
 /** internal/service.InvolvedPartySummary. */
 export interface InvolvedPartySummary {
@@ -92,16 +87,16 @@ export interface DocumentSummary {
   file_size: number;
   sha256_hash: string;
   status: DocumentStatus;
+  /** Set only for a REDACTED DERIVATIVE — the document it was produced
+   * FROM. Absent for an original upload. Use its presence as
+   * "is_derivative" rather than a separate flag. */
+  parent_document_id?: string;
   uploaded_by: string;
   uploaded_at: string;
 }
 
 export type DocumentType =
-  | 'FIR'
-  | 'FORENSIC_REPORT'
-  | 'PHOTO_EVIDENCE'
-  | 'WITNESS_STATEMENT'
-  | 'OTHER';
+  'FIR' | 'FORENSIC_REPORT' | 'PHOTO_EVIDENCE' | 'WITNESS_STATEMENT' | 'OTHER';
 
 export type DocumentStatus = 'ACTIVE' | 'TAMPERED';
 
@@ -174,6 +169,114 @@ export interface VerificationResult {
   stored_hash: string;
   computed_hash: string;
   verified_at: string;
+}
+
+/** One rectangular region to redact, in the SOURCE image's own pixel
+ * coordinate space (internal/service.RedactRegion) — never a rendered/
+ * zoomed on-screen coordinate; the caller must convert before sending
+ * this (see RedactStudioComponent). page must be 1 — every currently
+ * supported redaction format is single-page raster. */
+export interface RedactRegion {
+  page: 1;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** POST /documents/:id/redact's request body. */
+export interface RedactRequest {
+  reason: string;
+  regions: RedactRegion[];
+}
+
+/** POST /documents/:id/redact's response data (service.RedactionSummary).
+ * `document` is the newly created DERIVATIVE's own summary — never the
+ * source's, and never the raw redacted bytes. The source document's own
+ * row/hash/object/certificate are completely unaffected by this call. */
+export interface RedactionSummary {
+  redaction_id: string;
+  source_document_id: string;
+  reason: string;
+  created_at: string;
+  document: DocumentSummary;
+}
+
+/** document_shares.permission — VIEW (read + download + certificate
+ * read) or VERIFY (VIEW's grants plus document:verify). Never implies
+ * redact/reshare/delete. */
+export type SharePermission = 'VIEW' | 'VERIFY';
+
+/** Stored share status (document_shares.status). */
+export type ShareStatus = 'ACTIVE' | 'REVOKED';
+
+/** Computed, API-facing status (service.ShareSummary.effective_status) —
+ * ACTIVE/REVOKED mirror the stored status; EXPIRED is derived from
+ * expires_at and never itself persisted. */
+export type ShareEffectiveStatus = 'ACTIVE' | 'EXPIRED' | 'REVOKED';
+
+/** POST /documents/:id/share's request body. */
+export interface CreateShareRequest {
+  user_id: string;
+  permission: SharePermission;
+  expires_at?: string;
+  reason?: string;
+}
+
+/** internal/service.ShareSummary — POST .../share and
+ * POST .../shares/:shareId/revoke's response data, and one entry of
+ * GET .../shares. */
+export interface ShareSummary {
+  share_id: string;
+  document_id: string;
+  recipient_user_id: string;
+  created_by_user_id: string;
+  permission: SharePermission;
+  status: ShareStatus;
+  effective_status: ShareEffectiveStatus;
+  expires_at?: string;
+  reason?: string;
+  created_at: string;
+  revoked_at?: string;
+  revoked_by_user_id?: string;
+}
+
+/** GET /documents/:id/shares's response data. */
+export interface ShareListResult {
+  shares: ShareSummary[];
+}
+
+/** internal/service.SharedDocumentSummary — one row of
+ * GET /shared/documents. */
+export interface SharedDocumentSummary {
+  share_id: string;
+  permission: SharePermission;
+  expires_at?: string;
+  shared_at: string;
+  shared_by_user_id: string;
+  document: DocumentSummary;
+}
+
+/** GET /shared/documents's response data. */
+export interface SharedWithMeResult {
+  documents: SharedDocumentSummary[];
+  meta: PageMeta;
+}
+
+/** internal/service.RecipientCandidate — GET /users/search's per-user
+ * shape. Deliberately minimal — no phone/status/timestamps. */
+export interface RecipientCandidate {
+  id: string;
+  first_name: string;
+  last_name: string;
+  display_name?: string;
+  email: string;
+  roles: Role[];
+}
+
+/** GET /users/search's response data. */
+export interface UserSearchResult {
+  users: RecipientCandidate[];
 }
 
 /** GET /documents/:id/certificate's response data (service.CertificateSummary). */
@@ -267,4 +370,205 @@ export interface RoleCatalogEntry {
   id: string;
   name: Role;
   description?: string;
+}
+
+// ---- System 11: Audit Chain Verification & Integrity Dashboard ----
+// See docs/AUDIT_CHAIN.md's "Asynchronous Verification & Integrity
+// Dashboard" for the full backend design these types mirror.
+
+/** The complete verification-status vocabulary (internal/audit's
+ * VerificationStatus* constants) — QUEUED/RUNNING are in-flight;
+ * VERIFIED/INTEGRITY_FAILURE/FAILED are terminal. FAILED is an
+ * OPERATIONAL failure (e.g. a database outage), never a cryptographic
+ * finding — the two are never interchangeable in the UI either. */
+export type VerificationStatus = 'QUEUED' | 'RUNNING' | 'VERIFIED' | 'INTEGRITY_FAILURE' | 'FAILED';
+
+/** POST /audit/verify-chain's response data (internal/service.
+ * StartVerificationResult) — always 202: this is an ACCEPTANCE, not a
+ * result. If a verification was already QUEUED/RUNNING, this is that
+ * same run's id, never a newly created duplicate. */
+export interface StartVerificationResponse {
+  verification_id: string;
+  /** System 12: the underlying Asynq task's traceable id — deterministically
+   * `audit:verify_chain:<verification_id>` (see jobs.AuditVerifyChainJobID).
+   * Not rendered anywhere today; kept for parity with the backend response
+   * and for anyone correlating operational logs with a verification run. */
+  job_id: string;
+  status: VerificationStatus;
+  created_at: string;
+}
+
+/** GET /audit/verify-chain/:id's response data, and one element of
+ * GET /audit/verifications' list (internal/service.VerificationDetail).
+ * The SSE stream (see AuditVerificationService) delivers events shaped
+ * identically to this — the frontend never has to reconcile two
+ * different response shapes for "the same fact". */
+export interface VerificationDetail {
+  verification_id: string;
+  /** System 12: see StartVerificationResponse.job_id. */
+  job_id: string;
+  status: VerificationStatus;
+  entries_checked: number;
+  total_entries?: number;
+  progress_percent?: number;
+  last_seq_checked?: number;
+  failed_entry_id?: string;
+  failed_seq?: number;
+  /** INTEGRITY_FAILURE: GENESIS_INVALID | PREVIOUS_HASH_MISMATCH |
+   * ENTRY_HASH_MISMATCH | CANONICALIZATION_ERROR. FAILED: DATABASE_ERROR
+   * | TIMEOUT | STALE_TIMEOUT. Absent for QUEUED/RUNNING/VERIFIED. */
+  failure_type?: string;
+  /** Safe, human-readable text only — never raw SQL/driver detail. */
+  failure_reason?: string;
+  requested_by_user_id: string;
+  requested_by_role?: string;
+  started_at?: string;
+  completed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** GET /audit/verifications' filter/query params. */
+export interface VerificationHistoryFilter {
+  status?: VerificationStatus;
+  requested_by?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+  page_size?: number;
+}
+
+/** GET /audit/verifications' response data (internal/service.
+ * VerificationListResult). */
+export interface VerificationHistoryResult {
+  verifications: VerificationDetail[];
+  meta: PageMeta;
+}
+
+/** GET /audit/integrity's response data (internal/service.
+ * IntegritySummary) — the dashboard's at-a-glance card. */
+export interface IntegritySummary {
+  total_entries: number;
+  chain_head_seq?: number;
+  chain_head_hash?: string;
+  last_verification?: VerificationDetail;
+}
+
+/** GET /audit's filter/query params (internal/handlers/audit/list.go's
+ * parseAuditListFilter). Every field only NARROWS what the caller's own
+ * RLS-visible rows already are (audit_log_select) — it can never widen
+ * them, so an unprivileged value here simply yields zero rows, never
+ * another user's entries. */
+export interface AuditListFilter {
+  user_id?: string;
+  role?: string;
+  action?: string;
+  resource_type?: string;
+  resource_id?: string;
+  case_id?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+  page_size?: number;
+}
+
+/** One row of GET /audit (internal/service.AuditEntrySummary) — a single
+ * hash-chained ledger entry, distinct from a chain-VERIFICATION run
+ * (VerificationDetail above). `metadata` is a free-form, action-specific
+ * JSON object (e.g. a login failure's `reason`) — never rendered as HTML,
+ * only as inert text. */
+export interface AuditEntry {
+  id: string;
+  seq: number;
+  timestamp: string;
+  user_id?: string;
+  role?: string;
+  action: string;
+  resource_type: string;
+  resource_id?: string;
+  case_id?: string;
+  metadata: Record<string, unknown>;
+  prev_hash?: string;
+  hash: string;
+}
+
+/** GET /audit's response data (internal/service.AuditListResult). */
+export interface AuditListResult {
+  entries: AuditEntry[];
+  meta: PageMeta;
+}
+
+// ---- System 13: Real-Time Events & Server-Sent Events ----
+// See docs/REALTIME_EVENTS.md for the full architecture these types
+// mirror. internal/events.Event is the ONE envelope every SSE event this
+// backend ever sends uses — never a bespoke per-feature shape.
+
+/** internal/events.Event — the one real-time notification envelope.
+ * `data`'s shape depends on `event_type` (see the Type*EventData
+ * interfaces below); EventStreamService's callers narrow it themselves
+ * (an unrecognized event_type must be ignored safely, never crash — see
+ * that service's own doc comment). */
+export interface RealtimeEvent<T = unknown> {
+  event_id: string;
+  event_type: string;
+  event_version: number;
+  timestamp: string;
+  resource_type: string;
+  resource_id: string;
+  data: T;
+}
+
+/** internal/events.AuditVerificationData — the `data` payload of every
+ * AUDIT_VERIFICATION_STARTED/PROGRESS/COMPLETED/AUDIT_INTEGRITY_FAILURE/
+ * AUDIT_VERIFICATION_FAILED event. A safe, progress-focused SUBSET of
+ * VerificationDetail's fields (no requested-by identity, no created/
+ * updated timestamps on every tick), but every field it DOES carry uses
+ * the exact same name as its VerificationDetail counterpart, so rendering
+ * code can read either shape without a translation layer — see
+ * AuditVerificationService.current's own doc comment. */
+export interface AuditVerificationEventData {
+  verification_id: string;
+  status: VerificationStatus;
+  entries_checked: number;
+  total_entries?: number;
+  progress_percent?: number;
+  failed_entry_id?: string;
+  failure_type?: string;
+  failure_reason?: string;
+}
+
+/** internal/events.ShareEventData — the `data` payload of SHARE_CREATED/
+ * SHARE_REVOKED events on a case's event stream (GET /cases/:id/events).
+ * Deliberately omits the recipient's identity and permission level — see
+ * that Go type's own doc comment; this is a refetch SIGNAL, never a copy
+ * of the share record. */
+export interface ShareEventData {
+  share_id: string;
+  document_id: string;
+  case_id: string;
+}
+
+/** internal/events.DocumentVerificationData — DOCUMENT_VERIFICATION_
+ * COMPLETED's `data` payload on a case's event stream. */
+export interface DocumentVerificationEventData {
+  document_id: string;
+  case_id: string;
+  result: 'VERIFIED' | 'INTEGRITY_FAILURE';
+}
+
+/** internal/events.CertificateGenerationData — CERTIFICATE_GENERATION_
+ * COMPLETED's `data` payload on a case's event stream. */
+export interface CertificateGenerationEventData {
+  certificate_id: string;
+  document_id: string;
+  case_id: string;
+  document_hash: string;
+}
+
+/** internal/events.DocumentRedactionData — DOCUMENT_REDACTION_COMPLETED's
+ * `data` payload on a case's event stream. */
+export interface DocumentRedactionEventData {
+  source_document_id: string;
+  result_document_id: string;
+  case_id: string;
 }

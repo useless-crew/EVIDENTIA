@@ -4,13 +4,15 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { DmsStateService } from '../../core/services/dms-state.service';
 import { CaseService } from '../../core/services/case.service';
 import { DocumentService } from '../../core/services/document.service';
+import { ShareService } from '../../core/services/share.service';
 import { ApiError } from '../../core/services/api-client.service';
-import { CertificateSummary, DocumentSummary, VerificationResult } from '../../core/models/api.models';
+import { CertificateSummary, DocumentSummary, ShareSummary, VerificationResult } from '../../core/models/api.models';
+import { ShareDialogComponent } from '../../components/share-dialog/share-dialog.component';
 
 @Component({
   selector: 'app-document-viewer',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, ShareDialogComponent],
   templateUrl: './document-viewer.component.html',
   styleUrls: ['./document-viewer.component.css']
 })
@@ -18,6 +20,7 @@ export class DocumentViewerComponent implements OnInit {
   dms = inject(DmsStateService);
   private readonly caseService = inject(CaseService);
   private readonly documentService = inject(DocumentService);
+  private readonly shareService = inject(ShareService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
 
@@ -47,6 +50,20 @@ export class DocumentViewerComponent implements OnInit {
   readonly downloading = signal(false);
   readonly downloadError = signal<string | null>(null);
 
+  // ---- Document sharing ----
+  // canManageShares reflects a REAL backend authorization result (whether
+  // GET /documents/:id/shares succeeded), never a client-side guess — a
+  // caller who cannot manage this document's sharing simply never sees
+  // this section, and the backend enforces the same rule independently
+  // regardless of what this signal shows (frontend visibility is not
+  // security).
+  readonly canManageShares = signal(false);
+  readonly sharesLoading = signal(false);
+  readonly shares = signal<ShareSummary[]>([]);
+  readonly shareDialogOpen = signal(false);
+  readonly revokingShareId = signal<string | null>(null);
+  readonly shareActionError = signal<string | null>(null);
+
   ngOnInit() {
     this.route.paramMap.subscribe((params) => {
       const caseId = params.get('caseId');
@@ -59,22 +76,50 @@ export class DocumentViewerComponent implements OnInit {
     });
   }
 
-  /** No standalone GET /documents/:id exists yet — the only source of a
-   * document's metadata (filename, mime_type, uploaded_by, ...) is the
+  /** No standalone GET /documents/:id exists yet — the primary source of
+   * a document's metadata (filename, mime_type, uploaded_by, ...) is the
    * embedded documents[] array on GET /cases/:id (see
    * docs/API_ENDPOINTS.md's "Not yet implemented" note under Documents).
-   * Verify/certificate/download below all call their own real,
-   * document-scoped endpoints directly — only the display metadata comes
-   * from the case fetch. */
+   * That call requires case membership, though — a share recipient with
+   * NO relationship to the document's case (the whole point of sharing
+   * with someone outside it) gets a 403 from it. In that case, fall back
+   * to GET /shared/documents and find this exact document there instead
+   * — the recipient's own real, backend-authorized access path (see
+   * ShareService.sharedWithMe). Verify/certificate/download below all
+   * call their own real, document-scoped endpoints directly regardless
+   * of which path found the metadata. */
   fetch() {
     this.loading.set(true);
     this.errorMessage.set(null);
     this.caseService.get(this.caseId).subscribe({
       next: (c) => {
         const found = c.documents.find((d) => d.id === this.documentId) ?? null;
-        this.doc.set(found);
         if (!found) {
           this.errorMessage.set('This document could not be found in the case record.');
+          this.loading.set(false);
+          return;
+        }
+        this.doc.set(found);
+        this.loadShares();
+        this.loading.set(false);
+      },
+      error: () => this.fetchViaSharedWithMe(),
+    });
+  }
+
+  /** Fallback for a caller with no case relationship but an active share
+   * on this exact document — see fetch()'s doc comment. */
+  private fetchViaSharedWithMe() {
+    this.shareService.sharedWithMe(1, 100).subscribe({
+      next: (result) => {
+        const match = result.documents.find((d) => d.document.id === this.documentId);
+        if (match) {
+          this.doc.set(match.document);
+          // A pure recipient never manages this document's sharing —
+          // GET /documents/:id/shares would 403 for them too; skip the
+          // call entirely rather than surface an expected denial.
+        } else {
+          this.errorMessage.set('You do not have access to this document.');
         }
         this.loading.set(false);
       },
@@ -185,5 +230,57 @@ export class DocumentViewerComponent implements OnInit {
 
   goToRedact() {
     this.router.navigate(['/app/cases', this.caseId, 'documents', this.documentId, 'redact']);
+  }
+
+  /** GET /documents/:id/shares — only the caller's own real authorization
+   * result decides whether the sharing UI appears (see canManageShares's
+   * doc comment). A 403 here is an expected, silent outcome for most
+   * viewers, not an error to surface. */
+  private loadShares() {
+    this.sharesLoading.set(true);
+    this.shareService.list(this.documentId).subscribe({
+      next: (result) => {
+        this.sharesLoading.set(false);
+        this.canManageShares.set(true);
+        this.shares.set(result.shares);
+      },
+      error: () => {
+        this.sharesLoading.set(false);
+        this.canManageShares.set(false);
+        this.shares.set([]);
+      },
+    });
+  }
+
+  openShareDialog() {
+    this.shareActionError.set(null);
+    this.shareDialogOpen.set(true);
+  }
+
+  onShareDialogClosed() {
+    this.shareDialogOpen.set(false);
+  }
+
+  onShared(_summary: ShareSummary) {
+    this.shareDialogOpen.set(false);
+    this.loadShares();
+  }
+
+  revokeShare(shareId: string) {
+    if (this.revokingShareId()) return;
+    if (!confirm('Revoke this share? The recipient will immediately lose access.')) return;
+
+    this.revokingShareId.set(shareId);
+    this.shareActionError.set(null);
+    this.shareService.revoke(this.documentId, shareId).subscribe({
+      next: () => {
+        this.revokingShareId.set(null);
+        this.loadShares();
+      },
+      error: (err: ApiError) => {
+        this.revokingShareId.set(null);
+        this.shareActionError.set(err.message);
+      },
+    });
   }
 }

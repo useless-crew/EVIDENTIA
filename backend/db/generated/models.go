@@ -30,6 +30,29 @@ type AuditLog struct {
 	Hash     []byte `json:"hash"`
 }
 
+// One row per audit-chain verification run (System 11) — the durable, evidentiary record of "was the chain intact as of this check", independent of whatever transport (SSE, polling) a client used to observe it while running. Never mutates audit_log; read-only against it. id is the verification_id every System 11 API/SSE route is keyed by. requested_by_role is captured verbatim at request time, mirroring audit_log.role's own rationale (a user's roles can change after the fact, but this record should reflect what was true when requested).
+type AuditVerification struct {
+	ID                uuid.UUID `json:"id"`
+	RequestedByUserID uuid.UUID `json:"requested_by_user_id"`
+	RequestedByRole   *string   `json:"requested_by_role"`
+	Status            string    `json:"status"`
+	EntriesChecked    int64     `json:"entries_checked"`
+	// Captured ONCE, at job start, from a single COUNT(*) — never re-queried per batch (master prompt: "do not perform an expensive COUNT query repeatedly"). NULL only in the brief QUEUED window before the worker has picked the job up.
+	TotalEntries *int64 `json:"total_entries"`
+	// audit_log.seq of the last entry confirmed valid so far — the live progress cursor, updated at the same throttled cadence as entries_checked (see internal/service.AuditService's progress-update-throttle constant). Never used to RESUME a crashed run (see failure_type's STALE_TIMEOUT case below) — only to report progress.
+	LastSeqChecked *int64     `json:"last_seq_checked"`
+	FailedEntryID  *uuid.UUID `json:"failed_entry_id"`
+	FailedSeq      *int64     `json:"failed_seq"`
+	// For INTEGRITY_FAILURE: one of GENESIS_INVALID, PREVIOUS_HASH_MISMATCH, ENTRY_HASH_MISMATCH, CANONICALIZATION_ERROR (see internal/audit.BatchResult.FailureType — the exact, and only, categories System 10's verifier can DEFINITIVELY distinguish; CHAIN_FORK_DETECTED/DUPLICATE_ENTRY/CHAIN_ORDER_INVALID are prevented at the database level by audit_log's own unique indexes/ identity column and therefore can never be witnessed by a verifier scanning a successfully-committed chain — see docs/AUDIT_CHAIN.md). For FAILED: an operational category such as DATABASE_ERROR, TIMEOUT, or STALE_TIMEOUT (a RUNNING/QUEUED row whose worker went silent long enough to be presumed dead — see AuditService's reconciliation logic) — never confused with a cryptographic finding.
+	FailureType *string `json:"failure_type"`
+	// Safe, human-readable detail only — never a raw SQL error, stack trace, filesystem path, or credential (master prompt: "do not expose... database credentials... SQL statements... internal filesystem paths").
+	FailureReason *string            `json:"failure_reason"`
+	StartedAt     pgtype.Timestamptz `json:"started_at"`
+	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt     time.Time          `json:"created_at"`
+	UpdatedAt     time.Time          `json:"updated_at"`
+}
+
 // Refresh-token sessions. token_hash is SHA-256(raw token) — the raw token itself is never persisted. family_id groups a chain of rotated tokens descending from one login: on rotation the new row keeps the same family_id as its parent, so reuse of a already-rotated (revoked) token can invalidate the whole family, not just the one token presented (see internal/service/auth_service.go). Sessions are ended via UPDATE (revoked_at), never DELETE — consistent with this schema's soft-lifecycle convention elsewhere. ON DELETE CASCADE from users is deliberate here (unlike the RESTRICT used for evidence tables in System 2): a session has no independent evidentiary value, so removing a user's sessions when the user itself is removed is correct, not a data-loss risk.
 type AuthSession struct {
 	ID     uuid.UUID `json:"id"`
@@ -114,6 +137,24 @@ type Document struct {
 	UploadedAt       time.Time       `json:"uploaded_at"`
 	CreatedAt        time.Time       `json:"created_at"`
 	UpdatedAt        time.Time       `json:"updated_at"`
+}
+
+// Explicit, document-scoped access delegation — master prompt §4/§5. A row grants shared_with_user_id controlled access to EXACTLY document_id (never the whole case, never every derivative of it — see docs/SECURITY.md's "Sharing lineage") for as long as status = 'ACTIVE' and (expires_at IS NULL OR expires_at > now()). Revocation is a status transition (ACTIVE -> REVOKED), never a DELETE — no DELETE privilege is granted below and no DELETE query exists, so historical delegation/accountability records are permanent, exactly like redactions/compliance_certificates. The recipient never becomes the document's owner/uploader; this table only ever grants a read-oriented capability (VIEW or VERIFY) checked by internal/authz.Service.CanAccessDocument alongside — never instead of — the existing RBAC/ABAC/RLS checks.
+type DocumentShare struct {
+	ID               uuid.UUID `json:"id"`
+	DocumentID       uuid.UUID `json:"document_id"`
+	SharedWithUserID uuid.UUID `json:"shared_with_user_id"`
+	CreatedByUserID  uuid.UUID `json:"created_by_user_id"`
+	// VIEW (document:read + document:download + certificate:read) or VERIFY (VIEW's grants PLUS document:verify). Never implies document:redact, document:share (resharing), or any write/delete action — master prompt §7/§25.
+	Permission string `json:"permission"`
+	Status     string `json:"status"`
+	// NULL means non-expiring. Enforced server-side on every access check (internal/authz, and this same condition mirrored in RLS below) — never left to the frontend to hide an expired share.
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	Reason          *string            `json:"reason"`
+	Metadata        json.RawMessage    `json:"metadata"`
+	CreatedAt       time.Time          `json:"created_at"`
+	RevokedAt       pgtype.Timestamptz `json:"revoked_at"`
+	RevokedByUserID *uuid.UUID         `json:"revoked_by_user_id"`
 }
 
 // Fine-grained permission catalog (e.g. name='case:create', resource='case', action='create'). Not constrained to a fixed resource/action vocabulary here — the catalog is expected to grow as later systems are implemented; that growth is ordinary reference-data seeding, not a schema migration.
