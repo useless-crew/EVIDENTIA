@@ -5,11 +5,12 @@ import { DmsStateService } from '../../core/services/dms-state.service';
 import { CaseService } from '../../core/services/case.service';
 import { ApiError } from '../../core/services/api-client.service';
 import { CaseDetail, DocumentSummary } from '../../core/models/api.models';
+import { RevealDirective } from '../../core/directives/reveal.directive';
 
 @Component({
   selector: 'app-case-detail',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, RevealDirective],
   templateUrl: './case-detail.component.html',
   styleUrls: ['./case-detail.component.css']
 })

@@ -8,24 +8,28 @@
 
     <!-- Main Dynamic Content Workspace -->
     <main class="workspace-content" #contentArea>
-      <!-- Breadcrumb Bar -->
-      <div class="workspace-breadcrumb">
-        <span class="crumb-icon font-mono">▸</span>
-        <span class="crumb-path font-mono">{{ dms.breadcrumb() }}</span>
-      </div>
+      <div class="workspace-inner">
+        <!-- Breadcrumb Bar -->
+        <nav class="workspace-breadcrumb" aria-label="Breadcrumb">
+          <span class="crumb-mark" aria-hidden="true"></span>
+          <span class="crumb-path">{{ dms.breadcrumb() }}</span>
+        </nav>
 
-      <!-- Active Screen View Container -->
-      <div class="screen-container">
-        <router-outlet></router-outlet>
+        <!-- Active Screen View Container -->
+        <div class="screen-container">
+          <router-outlet></router-outlet>
+        </div>
       </div>
 
       <!-- Official Trust & Regulatory Footer -->
       <footer class="workspace-footer">
-        <div class="footer-trust-left">
-          <span>Official Document Management System · Government of India Evidence Infrastructure</span>
-        </div>
-        <div class="footer-trust-right font-mono">
-          <span>Node: NCRB-DMS-02 · IST · All activity is hash-sealed under §65B IT Act</span>
+        <div class="workspace-inner footer-inner">
+          <span class="footer-trust-left">
+            Official Document Management System · Government of India Evidence Infrastructure
+          </span>
+          <span class="footer-trust-right">
+            Node: NCRB-DMS-02 · IST · All activity is hash-sealed under §65B IT Act
+          </span>
         </div>
       </footer>
     </main>

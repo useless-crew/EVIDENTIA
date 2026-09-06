@@ -34,6 +34,9 @@ export class AdminComponent implements OnInit {
   readonly roles: Role[] = ['ADMIN', 'POLICE', 'FORENSICS', 'LAWYER', 'JUDGE'];
   readonly statuses: UserStatus[] = ['active', 'inactive', 'suspended'];
 
+  /** Placeholder rows rendered while the user list loads. */
+  readonly skeletonRows = Array.from({ length: 6 });
+
   readonly loading = signal(true);
   readonly errorMessage = signal<string | null>(null);
   readonly result = signal<AdminUserListResult | null>(null);

@@ -1,22 +1,43 @@
-<div class="doc-viewer-view animate-fade-in">
-  <div class="state-panel" *ngIf="loading()">Loading document…</div>
+<div class="doc-viewer-view">
+  <!-- Loading -->
+  <div class="panel" *ngIf="loading()" aria-busy="true">
+    <div class="detail-skeleton">
+      <span class="skeleton skeleton-line" style="width: 42%; height: 22px"></span>
+      <span class="skeleton skeleton-line" style="width: 64%"></span>
+      <span class="skeleton" style="width: 100%; height: 180px"></span>
+    </div>
+  </div>
 
-  <div class="state-panel state-error" *ngIf="!loading() && errorMessage()">
-    {{ errorMessage() }}
-    <button type="button" class="btn-secondary btn-retry" (click)="fetch()">Retry</button>
+  <!-- Error -->
+  <div class="panel" *ngIf="!loading() && errorMessage()">
+    <div class="state-block is-error">
+      <span class="state-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+      </span>
+      <span class="state-title">Could not load this document</span>
+      <span class="state-text">{{ errorMessage() }}</span>
+      <button type="button" class="btn-secondary" (click)="fetch()">Retry</button>
+    </div>
   </div>
 
   <ng-container *ngIf="!loading() && !errorMessage() && doc() as d">
     <!-- Document Header -->
-    <div class="doc-header">
-      <div>
-        <h1 class="doc-title font-mono">{{ d.filename }}</h1>
-        <p class="doc-subtitle">
-          {{ d.mime_type }} · {{ d.file_size | number }} bytes · Uploaded {{ d.uploaded_at | date: 'medium' }}
-        </p>
+    <header class="page-head">
+      <div class="page-head-titles">
+        <span class="page-eyebrow">Evidence file</span>
+        <h1 class="page-title doc-title">{{ d.filename }}</h1>
+        <div class="head-badges">
+          <span class="head-meta">{{ d.mime_type }}</span>
+          <span class="head-meta">{{ d.file_size | number }} bytes</span>
+          <span class="head-meta">Uploaded {{ d.uploaded_at | date: 'medium' }}</span>
+        </div>
       </div>
 
-      <div class="doc-actions">
+      <div class="page-actions">
         <button type="button" class="btn-secondary" (click)="download()" [disabled]="downloading()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -34,7 +55,12 @@
           Redact
         </button>
 
-        <button type="button" class="btn-primary" disabled title="Document sharing is not available yet">
+        <button
+          type="button"
+          class="btn-primary"
+          disabled
+          title="Document sharing is not available yet"
+        >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="18" cy="5" r="3"></circle>
             <circle cx="6" cy="12" r="3"></circle>
@@ -45,19 +71,32 @@
           Share
         </button>
       </div>
+    </header>
+
+    <div class="form-alert form-alert-error" *ngIf="downloadError()">
+      <span class="alert-mark" aria-hidden="true"></span>
+      {{ downloadError() }}
     </div>
-    <div class="inline-error" *ngIf="downloadError()">{{ downloadError() }}</div>
 
     <!-- Viewer 2-Column Split -->
     <div class="doc-layout-grid">
       <!-- Left Column: Document Canvas & Controls -->
-      <div class="viewer-card">
+      <section class="panel viewer-card">
         <div class="viewer-toolbar">
-          <button type="button" class="tool-btn" (click)="zoomOut()">−</button>
-          <button type="button" class="tool-btn" (click)="zoomIn()">+</button>
-          <span class="page-indicator font-mono">{{ zoomLevel }}%</span>
+          <button type="button" class="btn-icon" (click)="zoomOut()" aria-label="Zoom out">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+          </button>
+          <button type="button" class="btn-icon" (click)="zoomIn()" aria-label="Zoom in">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+          </button>
+          <span class="zoom-indicator">{{ zoomLevel }}%</span>
           <div class="toolbar-spacer"></div>
-          <button type="button" class="tool-btn-fit" (click)="resetZoom()">Reset</button>
+          <button type="button" class="btn-ghost" (click)="resetZoom()">Reset</button>
         </div>
 
         <!-- No inline renderer for arbitrary evidence file types — download
@@ -65,90 +104,167 @@
              for what's actually stored. -->
         <div class="viewer-viewport doc-canvas-bg">
           <div class="preview-placeholder" [style.transform]="'scale(' + zoomLevel / 100 + ')'">
-            <div class="preview-icon">📄</div>
-            <div class="preview-filename font-mono">{{ d.filename }}</div>
+            <span class="preview-icon" aria-hidden="true">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+                <rect x="5" y="3" width="14" height="18" rx="1.5"></rect>
+                <line x1="8.5" y1="8" x2="15.5" y2="8"></line>
+                <line x1="8.5" y1="12" x2="15.5" y2="12"></line>
+                <line x1="8.5" y1="16" x2="12.5" y2="16"></line>
+              </svg>
+            </span>
+            <div class="preview-filename">{{ d.filename }}</div>
             <div class="preview-type">{{ d.mime_type }}</div>
-            <p class="preview-note">Inline preview is not available for this file type. Use Download to view the original evidence file.</p>
+            <p class="preview-note">
+              Inline preview is not available for this file type. Use Download to view the original
+              evidence file.
+            </p>
           </div>
         </div>
-      </div>
+      </section>
 
       <!-- Right Column: Integrity & Certificate Sidecars -->
       <div class="doc-side-col">
         <!-- SHA-256 Integrity Card -->
-        <div class="side-card">
-          <h2 class="side-card-title">Cryptographic Integrity</h2>
-          <div class="side-card-label">RECORDED SHA-256 (AT UPLOAD)</div>
-          <div class="digest-box font-mono">{{ d.sha256_hash }}</div>
-
-          <div class="verify-action-row">
-            <button type="button" class="btn-primary btn-sm" (click)="verify()" [disabled]="verifying()">
-              {{ verifying() ? 'Verifying…' : 'Verify Integrity' }}
-            </button>
-            <div class="verify-feedback">
-              <span *ngIf="!verifying() && !verifyResult() && !verifyError()" class="status-idle">
-                Not verified this session
-              </span>
-              <span *ngIf="verifying()" class="status-checking">
-                <span class="spinner-dot"></span> Recomputing hash from stored evidence…
-              </span>
-              <span *ngIf="!verifying() && verifyResult()?.status === 'VERIFIED'" class="status-ok">
-                ✓ VERIFIED — matches canonical hash
-              </span>
-              <span *ngIf="!verifying() && verifyError()" class="status-unavailable">
-                Unable to verify evidence — {{ verifyError() }}
-              </span>
-            </div>
+        <section class="panel">
+          <div class="panel-head">
+            <h2 class="panel-title">Cryptographic Integrity</h2>
+            <span class="panel-hint">SHA-256</span>
           </div>
 
-          <!-- Integrity failure — deliberately prominent, per docs/SECURITY.md's
-               "a verification mismatch never updates the canonical hash". -->
-          <div class="integrity-failure-panel" *ngIf="!verifying() && verifyResult()?.status === 'INTEGRITY_FAILURE'">
-            <div class="failure-title">⚠ INTEGRITY FAILURE</div>
-            <p class="failure-desc">
-              This evidence does not match its canonical stored SHA-256 hash. The stored evidence object has
-              changed since it was ingested.
-            </p>
-            <div class="failure-hash-row">
-              <span class="failure-hash-label">CANONICAL HASH</span>
-              <div class="digest-box font-mono">{{ verifyResult()!.stored_hash }}</div>
+          <div class="panel-body integrity-body">
+            <div class="meta-item">
+              <span class="meta-key">Recorded at upload</span>
+              <span class="hash-chip digest">{{ d.sha256_hash }}</span>
             </div>
-            <div class="failure-hash-row">
-              <span class="failure-hash-label">COMPUTED HASH</span>
-              <div class="digest-box font-mono danger">{{ verifyResult()!.computed_hash }}</div>
-            </div>
-            <div class="failure-meta font-mono">Verified {{ verifyResult()!.verified_at | date: 'medium' }}</div>
-          </div>
 
-          <div class="verify-success-detail" *ngIf="!verifying() && verifyResult()?.status === 'VERIFIED'">
-            <div class="failure-hash-row">
-              <span class="failure-hash-label">COMPUTED HASH</span>
-              <div class="digest-box font-mono">{{ verifyResult()!.computed_hash }}</div>
+            <div class="verify-action-row">
+              <button
+                type="button"
+                class="btn-primary btn-sm"
+                (click)="verify()"
+                [disabled]="verifying()"
+              >
+                <span *ngIf="verifying()" class="btn-spinner animate-spin" aria-hidden="true"></span>
+                {{ verifying() ? 'Verifying…' : 'Verify Integrity' }}
+              </button>
+
+              <div class="verify-feedback">
+                <span
+                  *ngIf="!verifying() && !verifyResult() && !verifyError()"
+                  class="verify-note"
+                >
+                  Not verified this session
+                </span>
+                <span *ngIf="verifying()" class="verify-note">
+                  Recomputing hash from stored evidence…
+                </span>
+                <span
+                  *ngIf="!verifying() && verifyResult()?.status === 'VERIFIED'"
+                  class="live-pill"
+                >
+                  <span class="live-dot" aria-hidden="true"></span>
+                  Verified — matches canonical hash
+                </span>
+                <span *ngIf="!verifying() && verifyError()" class="verify-note is-warn">
+                  Unable to verify evidence — {{ verifyError() }}
+                </span>
+              </div>
             </div>
-            <div class="failure-meta font-mono">Verified {{ verifyResult()!.verified_at | date: 'medium' }}</div>
+
+            <!-- Integrity failure — deliberately prominent, per docs/SECURITY.md's
+                 "a verification mismatch never updates the canonical hash". -->
+            <div
+              class="integrity-failure-panel"
+              *ngIf="!verifying() && verifyResult()?.status === 'INTEGRITY_FAILURE'"
+            >
+              <div class="failure-title">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                  <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path>
+                  <line x1="12" y1="9" x2="12" y2="13"></line>
+                  <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                </svg>
+                Integrity failure
+              </div>
+              <p class="failure-desc">
+                This evidence does not match its canonical stored SHA-256 hash. The stored evidence
+                object has changed since it was ingested.
+              </p>
+              <div class="meta-item">
+                <span class="meta-key">Canonical hash</span>
+                <span class="hash-chip digest">{{ verifyResult()!.stored_hash }}</span>
+              </div>
+              <div class="meta-item">
+                <span class="meta-key">Computed hash</span>
+                <span class="hash-chip digest is-danger">{{ verifyResult()!.computed_hash }}</span>
+              </div>
+              <div class="failure-meta">
+                Verified {{ verifyResult()!.verified_at | date: 'medium' }}
+              </div>
+            </div>
+
+            <div
+              class="verify-success-detail"
+              *ngIf="!verifying() && verifyResult()?.status === 'VERIFIED'"
+            >
+              <div class="meta-item">
+                <span class="meta-key">Computed hash</span>
+                <span class="hash-chip digest">{{ verifyResult()!.computed_hash }}</span>
+              </div>
+              <div class="failure-meta">
+                Verified {{ verifyResult()!.verified_at | date: 'medium' }}
+              </div>
+            </div>
           </div>
-        </div>
+        </section>
 
         <!-- Compliance Certificate Card -->
-        <div class="side-card">
-          <div class="compliance-badge-btn" (click)="toggleCert()" title="View compliance certificate">
-            <span class="compliance-dot"></span>
-            <span>Compliance Certificate</span>
-            <span class="compliance-info-icon">{{ certOpen() ? '−' : 'i' }}</span>
-          </div>
+        <section class="panel">
+          <button
+            type="button"
+            class="compliance-badge-btn"
+            [class.is-open]="certOpen()"
+            (click)="toggleCert()"
+            [attr.aria-expanded]="certOpen()"
+          >
+            <span class="compliance-dot" aria-hidden="true"></span>
+            <span class="compliance-label">Compliance Certificate</span>
+            <span class="compliance-chevron" aria-hidden="true"></span>
+          </button>
 
-          <div *ngIf="certOpen()" class="cert-modal animate-fade-in">
+          <div *ngIf="certOpen()" class="cert-body animate-fade-in">
             <div *ngIf="certLoading()" class="cert-state">Loading certificate…</div>
 
             <ng-container *ngIf="!certLoading() && certificate() as cert">
-              <div class="cert-title">Compliance Certificate</div>
-              <div class="cert-row">id · <span class="font-mono">{{ cert.id }}</span></div>
-              <div class="cert-hash font-mono">hash · {{ cert.document_hash }}</div>
-              <div class="cert-row">version · {{ cert.certificate_version }}</div>
-              <div class="cert-row">issued · {{ cert.generated_at | date: 'medium' }}</div>
-              <div class="cert-row">issuer · {{ cert.issuer }}</div>
-              <div class="cert-row">signature algorithm · <span class="font-mono">{{ cert.signature_algorithm }}</span></div>
-              <div class="cert-row">signature · <span class="font-mono">{{ cert.signature.slice(0, 24) }}…</span></div>
+              <div class="meta-list">
+                <div class="meta-item">
+                  <span class="meta-key">Certificate ID</span>
+                  <span class="meta-value mono-value">{{ cert.id }}</span>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-key">Document hash</span>
+                  <span class="hash-chip digest">{{ cert.document_hash }}</span>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-key">Version</span>
+                  <span class="meta-value">{{ cert.certificate_version }}</span>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-key">Issued</span>
+                  <span class="meta-value">{{ cert.generated_at | date: 'medium' }}</span>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-key">Issuer</span>
+                  <span class="meta-value">{{ cert.issuer }}</span>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-key">Signature algorithm</span>
+                  <span class="meta-value mono-value">{{ cert.signature_algorithm }}</span>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-key">Signature</span>
+                  <span class="meta-value mono-value">{{ cert.signature.slice(0, 24) }}…</span>
+                </div>
+              </div>
             </ng-container>
 
             <div *ngIf="!certLoading() && certNotFound()" class="cert-state">
@@ -159,7 +275,7 @@
               {{ certError() }}
             </div>
           </div>
-        </div>
+        </section>
       </div>
     </div>
   </ng-container>

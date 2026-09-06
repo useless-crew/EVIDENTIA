@@ -1,0 +1,928 @@
+/* ==========================================================================
+   EVIDENTIA — Workspace Primitives
+   Shared building blocks for the authenticated tool surface (dashboard, cases,
+   viewer, audit, admin). The landing page is a marketing surface and uses the
+   display-serif system in styles.css; this file is deliberately denser and
+   quieter — serif appears only on page titles and figures, never in tables.
+   ========================================================================== */
+
+:root {
+  /* Spacing rhythm — every workspace gap comes from this scale */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 22px;
+  --sp-6: 30px;
+  --sp-7: 42px;
+
+  /* Radii */
+  --r-sm: 5px;
+  --r-md: 8px;
+  --r-lg: 12px;
+
+  /* Workspace chrome metrics — shared so sticky offsets stay in sync */
+  --header-h: 56px;
+  --ribbon-h: 3.5px;
+  --chrome-h: calc(var(--header-h) + var(--ribbon-h));
+  --sidebar-w: 236px;
+}
+
+/* ==========================================================================
+   Page header — the masthead every screen opens with
+   ========================================================================== */
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-6);
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.page-head-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.page-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--color-accent-blue);
+}
+
+/* Serif title — the one editorial note carried into the workspace */
+.page-title {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(1.75rem, 2.3vw, 2.35rem);
+  line-height: 1.08;
+  letter-spacing: -0.015em;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.page-subtitle {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+  max-width: 68ch;
+}
+
+.page-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* ==========================================================================
+   Panel — the workspace's single container primitive
+   ========================================================================== */
+.panel {
+  background: var(--color-card-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--dur-base) var(--ease-out-expo),
+    border-color var(--dur-base) ease;
+}
+
+.panel-flush {
+  border-radius: var(--r-lg);
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: linear-gradient(to bottom, #ffffff, var(--color-card-raised));
+}
+
+.panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.panel-hint {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.panel-link {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-accent-blue);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: gap var(--dur-base) var(--ease-out-expo), color var(--dur-base) ease;
+}
+
+.panel-link:hover {
+  gap: 9px;
+  color: var(--color-navy-primary);
+  text-decoration: none;
+}
+
+.panel-body {
+  padding: var(--sp-5);
+}
+
+/* ==========================================================================
+   Data table — CSS-grid rows, so columns stay aligned without <table>
+   ========================================================================== */
+.data-head {
+  display: grid;
+  gap: var(--sp-4);
+  align-items: center;
+  padding: 10px var(--sp-5);
+  background: var(--color-section-alt);
+  border-bottom: 1px solid var(--color-border);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.data-row {
+  position: relative;
+  display: grid;
+  gap: var(--sp-4);
+  align-items: center;
+  padding: 14px var(--sp-5);
+  border-bottom: 1px solid var(--color-border-subtle);
+  font-size: 13px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) ease;
+}
+
+.data-row:last-child {
+  border-bottom: none;
+}
+
+/* Accent edge that wipes in on hover — replaces a flat background swap */
+.data-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--color-accent-blue);
+  transform: scaleY(0);
+  transition: transform var(--dur-base) var(--ease-out-expo);
+}
+
+.data-row:hover {
+  background: var(--color-hover-row);
+}
+
+.data-row:hover::before {
+  transform: scaleY(1);
+}
+
+.data-row.is-selected {
+  background: var(--color-selected-row);
+}
+
+.cell-mono {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  letter-spacing: -0.01em;
+}
+
+.cell-strong {
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.cell-muted {
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+}
+
+/* Link-styled identifier inside a row */
+.cell-link {
+  color: var(--color-accent-blue);
+  font-weight: 500;
+}
+
+.data-row:hover .cell-link {
+  color: var(--color-navy-primary);
+}
+
+/* ==========================================================================
+   Toolbar & form controls
+   ========================================================================== */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: var(--color-card-bg);
+  flex-wrap: wrap;
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
+.toolbar-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 34px;
+  padding: 0 11px;
+  background: var(--color-card-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-sm);
+  color: var(--color-text-muted);
+  transition: border-color var(--dur-base) ease, box-shadow var(--dur-base) ease,
+    background-color var(--dur-base) ease;
+}
+
+.field:focus-within {
+  border-color: var(--color-accent-blue);
+  box-shadow: 0 0 0 3px rgba(66, 109, 155, 0.14);
+}
+
+.field-grow {
+  flex: 1 1 240px;
+  max-width: 340px;
+}
+
+.field-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+
+.field-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* Standalone inputs used inside forms and modals.
+   `.form-input` / `.form-select` / `.form-textarea` are the names the modal
+   templates already use — same styling, kept as aliases so the dialogs did
+   not all need re-marking up. */
+.input,
+.select,
+.textarea,
+.form-input,
+.form-select,
+.form-textarea {
+  width: 100%;
+  font-family: inherit;
+  font-size: 13.5px;
+  color: var(--color-text-primary);
+  background: var(--color-card-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  outline: none;
+  transition: border-color var(--dur-base) ease, box-shadow var(--dur-base) ease;
+}
+
+.textarea,
+.form-textarea {
+  resize: vertical;
+  min-height: 92px;
+  line-height: 1.55;
+}
+
+.input:hover,
+.select:hover,
+.textarea:hover,
+.form-input:hover,
+.form-select:hover,
+.form-textarea:hover {
+  border-color: #c6d0da;
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus,
+.form-input:focus,
+.form-select:focus,
+.form-textarea:focus {
+  border-color: var(--color-accent-blue);
+  box-shadow: 0 0 0 3px rgba(66, 109, 155, 0.14);
+}
+
+.input::placeholder,
+.textarea::placeholder,
+.form-input::placeholder,
+.form-textarea::placeholder {
+  color: var(--color-text-muted);
+}
+
+.input:disabled,
+.select:disabled,
+.textarea:disabled,
+.form-input:disabled,
+.form-select:disabled,
+.form-textarea:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+  background: var(--color-neutral-bg);
+}
+
+/* Legacy grouping wrapper used by the modal templates */
+.form-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.form-group + .form-group {
+  margin-top: var(--sp-4);
+}
+
+/* Native select needs its own arrow once the default appearance is removed */
+.select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 32px;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235b6775' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+}
+
+.select-sm {
+  height: 34px;
+  padding: 0 30px 0 11px;
+  font-size: 13px;
+}
+
+.form-label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: 7px;
+}
+
+.form-hint {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  margin-top: 6px;
+}
+
+/* Field row — one or more fields side by side, collapsing on narrow widths */
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--sp-3);
+}
+
+.form-row + .form-row {
+  margin-top: var(--sp-4);
+}
+
+/* ==========================================================================
+   Buttons — ghost + icon variants complementing the primary set
+   ========================================================================== */
+.btn-ghost {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 7px 12px;
+  border-radius: var(--r-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background-color var(--dur-base) ease, color var(--dur-base) ease;
+}
+
+.btn-ghost:hover {
+  background: var(--color-section-alt);
+  color: var(--color-navy-primary);
+}
+
+.btn-icon {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-card-bg);
+  color: var(--color-text-secondary);
+  transition: border-color var(--dur-base) ease, color var(--dur-base) ease,
+    background-color var(--dur-base) ease, transform var(--dur-base) var(--ease-out-expo);
+}
+
+.btn-icon:hover {
+  border-color: var(--color-accent-blue);
+  color: var(--color-accent-blue);
+  background: var(--color-accent-blue-light);
+}
+
+.btn-icon:active {
+  transform: scale(0.94);
+}
+
+/* ==========================================================================
+   States — loading, empty, error
+   ========================================================================== */
+.state-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-7) var(--sp-5);
+  text-align: center;
+}
+
+.state-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-section-alt);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.state-title {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  font-weight: 400;
+  color: var(--color-text-primary);
+}
+
+.state-text {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  max-width: 46ch;
+}
+
+.state-block.is-error .state-icon {
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-border);
+  color: var(--color-danger);
+}
+
+.state-block.is-error .state-text {
+  color: var(--color-danger);
+}
+
+/* Skeletons — shaped placeholders instead of a spinner, so the layout does
+   not jump when real rows arrive. */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-neutral-bg);
+  border-radius: var(--r-sm);
+}
+
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.85),
+    transparent
+  );
+  animation: skeletonSweep 1.4s ease-in-out infinite;
+}
+
+@keyframes skeletonSweep {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.skeleton-line {
+  height: 11px;
+}
+
+.skeleton-row {
+  display: grid;
+  gap: var(--sp-4);
+  align-items: center;
+  padding: 16px var(--sp-5);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after {
+    animation: none;
+  }
+}
+
+/* ==========================================================================
+   Metric cards
+   ========================================================================== */
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: var(--sp-3);
+}
+
+.metric-card {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-card-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-lg);
+  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  transition: transform var(--dur-base) var(--ease-out-expo),
+    box-shadow var(--dur-base) var(--ease-out-expo),
+    border-color var(--dur-base) ease;
+}
+
+.metric-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(to right, var(--tricolor-saffron), var(--color-accent-blue));
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--dur-slow) var(--ease-out-expo);
+}
+
+.metric-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-lift);
+  border-color: rgba(66, 109, 155, 0.3);
+}
+
+.metric-card:hover::before {
+  transform: scaleX(1);
+}
+
+.metric-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+/* Serif figures — numbers are the content here, so they get the display face */
+.metric-value {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(1.9rem, 2.6vw, 2.5rem);
+  line-height: 1;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-delta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+
+/* ==========================================================================
+   Pagination
+   ========================================================================== */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-card-raised);
+  flex-wrap: wrap;
+}
+
+.pagination-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.pagination-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-page {
+  background: var(--color-card-bg);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 13px;
+  border-radius: var(--r-sm);
+  transition: border-color var(--dur-base) ease, background-color var(--dur-base) ease,
+    color var(--dur-base) ease;
+}
+
+.btn-page:hover:not(.disabled) {
+  border-color: var(--color-accent-blue);
+  background: var(--color-accent-blue-light);
+  color: var(--color-accent-blue);
+}
+
+.btn-page.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ==========================================================================
+   Misc workspace atoms
+   ========================================================================== */
+/* Hash / fingerprint display */
+.hash-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+  background: var(--color-section-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-sm);
+  padding: 4px 9px;
+  word-break: break-all;
+}
+
+/* Key/value pair used across detail panes */
+.meta-list {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.meta-key {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.meta-value {
+  font-size: 13.5px;
+  color: var(--color-text-primary);
+}
+
+/* Live status pill */
+.live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--color-success-border);
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.live-pill.is-danger {
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulseDot 1.9s ease-in-out infinite;
+}
+
+/* ==========================================================================
+   Modal shell — shared by upload, create-case, create-user and reset-password
+   so the four dialogs stay visually identical. Component stylesheets are
+   scoped, so these live here rather than being copied into each one.
+   ========================================================================== */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-5);
+  background: rgba(9, 23, 41, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: modalFadeIn 0.22s var(--ease-out-expo);
+}
+
+.modal-dialog {
+  width: 100%;
+  max-width: 560px;
+  max-height: min(88vh, 760px);
+  display: flex;
+  flex-direction: column;
+  background: var(--color-card-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-modal);
+  overflow: hidden;
+  animation: modalRise 0.32s var(--ease-out-expo);
+}
+
+@keyframes modalFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modalRise {
+  from { opacity: 0; transform: translateY(14px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-backdrop,
+  .modal-dialog {
+    animation: none;
+  }
+}
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-5);
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: linear-gradient(to bottom, #ffffff, var(--color-card-raised));
+}
+
+.modal-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.modal-title {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 1.45rem;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  color: var(--color-text-primary);
+}
+
+.modal-subtitle {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.btn-close {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--color-text-muted);
+  transition: background-color var(--dur-base) ease, color var(--dur-base) ease,
+    border-color var(--dur-base) ease, rotate var(--dur-base) var(--ease-out-expo);
+}
+
+.btn-close:hover {
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-border);
+  color: var(--color-danger);
+  rotate: 90deg;
+}
+
+.modal-body {
+  padding: var(--sp-5);
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  padding: var(--sp-4) var(--sp-5);
+  border-top: 1px solid var(--color-border-subtle);
+  background: var(--color-card-raised);
+}
+
+.modal-footer .btn-primary,
+.modal-footer .btn-secondary {
+  font-size: 13px;
+  padding: 9px 18px;
+}
+
+.modal-footer .btn-primary:disabled,
+.modal-footer .btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Inline form messaging shared across modals */
+.inline-error,
+.form-alert-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  animation: fadeSlideIn 0.25s var(--ease-out-expo);
+}
+
+/* Divider with a mono caption, used to break long detail panes */
+.section-rule {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: var(--sp-5) 0 var(--sp-4);
+}
+
+.section-rule::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
+
+.section-rule-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
