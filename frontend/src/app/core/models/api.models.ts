@@ -171,6 +171,57 @@ export interface VerificationResult {
   verified_at: string;
 }
 
+/**
+ * Three-way integrity and candidate verification result (System 20 & Master Prompt §9).
+ * Corresponds to backend service.BlockchainVerifyResult.
+ */
+export interface IntegrityVerifyResult {
+  status:
+    | 'VERIFIED'
+    | 'INTEGRITY_FAILURE'
+    | 'HASH_MISMATCH'
+    | 'BLOCKCHAIN_MISMATCH'
+    | 'BLOCKCHAIN_UNAVAILABLE'
+    | 'BLOCKCHAIN_NOT_ANCHORED'
+    | 'VERSION_MISMATCH';
+  document_id: string;
+  version: number;
+  expected_hash: string;
+  actual_hash: string;
+  blockchain_hash?: string;
+  database_match: boolean;
+  blockchain_match: boolean;
+  blockchain_status?: 'MATCH' | 'MISMATCH' | 'UNAVAILABLE' | 'NOT_ANCHORED';
+  file_hash: string;
+  stored_hash: string;
+  chain_hash?: string;
+  transaction_id?: string;
+  anchored_at?: string;
+  organization?: string;
+  blockchain_enabled: boolean;
+  verified_at: string;
+  source: 'candidate' | 'stored';
+  details?: string;
+}
+
+/** Blockchain anchor record (service.BlockchainAnchorSummary). */
+export interface BlockchainAnchorSummary {
+  id: string;
+  document_id: string;
+  document_version: number;
+  event_type: string;
+  document_hash: string;
+  status: 'PENDING' | 'CONFIRMED' | 'FAILED';
+  fabric_tx_id?: string;
+  fabric_channel?: string;
+  fabric_chaincode?: string;
+  organization?: string;
+  last_error?: string;
+  retry_count: number;
+  created_at: string;
+  confirmed_at?: string;
+}
+
 /** One rectangular region to redact, in the SOURCE image's own pixel
  * coordinate space (internal/service.RedactRegion) — never a rendered/
  * zoomed on-screen coordinate; the caller must convert before sending

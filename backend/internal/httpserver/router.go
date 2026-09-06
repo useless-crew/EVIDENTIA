@@ -240,6 +240,7 @@ func NewRouter(a *app.App) *gin.Engine {
 	r.GET("/api/v1/documents/:id/blockchain/status", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentVerify, "id"), documenthandlers.BlockchainStatus(a.BlockchainAnchorService))
 	r.GET("/api/v1/documents/:id/blockchain/provenance", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentVerify, "id"), documenthandlers.BlockchainProvenance(a.BlockchainAnchorService))
 	r.POST("/api/v1/documents/:id/blockchain/verify", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentVerify, "id"), documenthandlers.BlockchainVerify(a.BlockchainAnchorService))
+	r.POST("/api/v1/documents/:id/verify-candidate", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentVerify, "id"), documenthandlers.VerifyCandidate(a.BlockchainAnchorService))
 
 	return r
 }

@@ -1,0 +1,341 @@
+<div class="modal-backdrop" (click)="close()">
+  <div class="modal-dialog integrity-dialog" data-lenis-prevent (click)="$event.stopPropagation()">
+    
+    <!-- Modal Header -->
+    <div class="modal-header">
+      <div class="modal-title-group">
+        <div class="title-with-badge">
+          <h2 class="modal-title">Evidence Integrity Verification</h2>
+          <span class="badge-status font-mono">v{{ documentVersion }} · §65B COMPLIANT</span>
+        </div>
+        <span class="modal-subtitle font-mono">
+          Document: {{ documentFilename }} (ID: {{ documentId }})
+        </span>
+      </div>
+      <button type="button" class="btn-close" (click)="close()" aria-label="Close">×</button>
+    </div>
+
+    <!-- Modal Body -->
+    <div class="modal-body">
+
+      <!-- Step 1: Trusted Evidence Reference Card -->
+      <section class="panel-section">
+        <div class="section-label">1. TRUSTED CANONICAL IDENTITY (RECORDED AT INGESTION)</div>
+        <div class="identity-grid">
+          <div class="identity-card db-card">
+            <div class="card-head">
+              <span class="head-title">PostgreSQL Evidence Record</span>
+              <span class="pill-pill pill-canonical">Canonical Reference</span>
+            </div>
+            <div class="card-meta">
+              <span class="meta-label">Original SHA-256 Fingerprint</span>
+              <span class="hash-display font-mono">{{ documentHash }}</span>
+            </div>
+          </div>
+
+          <div class="identity-card fabric-card">
+            <div class="card-head">
+              <span class="head-title">Hyperledger Fabric Anchor</span>
+              <span
+                class="pill-pill"
+                [class.pill-confirmed]="blockchainAnchor()?.status === 'CONFIRMED'"
+                [class.pill-pending]="blockchainAnchor()?.status === 'PENDING'"
+                [class.pill-neutral]="!blockchainAnchor()"
+              >
+                {{ blockchainAnchor()?.status === 'CONFIRMED' ? 'Ledger Anchored' : (blockchainAnchor()?.status || 'Not Anchored') }}
+              </span>
+            </div>
+            <div class="card-meta">
+              <span class="meta-label">Blockchain Tx ID</span>
+              <span class="hash-display font-mono" *ngIf="blockchainAnchor()?.fabric_tx_id; else noTx">
+                {{ blockchainAnchor()?.fabric_tx_id }}
+              </span>
+              <ng-template #noTx>
+                <span class="meta-muted font-mono">Off-chain / Standalone mode</span>
+              </ng-template>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Step 2: Verification Source Selection -->
+      <section class="panel-section">
+        <div class="section-label">2. CHOOSE VERIFICATION SOURCE</div>
+        <div class="source-toggle-group">
+          <button
+            type="button"
+            class="source-btn"
+            [class.active]="sourceMode() === 'candidate'"
+            (click)="setSourceMode('candidate')"
+          >
+            <span class="source-icon">📤</span>
+            <div class="source-text">
+              <span class="source-title">Upload Verification Candidate (Local Copy)</span>
+              <span class="source-desc">Verify an external copy or synthetic demo file without saving or altering evidence</span>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            class="source-btn"
+            [class.active]="sourceMode() === 'stored'"
+            (click)="setSourceMode('stored')"
+          >
+            <span class="source-icon">📁</span>
+            <div class="source-text">
+              <span class="source-title">Stored Evidence (MinIO Storage)</span>
+              <span class="source-desc">Recompute hash of the object currently sitting in off-chain object storage</span>
+            </div>
+          </button>
+        </div>
+      </section>
+
+      <!-- Step 3: Candidate Selection Area (When in Candidate Mode) -->
+      <section class="panel-section" *ngIf="sourceMode() === 'candidate'">
+        <div class="section-label">3. VERIFICATION CANDIDATE FILE</div>
+        
+        <!-- Synthetic Demo Quick Selectors (Master Prompt §20) -->
+        <div class="demo-preset-banner">
+          <span class="demo-preset-label">DEMONSTRATION DATA (SYNTHETIC SAMPLES):</span>
+          <div class="demo-preset-buttons">
+            <button
+              type="button"
+              class="btn-demo btn-demo-valid"
+              [class.active]="activeDemoPreset() === 'original'"
+              (click)="loadSyntheticDemo('original')"
+            >
+              ✓ Load Original Evidence Copy (Valid)
+            </button>
+            <button
+              type="button"
+              class="btn-demo btn-demo-tampered"
+              [class.active]="activeDemoPreset() === 'tampered'"
+              (click)="loadSyntheticDemo('tampered')"
+            >
+              ⚠ Load Modified Evidence Copy (Tampered)
+            </button>
+          </div>
+        </div>
+
+        <!-- Dropzone / File Picker -->
+        <div
+          class="dropzone"
+          [class.drag-over]="isDragOver()"
+          [class.has-file]="!!selectedFile()"
+          (drop)="onDrop($event)"
+          (dragover)="onDragOver($event)"
+          (dragleave)="onDragLeave()"
+          (click)="fileInput.click()"
+        >
+          <input #fileInput type="file" hidden (change)="onFileSelected($event)" />
+          
+          <div class="dropzone-content" *ngIf="!selectedFile()">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            <div class="dropzone-text">
+              Drop candidate evidence file here, or <span class="browse-link">browse local file</span>
+            </div>
+            <span class="dropzone-hint">Streams directly to SHA-256 hasher · Never overwrites original evidence</span>
+          </div>
+
+          <div class="dropzone-selected" *ngIf="selectedFile() as file">
+            <div class="file-icon">📄</div>
+            <div class="file-info">
+              <div class="file-name font-mono">{{ selectedFileName() }}</div>
+              <div class="file-meta">{{ formatBytes(selectedFileSize()) }} · Candidate Ready</div>
+            </div>
+            <button
+              type="button"
+              class="btn-remove"
+              (click)="$event.stopPropagation(); resetCandidate()"
+              title="Remove file"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Error message -->
+      <div class="alert-box alert-error animate-fade-in" *ngIf="verifyError()">
+        <span class="alert-icon">⚠</span>
+        <span>{{ verifyError() }}</span>
+      </div>
+
+      <!-- Verification Action Button -->
+      <div class="action-bar">
+        <button
+          type="button"
+          class="btn-verify-run"
+          [disabled]="verifying() || (sourceMode() === 'candidate' && !selectedFile())"
+          (click)="runVerification()"
+        >
+          <span *ngIf="verifying()" class="spinner animate-spin" aria-hidden="true"></span>
+          {{ verifying() ? 'Computing Cryptographic Hash & Comparing Ledger…' : 'Run Cryptographic Verification' }}
+        </button>
+      </div>
+
+      <!-- Step 4: Verification Result & Side-by-Side Comparison -->
+      <section class="panel-section result-section animate-fade-in" *ngIf="result() as res">
+        <div class="section-label">4. INTEGRITY COMPARISON VERDICT</div>
+
+        <!-- High-Impact Verdict Banner -->
+        <div
+          class="verdict-banner"
+          [class.verdict-success]="res.status === 'VERIFIED'"
+          [class.verdict-failure]="res.status === 'INTEGRITY_FAILURE' || res.status === 'HASH_MISMATCH'"
+          [class.verdict-warning]="res.status === 'BLOCKCHAIN_MISMATCH' || res.status === 'BLOCKCHAIN_UNAVAILABLE'"
+        >
+          <div class="verdict-header">
+            <span class="verdict-icon">
+              {{ res.status === 'VERIFIED' ? '✓' : (res.status === 'INTEGRITY_FAILURE' || res.status === 'HASH_MISMATCH' ? '❌' : '⚠') }}
+            </span>
+            <div class="verdict-title-group">
+              <span class="verdict-status">{{ res.status }}</span>
+              <span class="verdict-tagline">
+                {{
+                  res.status === 'VERIFIED'
+                    ? 'Evidence integrity confirmed. Cryptographic fingerprint matches registered evidence identity.'
+                    : (res.status === 'INTEGRITY_FAILURE' || res.status === 'HASH_MISMATCH'
+                        ? 'Evidence modification detected. The submitted file differs from the cryptographic fingerprint recorded when the evidence was registered.'
+                        : (res.status === 'BLOCKCHAIN_MISMATCH'
+                            ? 'Blockchain ledger mismatch detected. Ledger record differs from database fingerprint.'
+                            : 'Blockchain network currently unavailable. Database integrity confirmed.'))
+                }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3-Way Cryptographic Comparison Matrix (Master Prompt §21) -->
+        <div class="comparison-matrix">
+          
+          <!-- Column 1: Trusted Database -->
+          <div class="matrix-card">
+            <div class="matrix-card-head">
+              <span class="matrix-card-title">TRUSTED RECORD</span>
+              <span class="matrix-badge" [class.match]="res.database_match" [class.mismatch]="!res.database_match">
+                {{ res.database_match ? '✓ MATCH' : '✕ MISMATCH' }}
+              </span>
+            </div>
+            <div class="matrix-card-body">
+              <div class="matrix-field">
+                <span class="matrix-label">PostgreSQL Hash (SHA-256)</span>
+                <span class="matrix-hash font-mono">{{ res.expected_hash }}</span>
+              </div>
+              <div class="matrix-field">
+                <span class="matrix-label">Version</span>
+                <span class="matrix-val font-mono">v{{ res.version }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Column 2: Hyperledger Fabric Ledger -->
+          <div class="matrix-card">
+            <div class="matrix-card-head">
+              <span class="matrix-card-title">BLOCKCHAIN LEDGER</span>
+              <span
+                class="matrix-badge"
+                [class.match]="res.blockchain_match"
+                [class.mismatch]="res.blockchain_status === 'MISMATCH'"
+                [class.neutral]="res.blockchain_status === 'UNAVAILABLE' || res.blockchain_status === 'NOT_ANCHORED'"
+              >
+                {{ res.blockchain_match ? '✓ MATCH' : (res.blockchain_status === 'MISMATCH' ? '✕ MISMATCH' : (res.blockchain_status || 'OFF-CHAIN')) }}
+              </span>
+            </div>
+            <div class="matrix-card-body">
+              <div class="matrix-field">
+                <span class="matrix-label">Fabric Ledger Hash</span>
+                <span class="matrix-hash font-mono" *ngIf="res.blockchain_hash; else noChainHash">
+                  {{ res.blockchain_hash }}
+                </span>
+                <ng-template #noChainHash>
+                  <span class="matrix-muted font-mono">{{ res.blockchain_status || 'Not Anchored' }}</span>
+                </ng-template>
+              </div>
+              <div class="matrix-field">
+                <span class="matrix-label">Anchor Transaction</span>
+                <span class="matrix-val font-mono" *ngIf="res.transaction_id; else noTxId">
+                  {{ res.transaction_id.slice(0, 16) }}…
+                </span>
+                <ng-template #noTxId>
+                  <span class="matrix-muted font-mono">—</span>
+                </ng-template>
+              </div>
+            </div>
+          </div>
+
+          <!-- Column 3: Submitted Candidate File -->
+          <div class="matrix-card matrix-candidate" [class.is-tampered]="!res.database_match">
+            <div class="matrix-card-head">
+              <span class="matrix-card-title">SUBMITTED CANDIDATE</span>
+              <span class="matrix-badge" [class.match]="res.database_match" [class.mismatch]="!res.database_match">
+                {{ res.database_match ? '✓ VALID' : '✕ MODIFIED' }}
+              </span>
+            </div>
+            <div class="matrix-card-body">
+              <div class="matrix-field">
+                <span class="matrix-label">Computed SHA-256 Hash</span>
+                <span class="matrix-hash font-mono" [class.hash-danger]="!res.database_match">
+                  {{ res.actual_hash }}
+                </span>
+              </div>
+              <div class="matrix-field">
+                <span class="matrix-label">Candidate Source</span>
+                <span class="matrix-val font-mono">{{ res.source === 'candidate' ? 'Uploaded Copy' : 'MinIO Object' }}</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Post-Verification Next Steps (Master Prompt §21) -->
+        <div class="result-actions">
+          <button type="button" class="btn-action-sec" (click)="resetCandidate()">
+            🔄 Verify Another File
+          </button>
+          <button type="button" class="btn-action-sec" (click)="toggleProvenance()">
+            ⛓ {{ showProvenance() ? 'Hide Provenance' : 'View Blockchain Provenance' }}
+          </button>
+          <button type="button" class="btn-action-primary" (click)="goToAuditLog()">
+            🛡 View Cryptographic Audit Trail
+          </button>
+        </div>
+
+        <!-- Provenance History Drawer (When Toggled) -->
+        <div class="provenance-panel animate-fade-in" *ngIf="showProvenance()">
+          <h4 class="provenance-title">Hyperledger Fabric Provenance Trail</h4>
+          <div *ngIf="loadingProvenance()" class="provenance-loading">Loading ledger history…</div>
+          
+          <div *ngIf="!loadingProvenance() && provenanceHistory() as history">
+            <div *ngIf="history.length === 0" class="provenance-empty">
+              No blockchain anchor entries found for this evidence ID.
+            </div>
+            <div class="provenance-list" *ngIf="history.length > 0">
+              <div class="provenance-entry" *ngFor="let entry of history">
+                <div class="prov-badge">v{{ entry.document_version }} · {{ entry.event_type }}</div>
+                <div class="prov-hash font-mono">Hash: {{ entry.document_hash }}</div>
+                <div class="prov-meta font-mono" *ngIf="entry.fabric_tx_id">Tx: {{ entry.fabric_tx_id }}</div>
+                <div class="prov-time">Committed: {{ entry.created_at | date: 'medium' }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+    </div>
+
+    <!-- Modal Footer -->
+    <div class="modal-footer">
+      <div class="footer-note">
+        All verification attempts are cryptographically timestamped and hash-sealed into the Evidentia audit log.
+      </div>
+      <button type="button" class="btn-secondary" (click)="close()">Close Workspace</button>
+    </div>
+
+  </div>
+</div>

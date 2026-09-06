@@ -88,6 +88,16 @@ export class ApiClientService {
   }
 
   /**
+   * Direct multipart POST that returns the unwrapped data payload directly.
+   */
+  postMultipartDirect<T>(path: string, form: FormData): Observable<T> {
+    return this.http.post<ApiEnvelope<T>>(this.url(path), form).pipe(
+      map((env) => this.unwrap(env)),
+      catchError((err) => this.rethrow(err))
+    );
+  }
+
+  /**
    * A binary GET (document download) — returns the full HttpResponse so
    * the caller can read both the Blob body and the Content-Disposition
    * header (exposed cross-origin by the backend's CORS middleware

@@ -1,8 +1,10 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable, map } from 'rxjs';
 import {
+  BlockchainAnchorSummary,
   CertificateSummary,
   DocumentType,
+  IntegrityVerifyResult,
   RedactRegion,
   RedactionSummary,
   UploadDocumentResponse,
@@ -78,6 +80,38 @@ export class DocumentService {
    * ApiError if the document fails integrity verification. */
   getCertificate(documentId: string): Observable<CertificateSummary> {
     return this.api.get<CertificateSummary>(`/documents/${documentId}/certificate`);
+  }
+
+  /** POST /documents/:id/verify-candidate — streams an uploaded candidate
+   * file or verifies the stored object against PostgreSQL and Hyperledger Fabric.
+   * Both VERIFIED and INTEGRITY_FAILURE return HTTP 200 with structured findings. */
+  verifyCandidate(
+    documentId: string,
+    file?: File | Blob,
+    filename?: string,
+    source?: 'candidate' | 'stored'
+  ): Observable<IntegrityVerifyResult> {
+    if (source === 'stored' || !file) {
+      return this.api.post<IntegrityVerifyResult>(`/documents/${documentId}/verify-candidate?source=stored`);
+    }
+    const form = new FormData();
+    form.append('file', file, filename || (file instanceof File ? file.name : 'candidate_evidence'));
+    return this.api.postMultipartDirect<IntegrityVerifyResult>(`/documents/${documentId}/verify-candidate`, form);
+  }
+
+  /** GET /documents/:id/blockchain/status — returns the latest anchor status. */
+  getBlockchainStatus(documentId: string): Observable<BlockchainAnchorSummary | null> {
+    return this.api.get<BlockchainAnchorSummary | null>(`/documents/${documentId}/blockchain/status`);
+  }
+
+  /** GET /documents/:id/blockchain/provenance — returns ordered anchor history. */
+  getBlockchainProvenance(documentId: string): Observable<BlockchainAnchorSummary[]> {
+    return this.api.get<BlockchainAnchorSummary[]>(`/documents/${documentId}/blockchain/provenance`);
+  }
+
+  /** POST /documents/:id/blockchain/verify — performs three-way check (file vs DB vs Fabric). */
+  verifyBlockchain(documentId: string): Observable<IntegrityVerifyResult> {
+    return this.api.post<IntegrityVerifyResult>(`/documents/${documentId}/blockchain/verify`);
   }
 
   /** POST /documents/:id/redact — produces a brand-new, independent

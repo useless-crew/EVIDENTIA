@@ -233,7 +233,8 @@ func newTestAuditWorker(t *testing.T, application *app.App) func() {
 	redisOpt := asynq.RedisClientOpt{Addr: envOr("REDIS_ADDR", "localhost:6379"), Password: envOr("REDIS_PASSWORD", "")}
 	errorHandler := jobs.NewAuditVerificationErrorHandler(application.AuditService, application.Logger)
 	server := jobs.NewServer(redisOpt, errorHandler, application.Logger)
-	mux := jobs.NewMux(application.Logger, jobs.NewAuditVerificationHandler(application.AuditService))
+	blockchainHandler := jobs.NewBlockchainAnchorHandler(application.BlockchainAnchorService)
+	mux := jobs.NewMux(application.Logger, jobs.NewAuditVerificationHandler(application.AuditService), blockchainHandler)
 
 	go func() {
 		_ = server.Run(mux)

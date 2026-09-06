@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"evidentia/backend/internal/repository"
 	"evidentia/backend/internal/storage"
 	"evidentia/backend/internal/utils"
+	"evidentia/backend/pkg/hash"
 )
 
 // blockchainWorkerIdentityUserID is the worker-side RLS sentinel for
@@ -64,6 +66,9 @@ const (
 	BlockchainVerifyStatusChainMismatch = "BLOCKCHAIN_MISMATCH"
 	BlockchainVerifyStatusUnavailable   = "BLOCKCHAIN_UNAVAILABLE"
 	BlockchainVerifyStatusNotAnchored   = "BLOCKCHAIN_NOT_ANCHORED"
+
+	IntegrityStatusIntegrityFailure     = "INTEGRITY_FAILURE"
+	IntegrityStatusVersionMismatch      = "VERSION_MISMATCH"
 )
 
 // BlockchainAnchorSummary is the safe, API-friendly shape of a
@@ -86,26 +91,67 @@ type BlockchainAnchorSummary struct {
 	ConfirmedAt     *time.Time `json:"confirmed_at,omitempty"`
 }
 
-// BlockchainVerifyResult is the outcome of POST /documents/:id/blockchain/verify.
+// BlockchainVerifyResult is the structured outcome of POST /documents/:id/blockchain/verify
+// and POST /documents/:id/verify-candidate.
 type BlockchainVerifyResult struct {
-	// Status is one of the BlockchainVerifyStatus* constants.
+	// Status is one of the BlockchainVerifyStatus* or IntegrityStatus* constants:
+	// VERIFIED, HASH_MISMATCH, BLOCKCHAIN_MISMATCH, BLOCKCHAIN_UNAVAILABLE,
+	// BLOCKCHAIN_NOT_ANCHORED, VERSION_MISMATCH, or INTEGRITY_FAILURE.
 	Status string `json:"status"`
-	// FileHash is the SHA-256 of the file as it currently exists in MinIO.
+
+	// DocumentID is the document being verified.
+	DocumentID uuid.UUID `json:"document_id"`
+
+	// Version is the document version number.
+	Version int32 `json:"version"`
+
+	// ExpectedHash is the canonical hash recorded in PostgreSQL (hex string).
+	ExpectedHash string `json:"expected_hash"`
+
+	// ActualHash is the computed SHA-256 hash of the verification candidate or stored file (hex string).
+	ActualHash string `json:"actual_hash"`
+
+	// BlockchainHash is the hash recorded on the Fabric ledger, or nil if unavailable / not anchored.
+	BlockchainHash *string `json:"blockchain_hash,omitempty"`
+
+	// DatabaseMatch is true if ActualHash == ExpectedHash.
+	DatabaseMatch bool `json:"database_match"`
+
+	// BlockchainMatch is true if BlockchainHash != nil and *BlockchainHash == ActualHash.
+	BlockchainMatch bool `json:"blockchain_match"`
+
+	// BlockchainStatus indicates Fabric ledger status: MATCH, MISMATCH, UNAVAILABLE, or NOT_ANCHORED.
+	BlockchainStatus string `json:"blockchain_status,omitempty"`
+
+	// FileHash is an alias to ActualHash for backward compatibility.
 	FileHash string `json:"file_hash"`
-	// StoredHash is the hash recorded in PostgreSQL at upload time.
+
+	// StoredHash is an alias to ExpectedHash for backward compatibility.
 	StoredHash string `json:"stored_hash"`
-	// ChainHash is the hash anchored on the Fabric ledger (if available).
+
+	// ChainHash is an alias to BlockchainHash for backward compatibility.
 	ChainHash *string `json:"chain_hash,omitempty"`
+
 	// TransactionID is the Fabric tx_id (if blockchain-confirmed).
 	TransactionID *string `json:"transaction_id,omitempty"`
+
 	// AnchoredAt is when the ledger anchor was committed.
 	AnchoredAt *time.Time `json:"anchored_at,omitempty"`
+
 	// Organization is the MSP org that submitted the anchor.
 	Organization *string `json:"organization,omitempty"`
+
 	// BlockchainEnabled reports whether the Fabric integration is active.
 	BlockchainEnabled bool `json:"blockchain_enabled"`
+
 	// VerifiedAt is the timestamp of this verification check.
 	VerifiedAt time.Time `json:"verified_at"`
+
+	// Source is either "candidate" (uploaded file) or "stored" (MinIO).
+	Source string `json:"source,omitempty"`
+
+	// Details is a clear human-readable explanation of the verification outcome.
+	Details string `json:"details,omitempty"`
 }
 
 // BlockchainAnchorService orchestrates evidence blockchain anchoring for
@@ -457,6 +503,41 @@ func (s *BlockchainAnchorService) VerifyDocumentBlockchain(
 	user auth.AuthenticatedUser,
 	documentID uuid.UUID,
 ) (*BlockchainVerifyResult, error) {
+	res, err := s.VerifyCandidate(ctx, user, documentID, nil, 0, "", true)
+	if err != nil {
+		return nil, err
+	}
+	// For pure blockchain verification route, if DB matches but Fabric is unavailable/not anchored,
+	// reflect that in the top-level Status for backward compatibility with existing callers.
+	if res.DatabaseMatch {
+		if res.BlockchainStatus == BlockchainVerifyStatusUnavailable {
+			res.Status = BlockchainVerifyStatusUnavailable
+		} else if res.BlockchainStatus == BlockchainVerifyStatusNotAnchored {
+			res.Status = BlockchainVerifyStatusNotAnchored
+		}
+	}
+	return res, nil
+}
+
+// VerifyCandidate performs an integrity verification of a document against:
+//  1. PostgreSQL evidence metadata (canonical documents.sha256_hash)
+//  2. Hyperledger Fabric blockchain anchor, when Fabric is enabled
+//  3. Evidence version
+//
+// If isStored is true, it recomputes the SHA-256 hash from the stored object in MinIO.
+// If isStored is false, it streams the candidate file from candidateReader up to maxCandidateSize
+// without saving or persisting it to storage, database, or disk (guaranteeing original evidence immutability).
+// It records audit events (DOCUMENT_VERIFICATION_REQUESTED and DOCUMENT_INTEGRITY_FAILURE / DOCUMENT_VERIFIED)
+// and returns a structured BlockchainVerifyResult without ever modifying or overwriting the original evidence.
+func (s *BlockchainAnchorService) VerifyCandidate(
+	ctx context.Context,
+	user auth.AuthenticatedUser,
+	documentID uuid.UUID,
+	candidateReader io.Reader,
+	maxCandidateSize int64,
+	candidateFilename string,
+	isStored bool,
+) (*BlockchainVerifyResult, error) {
 	decision, err := s.authz.CanAccessDocument(ctx, user, documentID, authz.ActionDocumentVerify)
 	if err != nil {
 		return nil, utils.ErrInternal(err)
@@ -465,8 +546,8 @@ func (s *BlockchainAnchorService) VerifyDocumentBlockchain(
 		return nil, utils.ErrForbidden(genericDocumentForbiddenMessage)
 	}
 
-	// Load document metadata and current file hash.
-	ident := repository.AppIdentity{UserID: user.ID, Role: effectiveCaseRole(user)}
+	role := effectiveCaseRole(user)
+	ident := repository.AppIdentity{UserID: user.ID, Role: role}
 	var doc generated.Document
 	err = repository.WithTx(ctx, s.pool, ident, func(ctx context.Context, q *generated.Queries) error {
 		var txErr error
@@ -480,169 +561,233 @@ func (s *BlockchainAnchorService) VerifyDocumentBlockchain(
 		return nil, utils.ErrInternal(err)
 	}
 
+	sourceStr := "candidate"
+	if isStored {
+		sourceStr = "stored"
+	}
+
+	// Audit event: DOCUMENT_VERIFICATION_REQUESTED (server-controlled)
+	s.recorder.Record(ctx, audit.Event{
+		Action:       "DOCUMENT_VERIFICATION_REQUESTED",
+		ResourceType: "document",
+		ResourceID:   &documentID,
+		UserID:       &user.ID,
+		Role:         role,
+		CaseID:       &doc.CaseID,
+		Metadata: map[string]any{
+			"source":   sourceStr,
+			"filename": candidateFilename,
+		},
+	})
+
 	storedHashHex := blockchain.HashToHex(doc.Sha256Hash)
 	verifiedAt := time.Now().UTC()
 
-	// Recompute file hash from storage — delegates to the same package-level
-	// function DocumentService.VerifyDocument and CertificateService both use,
-	// ensuring all three paths agree on "what the file actually is."
-	recomputedHash, storageErr := recomputeDocumentHash(ctx, s.storage, doc)
-	if storageErr != nil {
-		s.logger.ErrorContext(ctx, "blockchain verify: recompute document hash failed",
-			slog.String("document_id", documentID.String()),
-			slog.String("error", storageErr.Error()),
-		)
-		return nil, utils.ErrServiceUnavailable("The document could not be retrieved for verification")
+	// Compute candidate or stored hash
+	var computedHex string
+	if isStored {
+		recomputedHash, storageErr := recomputeDocumentHash(ctx, s.storage, doc)
+		if storageErr != nil {
+			s.logger.ErrorContext(ctx, "blockchain verify: recompute document hash failed",
+				slog.String("document_id", documentID.String()),
+				slog.String("error", storageErr.Error()),
+			)
+			return nil, utils.ErrServiceUnavailable("The document could not be retrieved for verification")
+		}
+		computedHex = hex.EncodeToString(recomputedHash)
+	} else {
+		if candidateReader == nil {
+			return nil, utils.ErrBadRequest("Missing verification candidate stream")
+		}
+		if maxCandidateSize <= 0 {
+			maxCandidateSize = 52428800 // 50 MiB default
+		}
+		lr := &io.LimitedReader{R: candidateReader, N: maxCandidateSize + 1}
+		h := hash.New()
+		n, copyErr := io.Copy(h, lr)
+		if copyErr != nil {
+			return nil, utils.ErrBadRequest("Failed to read candidate file stream")
+		}
+		if n > maxCandidateSize {
+			return nil, utils.ErrRequestEntityTooLarge("Verification candidate exceeds maximum allowable size")
+		}
+		computedHex = hex.EncodeToString(h.Sum(nil))
 	}
-	recomputedHex := hex.EncodeToString(recomputedHash)
 
-	// Three-way check:
-	if recomputedHex != storedHashHex {
-		// File has been tampered with.
+	databaseMatch := (computedHex == storedHashHex)
+
+	// If verifying stored file and mismatch occurs, reconcile tamper status.
+	// When verifying candidate file, NEVER mutate documents.status (original remains immutable).
+	if isStored {
+		_ = reconcileTamperStatus(ctx, s.pool, ident, doc, databaseMatch)
+	}
+
+	// Fetch anchor version if available
+	var docVersion int32 = 1
+	var latestAnchor *generated.BlockchainAnchor
+	var anchorFound bool
+
+	anchErr := repository.WithTx(ctx, s.pool, ident, func(ctx context.Context, q *generated.Queries) error {
+		anc, txErr := q.GetLatestBlockchainAnchorByDocumentID(ctx, documentID)
+		if txErr == nil {
+			latestAnchor = &anc
+			anchorFound = true
+			docVersion = anc.DocumentVersion
+		} else if errors.Is(txErr, pgx.ErrNoRows) {
+			return nil
+		}
+		return txErr
+	})
+	if anchErr != nil && !errors.Is(anchErr, pgx.ErrNoRows) {
+		s.logger.WarnContext(ctx, "verify candidate: query blockchain anchor warning", slog.String("error", anchErr.Error()))
+	}
+
+	var (
+		chainHash        *string
+		txID             *string
+		anchoredAt       *time.Time
+		org              *string
+		blockchainStatus string = BlockchainVerifyStatusNotAnchored
+		blockchainMatch  bool   = false
+		finalStatus      string = BlockchainVerifyStatusVerified
+		details          string = ""
+	)
+
+	if !s.blockchain.IsEnabled() {
+		blockchainStatus = BlockchainVerifyStatusUnavailable
+	} else if !anchorFound || latestAnchor == nil || latestAnchor.Status != BlockchainStatusConfirmed {
+		blockchainStatus = BlockchainVerifyStatusNotAnchored
+	} else {
+		// Query Fabric ledger
+		verifyReq := blockchain.VerifyRequest{
+			EvidenceID: documentID,
+			Version:    latestAnchor.DocumentVersion,
+			Hash:       storedHashHex,
+		}
+		verifyResult, fErr := s.blockchain.VerifyEvidence(ctx, verifyReq)
+		if fErr != nil {
+			if errors.Is(fErr, blockchain.ErrUnavailable) {
+				blockchainStatus = BlockchainVerifyStatusUnavailable
+			} else if errors.Is(fErr, blockchain.ErrNotFound) {
+				blockchainStatus = BlockchainVerifyStatusNotAnchored
+			} else if errors.Is(fErr, blockchain.ErrIntegrityMismatch) {
+				blockchainStatus = BlockchainVerifyStatusChainMismatch
+				chainHash = &verifyResult.OnChainHash
+				txID = &verifyResult.TransactionID
+				anchoredAt = &verifyResult.AnchoredAt
+				org = &verifyResult.Organization
+			} else {
+				s.logger.WarnContext(ctx, "verify candidate: fabric verify error", slog.String("error", fErr.Error()))
+				blockchainStatus = BlockchainVerifyStatusUnavailable
+			}
+		} else {
+			blockchainStatus = "MATCH"
+			chainHash = &verifyResult.OnChainHash
+			txID = &verifyResult.TransactionID
+			anchoredAt = &verifyResult.AnchoredAt
+			org = &verifyResult.Organization
+		}
+	}
+
+	if chainHash != nil && *chainHash == computedHex {
+		blockchainMatch = true
+	}
+
+	// Status resolution
+	if !databaseMatch {
+		if !isStored {
+			finalStatus = IntegrityStatusIntegrityFailure
+		} else {
+			finalStatus = BlockchainVerifyStatusHashMismatch
+		}
+		if blockchainMatch {
+			details = "Evidence modification detected in database record. Submitted file matches Hyperledger Fabric anchor."
+		} else {
+			details = "The submitted file differs from the cryptographic fingerprint recorded when the evidence was registered."
+		}
+	} else {
+		if blockchainStatus == BlockchainVerifyStatusChainMismatch {
+			finalStatus = BlockchainVerifyStatusChainMismatch
+			details = "The ledger record differs from the database fingerprint."
+		} else {
+			finalStatus = BlockchainVerifyStatusVerified
+			if blockchainStatus == BlockchainVerifyStatusUnavailable {
+				details = "Evidence integrity confirmed against PostgreSQL database hash. Blockchain verification is currently unavailable."
+			} else if blockchainStatus == BlockchainVerifyStatusNotAnchored {
+				details = "Evidence integrity confirmed against PostgreSQL database hash. Document is not anchored on blockchain."
+			} else {
+				details = "Evidence integrity confirmed. All cryptographic proofs match (Database and Blockchain)."
+			}
+		}
+	}
+
+	// Record completion audit events
+	if finalStatus == IntegrityStatusIntegrityFailure || finalStatus == BlockchainVerifyStatusHashMismatch {
+		s.recorder.Record(ctx, audit.Event{
+			Action:       "DOCUMENT_INTEGRITY_FAILURE",
+			ResourceType: "document",
+			ResourceID:   &documentID,
+			UserID:       &user.ID,
+			Role:         role,
+			CaseID:       &doc.CaseID,
+			Metadata: map[string]any{
+				"expected_hash": storedHashHex,
+				"actual_hash":   computedHex,
+				"source":        sourceStr,
+				"result":        finalStatus,
+			},
+		})
+	} else if finalStatus == BlockchainVerifyStatusChainMismatch {
+		s.recorder.Record(ctx, audit.Event{
+			Action:       "BLOCKCHAIN_INTEGRITY_FAILURE",
+			ResourceType: "document",
+			ResourceID:   &documentID,
+			UserID:       &user.ID,
+			Role:         role,
+			CaseID:       &doc.CaseID,
+			Metadata: map[string]any{
+				"expected_hash": storedHashHex,
+				"chain_hash":    chainHash,
+				"source":        sourceStr,
+				"result":        BlockchainVerifyStatusChainMismatch,
+			},
+		})
+	} else {
 		s.recorder.Record(ctx, audit.Event{
 			Action:       "BLOCKCHAIN_VERIFICATION_COMPLETED",
 			ResourceType: "document",
 			ResourceID:   &documentID,
 			UserID:       &user.ID,
-			Role:         effectiveCaseRole(user),
+			Role:         role,
 			CaseID:       &doc.CaseID,
-			Metadata:     map[string]any{"result": BlockchainVerifyStatusHashMismatch},
+			Metadata: map[string]any{
+				"result":            finalStatus,
+				"source":            sourceStr,
+				"blockchain_status": blockchainStatus,
+			},
 		})
-		return &BlockchainVerifyResult{
-			Status:            BlockchainVerifyStatusHashMismatch,
-			FileHash:          recomputedHex,
-			StoredHash:        storedHashHex,
-			BlockchainEnabled: s.blockchain.IsEnabled(),
-			VerifiedAt:        verifiedAt,
-		}, nil
 	}
-
-	// File hash matches PostgreSQL — check blockchain.
-	if !s.blockchain.IsEnabled() {
-		return &BlockchainVerifyResult{
-			Status:            BlockchainVerifyStatusUnavailable,
-			FileHash:          recomputedHex,
-			StoredHash:        storedHashHex,
-			BlockchainEnabled: false,
-			VerifiedAt:        verifiedAt,
-		}, nil
-	}
-
-	// Get the latest confirmed anchor.
-	var latestAnchor generated.BlockchainAnchor
-	anchErr := repository.WithTx(ctx, s.pool, ident, func(ctx context.Context, q *generated.Queries) error {
-		var txErr error
-		latestAnchor, txErr = q.GetLatestBlockchainAnchorByDocumentID(ctx, documentID)
-		return txErr
-	})
-	if anchErr != nil {
-		if errors.Is(anchErr, pgx.ErrNoRows) {
-			return &BlockchainVerifyResult{
-				Status:            BlockchainVerifyStatusNotAnchored,
-				FileHash:          recomputedHex,
-				StoredHash:        storedHashHex,
-				BlockchainEnabled: true,
-				VerifiedAt:        verifiedAt,
-			}, nil
-		}
-		return nil, utils.ErrInternal(anchErr)
-	}
-
-	if latestAnchor.Status != BlockchainStatusConfirmed {
-		return &BlockchainVerifyResult{
-			Status:            BlockchainVerifyStatusNotAnchored,
-			FileHash:          recomputedHex,
-			StoredHash:        storedHashHex,
-			BlockchainEnabled: true,
-			VerifiedAt:        verifiedAt,
-		}, nil
-	}
-
-	// Query the Fabric ledger for this evidence.
-	verifyReq := blockchain.VerifyRequest{
-		EvidenceID: documentID,
-		Version:    latestAnchor.DocumentVersion,
-		Hash:       storedHashHex,
-	}
-	verifyResult, err := s.blockchain.VerifyEvidence(ctx, verifyReq)
-	if err != nil {
-		if errors.Is(err, blockchain.ErrUnavailable) {
-			return &BlockchainVerifyResult{
-				Status:            BlockchainVerifyStatusUnavailable,
-				FileHash:          recomputedHex,
-				StoredHash:        storedHashHex,
-				BlockchainEnabled: true,
-				VerifiedAt:        verifiedAt,
-			}, nil
-		}
-		if errors.Is(err, blockchain.ErrNotFound) {
-			return &BlockchainVerifyResult{
-				Status:            BlockchainVerifyStatusNotAnchored,
-				FileHash:          recomputedHex,
-				StoredHash:        storedHashHex,
-				BlockchainEnabled: true,
-				VerifiedAt:        verifiedAt,
-			}, nil
-		}
-		if errors.Is(err, blockchain.ErrIntegrityMismatch) {
-			chainHash := verifyResult.OnChainHash
-			txID := verifyResult.TransactionID
-			anchored := verifyResult.AnchoredAt
-			org := verifyResult.Organization
-			s.recorder.Record(ctx, audit.Event{
-				Action:       "BLOCKCHAIN_INTEGRITY_FAILURE",
-				ResourceType: "document",
-				ResourceID:   &documentID,
-				UserID:       &user.ID,
-				Role:         effectiveCaseRole(user),
-				CaseID:       &doc.CaseID,
-				Metadata: map[string]any{
-					"stored_hash": storedHashHex,
-					"chain_hash":  chainHash,
-					"tx_id":       txID,
-				},
-			})
-			return &BlockchainVerifyResult{
-				Status:            BlockchainVerifyStatusChainMismatch,
-				FileHash:          recomputedHex,
-				StoredHash:        storedHashHex,
-				ChainHash:         &chainHash,
-				TransactionID:     &txID,
-				AnchoredAt:        &anchored,
-				Organization:      &org,
-				BlockchainEnabled: true,
-				VerifiedAt:        verifiedAt,
-			}, nil
-		}
-		return nil, utils.ErrInternal(err)
-	}
-
-	// All three layers agree.
-	chainHash := verifyResult.OnChainHash
-	txID := verifyResult.TransactionID
-	anchored := verifyResult.AnchoredAt
-	org := verifyResult.Organization
-
-	s.recorder.Record(ctx, audit.Event{
-		Action:       "BLOCKCHAIN_VERIFICATION_COMPLETED",
-		ResourceType: "document",
-		ResourceID:   &documentID,
-		UserID:       &user.ID,
-		Role:         effectiveCaseRole(user),
-		CaseID:       &doc.CaseID,
-		Metadata:     map[string]any{"result": BlockchainVerifyStatusVerified, "tx_id": txID},
-	})
 
 	return &BlockchainVerifyResult{
-		Status:            BlockchainVerifyStatusVerified,
-		FileHash:          recomputedHex,
+		Status:            finalStatus,
+		DocumentID:        documentID,
+		Version:           docVersion,
+		ExpectedHash:      storedHashHex,
+		ActualHash:        computedHex,
+		BlockchainHash:    chainHash,
+		DatabaseMatch:     databaseMatch,
+		BlockchainMatch:   blockchainMatch,
+		BlockchainStatus:  blockchainStatus,
+		FileHash:          computedHex,
 		StoredHash:        storedHashHex,
-		ChainHash:         &chainHash,
-		TransactionID:     &txID,
-		AnchoredAt:        &anchored,
-		Organization:      &org,
-		BlockchainEnabled: true,
+		ChainHash:         chainHash,
+		TransactionID:     txID,
+		AnchoredAt:        anchoredAt,
+		Organization:      org,
+		BlockchainEnabled: s.blockchain.IsEnabled(),
 		VerifiedAt:        verifiedAt,
+		Source:            sourceStr,
+		Details:           details,
 	}, nil
 }
 

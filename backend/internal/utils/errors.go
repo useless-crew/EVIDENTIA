@@ -119,6 +119,11 @@ func ErrUnprocessableEntity(message string) *AppError {
 	return NewAppError(http.StatusUnprocessableEntity, CodeUnprocessableEntity, message, nil)
 }
 
+// ErrRequestEntityTooLarge builds a 413 response when an upload or candidate stream exceeds size limits.
+func ErrRequestEntityTooLarge(message string) *AppError {
+	return NewAppError(http.StatusRequestEntityTooLarge, CodeRequestEntityTooLarge, message, nil)
+}
+
 // ErrTooManyRequests builds a 429 response. Two independent callers use
 // it today: System 13's SSE connection-limit guard
 // (internal/sse.Manager.Register's ErrTooManyConnections) when a user

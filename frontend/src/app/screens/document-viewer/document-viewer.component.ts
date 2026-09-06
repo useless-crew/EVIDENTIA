@@ -6,13 +6,14 @@ import { CaseService } from '../../core/services/case.service';
 import { DocumentService } from '../../core/services/document.service';
 import { ShareService } from '../../core/services/share.service';
 import { ApiError } from '../../core/services/api-client.service';
-import { CertificateSummary, DocumentSummary, ShareSummary, VerificationResult } from '../../core/models/api.models';
+import { CertificateSummary, DocumentSummary, IntegrityVerifyResult, ShareSummary, VerificationResult } from '../../core/models/api.models';
 import { ShareDialogComponent } from '../../components/share-dialog/share-dialog.component';
+import { IntegrityWorkspaceComponent } from '../../components/integrity-workspace/integrity-workspace.component';
 
 @Component({
   selector: 'app-document-viewer',
   standalone: true,
-  imports: [CommonModule, ShareDialogComponent],
+  imports: [CommonModule, ShareDialogComponent, IntegrityWorkspaceComponent],
   templateUrl: './document-viewer.component.html',
   styleUrls: ['./document-viewer.component.css']
 })
@@ -63,6 +64,22 @@ export class DocumentViewerComponent implements OnInit {
   readonly shareDialogOpen = signal(false);
   readonly revokingShareId = signal<string | null>(null);
   readonly shareActionError = signal<string | null>(null);
+
+  // ---- Integrity Verification Workspace (Demonstration & Investigation) ----
+  readonly integrityWorkspaceOpen = signal(false);
+  readonly lastIntegrityResult = signal<IntegrityVerifyResult | null>(null);
+
+  openIntegrityWorkspace() {
+    this.integrityWorkspaceOpen.set(true);
+  }
+
+  closeIntegrityWorkspace() {
+    this.integrityWorkspaceOpen.set(false);
+  }
+
+  onWorkspaceVerified(result: IntegrityVerifyResult) {
+    this.lastIntegrityResult.set(result);
+  }
 
   ngOnInit() {
     this.route.paramMap.subscribe((params) => {

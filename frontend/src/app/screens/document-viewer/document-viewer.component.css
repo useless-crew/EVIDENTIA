@@ -181,6 +181,13 @@
   border-top: 1px solid var(--color-border-subtle);
 }
 
+.verify-btn-group {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
 .verify-feedback {
   min-height: 22px;
   display: flex;
