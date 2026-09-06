@@ -205,7 +205,20 @@ func (s *DocumentService) UploadDocument(ctx context.Context, user auth.Authenti
 		// attempt (master prompt §17: never leave an orphan unhandled).
 		s.cleanupOrphan(ctx, objectKey, caseID, documentID, "upload stream failed before completion")
 
-		if errors.Is(err, errUploadTooLarge) {
+		var maxBytesErr *http.MaxBytesError
+		// Two independent, redundant size guards can observe this same
+		// oversized upload: the service's own limitedReader (errUploadTooLarge,
+		// counting only the `file` part's bytes) and the router-level
+		// middleware.BodyLimit wrapping the ENTIRE request body in
+		// http.MaxBytesReader (which also covers multipart boundaries/
+		// headers for the preceding document_type/description parts, so it
+		// reaches its byte cap slightly BEFORE limitedReader does on a
+		// borderline-oversized file — confirmed by live testing during the
+		// System 19 security audit, which reproduced this exact ordering).
+		// Both must map to the same 413, not let whichever guard happens to
+		// fire first determine whether the client sees a clean 413 or an
+		// internal-error 500 for an entirely ordinary "file too big" case.
+		if errors.Is(err, errUploadTooLarge) || errors.As(err, &maxBytesErr) {
 			return nil, utils.NewAppError(413, utils.CodeRequestEntityTooLarge,
 				fmt.Sprintf("File exceeds the maximum upload size of %d bytes", s.maxUploadSize), nil)
 		}

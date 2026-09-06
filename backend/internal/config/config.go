@@ -181,10 +181,25 @@ type BootstrapAdminConfig struct {
 // of which account is targeted (a credential-stuffing spray), while
 // AccountMax/AccountWindow bound attempts against one account regardless
 // of source address (a distributed brute-force against a single victim).
-// Both are fixed-window, auto-expiring counters — never a permanent
-// lockout — so this cannot become a denial-of-service vector against a
-// legitimate account merely by an attacker repeating failed logins
-// against it.
+// Both are fixed-window, auto-expiring counters — NEVER a permanent
+// lockout: an account (or IP) always regains access on its own once its
+// window elapses, with no operator action required.
+//
+// This is NOT the same as "cannot become a denial-of-service vector".
+// AccountMax/AccountWindow is keyed on the account, not the caller's
+// identity — an unauthenticated party who merely knows (or guesses) a
+// victim's email can send AccountMax wrong passwords and lock even the
+// legitimate account holder out for up to AccountWindow, and can repeat
+// this indefinitely to keep them locked out (System 19 security audit,
+// confirmed live: 10 failed attempts against a known email blocked that
+// account's own correct password for the full 15-minute window). This is
+// the standard, accepted trade-off of account-keyed brute-force throttling
+// (the alternative — no account-level limit — permits unbounded
+// distributed credential stuffing against one victim from many IPs) and
+// is not fixed by this config alone; a production deployment wanting to
+// close this gap should add a secondary control (e.g. CAPTCHA after a few
+// failures, alerting on repeated lockouts, or a shorter/escalating window)
+// rather than assuming the limiter itself prevents it.
 type LoginRateLimitConfig struct {
 	IPMax         int
 	IPWindow      time.Duration
