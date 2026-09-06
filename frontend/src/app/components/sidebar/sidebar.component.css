@@ -184,6 +184,13 @@
   color: #fca5a5;
 }
 
+.status-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .status-pulse-dot {
   width: 7px;
   height: 7px;
