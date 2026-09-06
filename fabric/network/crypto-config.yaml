@@ -1,0 +1,54 @@
+################################################################################
+# Evidentia Hyperledger Fabric — crypto-config.yaml
+#
+# Generates MSP material (CA certs, peer/orderer TLS certs, client certs)
+# for the three Evidentia organizations plus the orderer.
+#
+# Generate with:
+#   cryptogen generate --config=crypto-config.yaml --output=crypto-config
+################################################################################
+
+OrdererOrgs:
+  - Name: Orderer
+    Domain: orderer.evidentia.local
+    EnableNodeOUs: true
+    Specs:
+      - Hostname: orderer
+        SANS:
+          - localhost
+          - 127.0.0.1
+          - orderer.evidentia.local
+
+PeerOrgs:
+  - Name: Police
+    Domain: police.evidentia.local
+    EnableNodeOUs: true
+    Template:
+      Count: 1
+      SANS:
+        - localhost
+        - 127.0.0.1
+    Users:
+      Count: 2   # Admin user + one application backend user
+
+  - Name: Forensics
+    Domain: forensics.evidentia.local
+    EnableNodeOUs: true
+    Template:
+      Count: 1
+      SANS:
+        - localhost
+        - 127.0.0.1
+    Users:
+      Count: 1
+
+  - Name: Court
+    Domain: court.evidentia.local
+    EnableNodeOUs: true
+    Template:
+      Count: 1
+      SANS:
+        - localhost
+        - 127.0.0.1
+    Users:
+      Count: 1

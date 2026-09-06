@@ -78,10 +78,11 @@ func NewServer(redisOpt asynq.RedisConnOpt, errorHandler asynq.ErrorHandler, log
 // middleware's own doc comment). A later system adding a new task type
 // registers it here too, never a second competing asynq.Server/mux (master
 // prompt: "do not introduce ... a second queue system").
-func NewMux(logger *slog.Logger, auditHandler *AuditVerificationHandler) *asynq.ServeMux {
+func NewMux(logger *slog.Logger, auditHandler *AuditVerificationHandler, blockchainHandler *BlockchainAnchorHandler) *asynq.ServeMux {
 	mux := asynq.NewServeMux()
 	mux.Use(LoggingMiddleware(logger))
 	mux.Handle(TypeVerifyAuditChain, auditHandler)
+	mux.Handle(TypeBlockchainAnchor, blockchainHandler)
 	return mux
 }
 

@@ -356,6 +356,20 @@ type Querier interface {
 	UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) error
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (UpdateUserProfileRow, error)
 	UpdateUserStatus(ctx context.Context, arg UpdateUserStatusParams) (UpdateUserStatusRow, error)
+
+	// --- Blockchain anchors (System 20) ---
+	// CreateBlockchainAnchor inserts a PENDING anchor record for an
+	// anchoring event. Called immediately after a document is uploaded
+	// (or redacted/certificated) so the record exists even if the
+	// subsequent Asynq enqueue fails.
+	CreateBlockchainAnchor(ctx context.Context, arg CreateBlockchainAnchorParams) (BlockchainAnchor, error)
+	GetBlockchainAnchorByID(ctx context.Context, id uuid.UUID) (BlockchainAnchor, error)
+	GetLatestBlockchainAnchorByDocumentID(ctx context.Context, documentID uuid.UUID) (BlockchainAnchor, error)
+	ListBlockchainAnchorsByDocumentID(ctx context.Context, documentID uuid.UUID) ([]BlockchainAnchor, error)
+	ConfirmBlockchainAnchor(ctx context.Context, arg ConfirmBlockchainAnchorParams) (BlockchainAnchor, error)
+	FailBlockchainAnchor(ctx context.Context, arg FailBlockchainAnchorParams) (BlockchainAnchor, error)
+	IncrementBlockchainAnchorRetry(ctx context.Context, arg IncrementBlockchainAnchorRetryParams) error
+	CountPendingBlockchainAnchors(ctx context.Context) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -105,9 +105,20 @@ func run(ctx context.Context, a *app.App) {
 	runEmbeddedWorker := os.Getenv("DISABLE_EMBEDDED_WORKER") != "true"
 
 	redisOpt := asynq.RedisClientOpt{Addr: a.Config.Redis.Addr, Password: a.Config.Redis.Password, DB: a.Config.Redis.DB}
-	errorHandler := jobs.NewAuditVerificationErrorHandler(a.AuditService, a.Logger)
+
+	// Each error handler checks task.Type() before acting, so chaining them
+	// in a single asynq.ErrorHandlerFunc is safe and correct — exactly one
+	// branch fires per task type.
+	auditErrHandler := jobs.NewAuditVerificationErrorHandler(a.AuditService, a.Logger)
+	blockchainErrHandler := jobs.NewBlockchainAnchorErrorHandler(a.BlockchainAnchorService)
+	errorHandler := asynq.ErrorHandlerFunc(func(ctx context.Context, task *asynq.Task, err error) {
+		auditErrHandler.HandleError(ctx, task, err)
+		blockchainErrHandler.HandleError(ctx, task, err)
+	})
+
 	worker := jobs.NewServer(redisOpt, errorHandler, a.Logger)
-	mux := jobs.NewMux(a.Logger, jobs.NewAuditVerificationHandler(a.AuditService))
+	blockchainHandler := jobs.NewBlockchainAnchorHandler(a.BlockchainAnchorService)
+	mux := jobs.NewMux(a.Logger, jobs.NewAuditVerificationHandler(a.AuditService), blockchainHandler)
 
 	a.Logger.Info("starting server",
 		slog.String("addr", a.Config.Server.Addr()),

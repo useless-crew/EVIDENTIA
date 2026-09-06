@@ -74,6 +74,17 @@ const (
 	TypeShareCreated = "SHARE_CREATED"
 	TypeShareRevoked = "SHARE_REVOKED"
 
+	// --- Hyperledger Fabric blockchain anchoring (System 20).
+	// ResourceType: ResourceTypeCase (scoped to the document's case,
+	// matching the existing per-case event granularity). Data:
+	// BlockchainAnchorData. Published by
+	// internal/service.BlockchainAnchorService.RunAnchor.
+	// SSE subscribers can use these to update the blockchain-status panel
+	// in the document viewer without polling.
+	TypeBlockchainAnchorRequested = "BLOCKCHAIN_ANCHOR_REQUESTED"
+	TypeBlockchainAnchorConfirmed = "BLOCKCHAIN_ANCHOR_CONFIRMED"
+	TypeBlockchainAnchorFailed    = "BLOCKCHAIN_ANCHOR_FAILED"
+
 	// --- Admin & user management (System 14). ResourceType:
 	// ResourceTypeAdminUsers, always scoped to the fixed singleton ID
 	// "global" (see internal/service.adminUsersScopeID's own doc comment —
@@ -182,6 +193,19 @@ type ShareEventData struct {
 	ShareID    string `json:"share_id"`
 	DocumentID string `json:"document_id"`
 	CaseID     string `json:"case_id"`
+}
+
+// BlockchainAnchorData is BLOCKCHAIN_ANCHOR_*/BLOCKCHAIN_ANCHOR_CONFIRMED's
+// Data payload — identifiers and status only, never document content, hash
+// bytes, or any private key material. The frontend uses this to update the
+// blockchain-status panel without a separate REST poll.
+type BlockchainAnchorData struct {
+	AnchorID   string `json:"anchor_id"`
+	DocumentID string `json:"document_id"`
+	CaseID     string `json:"case_id"`
+	Status     string `json:"status"`
+	// TxID is the Fabric transaction ID — only set for CONFIRMED events.
+	TxID string `json:"tx_id,omitempty"`
 }
 
 // AdminUserEventData is every USER_CREATED/USER_UPDATED/USER_ROLE_

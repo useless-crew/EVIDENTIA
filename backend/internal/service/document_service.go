@@ -126,6 +126,14 @@ type DownloadedDocument struct {
 // recomputeDocumentHash function, not on DocumentService itself. See
 // UploadDocument/DownloadDocument/VerifyDocument's doc comments for the
 // exact boundary each respects.
+//
+// System 20 (blockchain): blockchainSvc is optional (nil when
+// FABRIC_ENABLED=false). When set, UploadDocument calls
+// blockchainSvc.CreateAnchorForDocument after a successful upload —
+// this is the outbox trigger for async Fabric anchoring. Failure to
+// enqueue the blockchain anchor task is logged but NEVER propagates to
+// the caller: the document upload has already succeeded, and blockchain
+// anchoring is a secondary integrity layer, not a prerequisite.
 type DocumentService struct {
 	pool          *pgxpool.Pool
 	authz         *authz.Service
@@ -135,6 +143,26 @@ type DocumentService struct {
 	maxUploadSize int64
 	publisher     events.Publisher
 	logger        *slog.Logger
+	// blockchainSvc is the System 20 blockchain anchor hook. May be nil
+	// when FABRIC_ENABLED=false (safe: CreateAnchorForDocument is always
+	// guarded by a non-nil check before use).
+	blockchainSvc blockchainAnchorCreator
+}
+
+// blockchainAnchorCreator is the narrow interface DocumentService requires
+// from BlockchainAnchorService — only the post-upload hook. Defined here
+// (not in internal/blockchain) to avoid an import cycle: internal/service
+// already imports internal/blockchain; having internal/blockchain import
+// internal/service back would create the cycle.
+type blockchainAnchorCreator interface {
+	CreateAnchorForDocument(
+		ctx context.Context,
+		user auth.AuthenticatedUser,
+		documentID uuid.UUID,
+		caseID uuid.UUID,
+		sha256Hash []byte,
+		eventType string,
+	)
 }
 
 func NewDocumentService(pool *pgxpool.Pool, authzService *authz.Service, recorder audit.Recorder, objectStorage storage.Storage, bucket string, maxUploadSize int64, publisher events.Publisher, logger *slog.Logger) *DocumentService {
@@ -148,6 +176,14 @@ func NewDocumentService(pool *pgxpool.Pool, authzService *authz.Service, recorde
 		publisher:     publisher,
 		logger:        logger,
 	}
+}
+
+// SetBlockchainService wires up the blockchain anchor hook after
+// construction — used by app.go to avoid a constructor argument cycle
+// (DocumentService and BlockchainAnchorService are both constructed in
+// New, with DocumentService constructed first).
+func (s *DocumentService) SetBlockchainService(svc blockchainAnchorCreator) {
+	s.blockchainSvc = svc
 }
 
 // UploadDocument authorizes user for document:upload on caseID (RBAC
@@ -275,6 +311,23 @@ func (s *DocumentService) UploadDocument(ctx context.Context, user auth.Authenti
 	})
 
 	summary := toDocumentSummary(created)
+
+	// System 20: trigger async blockchain anchoring after a successful
+	// upload. This is a fire-and-forget call — failures are logged inside
+	// CreateAnchorForDocument but never propagate here (the document upload
+	// has already committed to PostgreSQL; blockchain is a secondary layer).
+	// The nil check is safe: blockchainSvc is nil when FABRIC_ENABLED=false.
+	if s.blockchainSvc != nil {
+		s.blockchainSvc.CreateAnchorForDocument(
+			ctx,
+			user,
+			created.ID,
+			caseID,
+			created.Sha256Hash,
+			"DOCUMENT_UPLOADED",
+		)
+	}
+
 	return &summary, nil
 }
 

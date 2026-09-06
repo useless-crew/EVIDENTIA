@@ -130,6 +130,39 @@ func validate(c *errCollector, cfg *Config) {
 	validatePositiveDuration(c, "LOGIN_RATE_LIMIT_ACCOUNT_WINDOW", cfg.LoginLimit.AccountWindow)
 
 	validateBootstrapAdmin(c, cfg.Bootstrap)
+	validateFabric(c, cfg.Fabric)
+}
+
+// validateFabric requires that when FABRIC_ENABLED=true the path-based
+// credentials and network configuration are all provided. When
+// FABRIC_ENABLED=false (the default) this is a no-op — partial
+// FABRIC_* configuration with FABRIC_ENABLED=false is explicitly allowed
+// so developers can pre-stage config without activating the integration.
+func validateFabric(c *errCollector, f FabricConfig) {
+	if !f.Enabled {
+		return
+	}
+	if f.PeerEndpoint == "" {
+		c.add("FABRIC_PEER_ENDPOINT must be set when FABRIC_ENABLED=true")
+	}
+	if f.CertPath == "" {
+		c.add("FABRIC_CERT_PATH must be set when FABRIC_ENABLED=true")
+	}
+	if f.KeyPath == "" {
+		c.add("FABRIC_KEY_PATH must be set when FABRIC_ENABLED=true")
+	}
+	if f.TLSCertPath == "" {
+		c.add("FABRIC_TLS_CERT_PATH must be set when FABRIC_ENABLED=true")
+	}
+	if f.Channel == "" {
+		c.add("FABRIC_CHANNEL must be set when FABRIC_ENABLED=true")
+	}
+	if f.Chaincode == "" {
+		c.add("FABRIC_CHAINCODE must be set when FABRIC_ENABLED=true")
+	}
+	if f.MSPID == "" {
+		c.add("FABRIC_MSP_ID must be set when FABRIC_ENABLED=true")
+	}
 }
 
 // validateBootstrapAdmin requires EVIDENTIA_BOOTSTRAP_ADMIN_{EMAIL,PASSWORD,

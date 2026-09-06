@@ -25,6 +25,7 @@ type Config struct {
 	Certificate CertificateConfig
 	Bootstrap   BootstrapAdminConfig
 	LoginLimit  LoginRateLimitConfig
+	Fabric      FabricConfig
 }
 
 // AppConfig describes general application identity.
@@ -231,6 +232,64 @@ type JWTConfig struct {
 	BcryptCost int
 }
 
+// FabricConfig configures the Hyperledger Fabric blockchain integration
+// (System 20). All fields are optional: when Enabled is false (the default),
+// the application starts normally and the blockchain layer is a no-op. When
+// Enabled is true, CertPath/KeyPath/TLSCertPath/PeerEndpoint are required.
+//
+// Security notes:
+//   - CertPath/KeyPath point to the MSP identity files that identify this
+//     backend instance to the Fabric network. These files must never be
+//     committed to Git or logged; they belong in a mounted secret volume.
+//   - TLSCertPath is the Fabric peer's TLS CA certificate, used to verify
+//     the peer's TLS certificate. Required when Enabled=true.
+//   - PeerEndpoint is host:port of the peer's gRPC listener, not a public
+//     HTTP endpoint. It must not be reachable from the browser.
+type FabricConfig struct {
+	// Enabled controls whether the blockchain integration is active.
+	// When false, all blockchain operations are silently no-ops and the
+	// application starts without any Fabric connectivity. This is the safe
+	// default that preserves backward compatibility for deployments that
+	// have not set up a Fabric network yet.
+	Enabled bool
+
+	// PeerEndpoint is the gRPC address of the Fabric peer this backend
+	// submits transactions to. Example: "peer0.police.evidentia.net:7051".
+	// Required when Enabled=true.
+	PeerEndpoint string
+
+	// GatewaySSLHostOverride overrides the TLS server name used when
+	// connecting to the peer. Useful in development environments where
+	// the peer's TLS certificate CN does not match the hostname.
+	GatewaySSLHostOverride string
+
+	// CertPath is the path to the PEM-encoded X.509 certificate that
+	// identifies this client (the Evidentia backend) to the Fabric network.
+	// This is the MSP signing certificate, not the CA certificate.
+	// Required when Enabled=true.
+	CertPath string
+
+	// KeyPath is the path to the PEM-encoded private key corresponding
+	// to CertPath. Must be kept secret. Never logged or returned via API.
+	// Required when Enabled=true.
+	KeyPath string
+
+	// TLSCertPath is the path to the PEM-encoded TLS CA certificate of the
+	// Fabric peer. Used to verify the peer's TLS certificate.
+	// Required when Enabled=true.
+	TLSCertPath string
+
+	// Channel is the Fabric channel name. Example: "evidentia-channel".
+	Channel string
+
+	// Chaincode is the installed chaincode name. Example: "evidentia".
+	Chaincode string
+
+	// MSPID is the MSP identifier for this backend's organization.
+	// Example: "PoliceMSP".
+	MSPID string
+}
+
 var validSSLModes = map[string]bool{
 	"disable":     true,
 	"allow":       true,
@@ -339,6 +398,20 @@ func Load() (*Config, error) {
 			Email:    getString("EVIDENTIA_BOOTSTRAP_ADMIN_EMAIL", ""),
 			Password: getString("EVIDENTIA_BOOTSTRAP_ADMIN_PASSWORD", ""),
 			Name:     getString("EVIDENTIA_BOOTSTRAP_ADMIN_NAME", ""),
+		},
+		// Fabric is entirely optional — see FabricConfig's doc comment.
+		// When FABRIC_ENABLED=false (the default), none of the other
+		// FABRIC_* vars are required or validated.
+		Fabric: FabricConfig{
+			Enabled:                getBool(c, "FABRIC_ENABLED", false),
+			PeerEndpoint:           getString("FABRIC_PEER_ENDPOINT", ""),
+			GatewaySSLHostOverride: getString("FABRIC_GATEWAY_SSL_HOST_OVERRIDE", ""),
+			CertPath:               getString("FABRIC_CERT_PATH", ""),
+			KeyPath:                getString("FABRIC_KEY_PATH", ""),
+			TLSCertPath:            getString("FABRIC_TLS_CERT_PATH", ""),
+			Channel:                getString("FABRIC_CHANNEL", "evidentia-channel"),
+			Chaincode:              getString("FABRIC_CHAINCODE", "evidentia"),
+			MSPID:                  getString("FABRIC_MSP_ID", "PoliceMSP"),
 		},
 	}
 

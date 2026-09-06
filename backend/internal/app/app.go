@@ -16,6 +16,7 @@ import (
 	"evidentia/backend/internal/audit"
 	"evidentia/backend/internal/auth"
 	"evidentia/backend/internal/authz"
+	"evidentia/backend/internal/blockchain"
 	"evidentia/backend/internal/cache"
 	"evidentia/backend/internal/config"
 	"evidentia/backend/internal/database"
@@ -121,6 +122,19 @@ type App struct {
 	// dependency between a business service and this field at all (see
 	// docs/REALTIME_EVENTS.md's own architecture diagram).
 	SSEManager *sse.Manager
+
+	// BlockchainService is System 20's Hyperledger Fabric client (see
+	// internal/blockchain). When FABRIC_ENABLED=false (the default), this
+	// field holds a blockchain.NoopService that returns ErrUnavailable for
+	// every call — the application behaves identically to before System 20
+	// in that mode. When FABRIC_ENABLED=true, this holds a real
+	// blockchain.FabricService connected to the configured peer.
+	BlockchainService blockchain.Service
+
+	// BlockchainAnchorService is System 20's application-layer coordinator
+	// for evidence anchoring, provenance retrieval, and blockchain
+	// verification. Depends on BlockchainService and JobClient.
+	BlockchainAnchorService *service.BlockchainAnchorService
 }
 
 // New loads configuration and connects every infrastructure dependency in
@@ -212,23 +226,66 @@ func New(ctx context.Context) (*App, error) {
 	jobClient := jobs.NewClient(redisOpt)
 	auditService := service.NewAuditService(db.Pool(), authzService, recorder, jobClient, eventPublisher, log)
 
+	// System 20: Hyperledger Fabric blockchain integration.
+	// blockchainSvc is a NoopService when FABRIC_ENABLED=false — no
+	// connectivity, no startup failure, backward-compatible with all
+	// deployments that have not set up a Fabric network. When
+	// FABRIC_ENABLED=true, we connect to the peer and return an error
+	// if the connection fails (fail-closed: a misconfigured Fabric
+	// integration is not silently ignored).
+	var blockchainSvc blockchain.Service
+	if cfg.Fabric.Enabled {
+		fabricSvc, fabricErr := blockchain.New(ctx, cfg.Fabric, log)
+		if fabricErr != nil {
+			db.Close()
+			_ = redisCache.Close()
+			if jobErr := jobClient.Close(); jobErr != nil {
+				log.Error("shutdown after fabric init failure: closing asynq client", "error", jobErr)
+			}
+			return nil, fmt.Errorf("app: connect hyperledger fabric: %w", fabricErr)
+		}
+		blockchainSvc = fabricSvc
+	} else {
+		blockchainSvc = blockchain.NewNoopService()
+		log.Info("blockchain: Hyperledger Fabric integration disabled (FABRIC_ENABLED=false)")
+	}
+
+	blockchainAnchorSvc := service.NewBlockchainAnchorService(
+		db.Pool(),
+		authzService,
+		recorder,
+		blockchainSvc,
+		jobClient,
+		eventPublisher,
+		log,
+		objectStorage,
+		cfg.Fabric.Channel,
+		cfg.Fabric.Chaincode,
+		cfg.Fabric.MSPID,
+	)
+	// Wire the blockchain hook into DocumentService after both are
+	// constructed — see DocumentService.SetBlockchainService's doc comment.
+	documentService.SetBlockchainService(blockchainAnchorSvc)
+
 	return &App{
-		Config:             cfg,
-		Logger:             log,
-		DB:                 db,
-		Cache:              redisCache,
-		Storage:            objectStorage,
-		JWTManager:         jwtManager,
-		AuthService:        authService,
-		AuthzService:       authzService,
-		CaseService:        caseService,
-		DocumentService:    documentService,
-		CertificateService: certificateService,
-		UserService:        userService,
-		ShareService:       shareService,
-		AuditService:       auditService,
-		JobClient:          jobClient,
-		SSEManager:         sseManager,
+		Config:                  cfg,
+		Logger:                  log,
+		DB:                      db,
+		Cache:                   redisCache,
+		Storage:                 objectStorage,
+		JWTManager:              jwtManager,
+		AuthService:             authService,
+		AuthzService:            authzService,
+		CaseService:             caseService,
+		DocumentService:         documentService,
+		CertificateService:      certificateService,
+		UserService:             userService,
+		ShareService:            shareService,
+		AuditService:            auditService,
+		JobClient:               jobClient,
+		SSEManager:              sseManager,
+		BlockchainService:       blockchainSvc,
+		BlockchainAnchorService: blockchainAnchorSvc,
 	}, nil
 }
 
@@ -236,6 +293,17 @@ func New(ctx context.Context) (*App, error) {
 // graceful shutdown, after the HTTP server has stopped accepting new
 // requests (see cmd/server/main.go for the full shutdown sequence).
 func (a *App) Close() {
+	// System 20: close the Fabric gRPC connection before other clients
+	// (so any in-flight blockchain submissions complete or cancel cleanly
+	// before Redis/PostgreSQL shut down). NoopService.Close() is a no-op.
+	if a.BlockchainService != nil {
+		if err := a.BlockchainService.Close(); err != nil {
+			a.Logger.Error("shutdown: closing blockchain service", slog.String("error", err.Error()))
+		} else {
+			a.Logger.Info("shutdown: blockchain service closed")
+		}
+	}
+
 	if err := a.JobClient.Close(); err != nil {
 		a.Logger.Error("shutdown: closing asynq client", slog.String("error", err.Error()))
 	} else {

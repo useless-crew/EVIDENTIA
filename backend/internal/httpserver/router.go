@@ -225,5 +225,21 @@ func NewRouter(a *app.App) *gin.Engine {
 	r.GET("/api/v1/audit/verifications", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditVerify), audithandlers.History(a.AuditService))
 	r.GET("/api/v1/audit/integrity", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionAuditVerify), audithandlers.Integrity(a.AuditService))
 
+	// Blockchain provenance & verification (System 20): all three routes are
+	// document-scoped (:id is the DOCUMENT id) and gated by
+	// RequireDocumentAccess with ActionDocumentVerify — the same permission
+	// the existing POST /verify and GET /certificate routes use, because
+	// blockchain provenance data is evidence metadata that must not be
+	// readable by parties without a relationship to the document's case.
+	// None of these take a JSON request body, so none need jsonBodyLimit.
+	// GET /status returns the most recent anchor row (or null if none).
+	// GET /provenance returns the full ordered anchor history.
+	// POST /verify performs the three-way integrity check (file vs DB vs
+	// Fabric) — always 200 on completion; inspect result.status for the
+	// finding.
+	r.GET("/api/v1/documents/:id/blockchain/status", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentVerify, "id"), documenthandlers.BlockchainStatus(a.BlockchainAnchorService))
+	r.GET("/api/v1/documents/:id/blockchain/provenance", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentVerify, "id"), documenthandlers.BlockchainProvenance(a.BlockchainAnchorService))
+	r.POST("/api/v1/documents/:id/blockchain/verify", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentVerify, "id"), documenthandlers.BlockchainVerify(a.BlockchainAnchorService))
+
 	return r
 }
