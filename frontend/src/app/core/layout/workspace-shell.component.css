@@ -8,17 +8,8 @@
 .workspace-body {
   display: flex;
   flex: 1;
-  min-height: calc(100vh - 59.5px);
+  min-height: calc(100vh - var(--chrome-h));
   position: relative;
-}
-
-.workspace-content {
-  flex: 1;
-  min-width: 0;
-  padding: 20px 30px 40px;
-  background: var(--color-bg-page);
-  display: flex;
-  flex-direction: column;
 }
 
 app-header {
@@ -28,41 +19,86 @@ app-header {
   display: block;
 }
 
+.workspace-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  /* Faint page texture so large empty areas aren't dead flat white-grey */
+  background:
+    radial-gradient(70ch 44ch at 92% -4%, rgba(66, 109, 155, 0.06) 0%, transparent 62%),
+    var(--color-bg-page);
+}
+
+/* One measure shared by content and footer so they stay aligned */
+.workspace-inner {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding-inline: clamp(20px, 3vw, 38px);
+}
+
+.workspace-content > .workspace-inner {
+  flex: 1;
+  padding-top: var(--sp-5);
+  padding-bottom: var(--sp-7);
+  display: flex;
+  flex-direction: column;
+}
+
+/* ==========================================================================
+   Breadcrumb
+   ========================================================================== */
 .workspace-breadcrumb {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11.5px;
-  color: var(--color-text-secondary);
-  margin-bottom: 16px;
+  gap: 9px;
+  margin-bottom: var(--sp-5);
+  font-family: var(--font-mono);
+  font-size: 11px;
   font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
 }
 
-.crumb-icon {
-  color: var(--color-accent-blue);
-  font-size: 10px;
+/* Small saffron square standing in for the old "▸" glyph */
+.crumb-mark {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 1px;
+  background: var(--tricolor-saffron);
 }
 
 .crumb-path {
-  color: var(--color-text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .screen-container {
   flex: 1;
+  min-width: 0;
 }
 
-/* Trust Footer */
+/* ==========================================================================
+   Trust Footer
+   ========================================================================== */
 .workspace-footer {
-  margin-top: 36px;
-  padding-top: 16px;
   border-top: 1px solid var(--color-border);
+  background: var(--color-card-raised);
+  padding-block: var(--sp-4);
+}
+
+.footer-inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 11px;
-  color: var(--color-text-muted);
   flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--sp-2);
+  font-size: 10.5px;
 }
 
 .footer-trust-left {
@@ -71,5 +107,7 @@ app-header {
 }
 
 .footer-trust-right {
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
   color: var(--color-text-muted);
 }

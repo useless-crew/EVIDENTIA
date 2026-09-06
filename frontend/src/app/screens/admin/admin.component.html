@@ -1,100 +1,207 @@
-<div class="admin-view animate-fade-in">
-  <div class="admin-header">
-    <div class="admin-header-row">
-      <div>
-        <h1 class="admin-title">User Management</h1>
-        <p class="admin-subtitle">
-          Create accounts and manage roles, status, and passwords for every Evidentia user.
-        </p>
-      </div>
-      <button type="button" class="btn-primary" (click)="openCreate()">+ New User</button>
+<div class="admin-view">
+  <header class="page-head">
+    <div class="page-head-titles">
+      <span class="page-eyebrow">Administration</span>
+      <h1 class="page-title">User Management</h1>
+      <p class="page-subtitle">
+        Create accounts and manage roles, status, and passwords for every Evidentia user.
+      </p>
     </div>
 
-    <div class="admin-filters">
-      <input
-        type="text"
-        class="filter-input"
-        placeholder="Search name or email…"
-        [value]="searchTerm()"
-        (input)="onSearchInput($any($event.target).value)"
-      />
-      <select class="filter-select" [value]="roleFilter()" (change)="onRoleFilterChange($any($event.target).value)">
+    <div class="page-actions">
+      <button type="button" class="btn-primary" (click)="openCreate()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+        New User
+      </button>
+    </div>
+  </header>
+
+  <div *ngIf="rowActionError()" class="form-alert form-alert-error">
+    <span class="alert-mark" aria-hidden="true"></span>
+    {{ rowActionError() }}
+  </div>
+
+  <div class="panel">
+    <div class="toolbar">
+      <div class="field field-grow">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input
+          type="text"
+          class="field-input"
+          placeholder="Search name or email…"
+          [value]="searchTerm()"
+          (input)="onSearchInput($any($event.target).value)"
+        />
+      </div>
+
+      <select
+        class="select select-sm"
+        [value]="roleFilter()"
+        (change)="onRoleFilterChange($any($event.target).value)"
+      >
         <option value="">All roles</option>
         <option *ngFor="let r of roles" [value]="r">{{ r }}</option>
       </select>
-      <select class="filter-select" [value]="statusFilter()" (change)="onStatusFilterChange($any($event.target).value)">
+
+      <select
+        class="select select-sm"
+        [value]="statusFilter()"
+        (change)="onStatusFilterChange($any($event.target).value)"
+      >
         <option value="">All statuses</option>
         <option *ngFor="let s of statuses" [value]="s">{{ s }}</option>
       </select>
-    </div>
-  </div>
 
-  <div *ngIf="rowActionError()" class="form-alert form-alert-error">{{ rowActionError() }}</div>
+      <div class="toolbar-spacer"></div>
 
-  <div class="admin-card">
-    <div class="admin-table-header">
-      <span class="col-name">NAME</span>
-      <span class="col-email">EMAIL</span>
-      <span class="col-role">ROLE</span>
-      <span class="col-status">STATUS</span>
-      <span class="col-created">CREATED</span>
-      <span class="col-action">ACTIONS</span>
+      <span class="toolbar-count" *ngIf="result() as r">
+        {{ r.meta.total }} user{{ r.meta.total === 1 ? '' : 's' }}
+      </span>
     </div>
 
-    <div *ngIf="loading()" class="admin-empty">Loading users…</div>
-    <div *ngIf="!loading() && errorMessage()" class="admin-empty admin-empty-error">{{ errorMessage() }}</div>
-    <div *ngIf="!loading() && !errorMessage() && result()?.users?.length === 0" class="admin-empty">
-      No users match these filters.
+    <!-- Loading -->
+    <div *ngIf="loading()" class="skeleton-stack" aria-busy="true">
+      <div class="skeleton-row admin-cols" *ngFor="let row of skeletonRows">
+        <span class="skeleton skeleton-line" style="width: 70%"></span>
+        <span class="skeleton skeleton-line" style="width: 86%"></span>
+        <span class="skeleton skeleton-line" style="width: 60%"></span>
+        <span class="skeleton skeleton-line" style="width: 52%"></span>
+        <span class="skeleton skeleton-line" style="width: 64%"></span>
+        <span class="skeleton skeleton-line" style="width: 78%"></span>
+      </div>
     </div>
 
-    <div class="admin-table-body" *ngIf="!loading() && !errorMessage()">
-      <div *ngFor="let u of result()?.users" class="admin-row">
-        <span class="col-name">{{ displayName(u) }}</span>
-        <span class="col-email font-mono">{{ u.email }}</span>
-        <span class="col-role">
-          <select
-            class="role-select"
-            [value]="primaryRole(u)"
-            [disabled]="u.id === currentUserId || rowBusyId() === u.id"
-            (change)="onRoleSelect(u, $any($event.target).value)"
-            [title]="u.id === currentUserId ? 'You cannot change your own role' : 'Change role'"
+    <!-- Error -->
+    <div *ngIf="!loading() && errorMessage()" class="state-block is-error">
+      <span class="state-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+      </span>
+      <span class="state-title">Could not load users</span>
+      <span class="state-text">{{ errorMessage() }}</span>
+    </div>
+
+    <!-- Empty -->
+    <div
+      *ngIf="!loading() && !errorMessage() && result()?.users?.length === 0"
+      class="state-block"
+    >
+      <span class="state-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+          <circle cx="9" cy="7" r="4"></circle>
+        </svg>
+      </span>
+      <span class="state-title">No users match</span>
+      <span class="state-text">Try clearing the search box or the role and status filters.</span>
+    </div>
+
+    <ng-container *ngIf="!loading() && !errorMessage() && result()?.users?.length">
+      <div class="data-head admin-cols">
+        <span>Name</span>
+        <span>Email</span>
+        <span>Role</span>
+        <span>Status</span>
+        <span>Created</span>
+        <span>Actions</span>
+      </div>
+
+      <div class="admin-table-body">
+        <div *ngFor="let u of result()?.users" class="data-row admin-cols is-static">
+          <span class="cell-strong">{{ displayName(u) }}</span>
+          <span class="cell-mono cell-muted user-email">{{ u.email }}</span>
+
+          <span>
+            <select
+              class="select select-sm role-select"
+              [value]="primaryRole(u)"
+              [disabled]="u.id === currentUserId || rowBusyId() === u.id"
+              (change)="onRoleSelect(u, $any($event.target).value)"
+              [title]="u.id === currentUserId ? 'You cannot change your own role' : 'Change role'"
+            >
+              <option *ngFor="let r of roles" [value]="r">{{ r }}</option>
+            </select>
+          </span>
+
+          <span>
+            <span class="status-pill" [attr.data-status]="u.status">
+              <span class="status-pill-dot" aria-hidden="true"></span>
+              {{ u.status }}
+            </span>
+          </span>
+
+          <span class="cell-muted">{{ u.created_at | date: 'mediumDate' }}</span>
+
+          <span class="row-actions">
+            <button
+              type="button"
+              class="action-link"
+              (click)="openResetPassword(u)"
+              [disabled]="rowBusyId() === u.id"
+            >
+              Reset password
+            </button>
+            <button
+              type="button"
+              class="action-link"
+              [class.action-link-danger]="u.status === 'active'"
+              [disabled]="u.id === currentUserId || rowBusyId() === u.id"
+              [title]="u.id === currentUserId ? 'You cannot change your own status' : ''"
+              (click)="toggleStatus(u)"
+            >
+              {{ u.status === 'active' ? 'Deactivate' : 'Activate' }}
+            </button>
+          </span>
+        </div>
+      </div>
+
+      <div class="pagination" *ngIf="result() as r">
+        <span class="pagination-count">
+          {{ r.meta.total }} user{{ r.meta.total === 1 ? '' : 's' }} · page {{ r.meta.page }} of
+          {{ r.meta.total_pages || 1 }}
+        </span>
+        <div class="pagination-buttons">
+          <button
+            type="button"
+            class="btn-page"
+            [class.disabled]="r.meta.page <= 1"
+            [disabled]="r.meta.page <= 1"
+            (click)="goToPage(r.meta.page - 1)"
           >
-            <option *ngFor="let r of roles" [value]="r">{{ r }}</option>
-          </select>
-        </span>
-        <span class="col-status">
-          <span class="status-pill" [attr.data-status]="u.status">{{ u.status }}</span>
-        </span>
-        <span class="col-created">{{ u.created_at | date:'mediumDate' }}</span>
-        <span class="col-action">
-          <button type="button" class="action-link" (click)="openResetPassword(u)" [disabled]="rowBusyId() === u.id">
-            Reset password
+            Previous
           </button>
           <button
             type="button"
-            class="action-link"
-            [class.action-link-danger]="u.status === 'active'"
-            [disabled]="u.id === currentUserId || rowBusyId() === u.id"
-            [title]="u.id === currentUserId ? 'You cannot change your own status' : ''"
-            (click)="toggleStatus(u)"
+            class="btn-page"
+            [class.disabled]="r.meta.page >= r.meta.total_pages"
+            [disabled]="r.meta.page >= r.meta.total_pages"
+            (click)="goToPage(r.meta.page + 1)"
           >
-            {{ u.status === 'active' ? 'Deactivate' : 'Activate' }}
+            Next
           </button>
-        </span>
+        </div>
       </div>
-    </div>
-  </div>
-
-  <div class="admin-pagination" *ngIf="result() as r">
-    <span class="pagination-info">
-      {{ r.meta.total }} user{{ r.meta.total === 1 ? '' : 's' }} · page {{ r.meta.page }} of {{ r.meta.total_pages || 1 }}
-    </span>
-    <div class="pagination-controls">
-      <button type="button" class="btn-secondary" [disabled]="r.meta.page <= 1" (click)="goToPage(r.meta.page - 1)">Previous</button>
-      <button type="button" class="btn-secondary" [disabled]="r.meta.page >= r.meta.total_pages" (click)="goToPage(r.meta.page + 1)">Next</button>
-    </div>
+    </ng-container>
   </div>
 </div>
 
-<app-create-user-modal *ngIf="createOpen()" (closed)="createOpen.set(false)" (created)="onUserCreated($event)" />
-<app-reset-password-modal *ngIf="resetPasswordFor() as u" [user]="u" (closed)="resetPasswordFor.set(null)" (done)="onPasswordReset()" />
+<app-create-user-modal
+  *ngIf="createOpen()"
+  (closed)="createOpen.set(false)"
+  (created)="onUserCreated($event)"
+/>
+<app-reset-password-modal
+  *ngIf="resetPasswordFor() as u"
+  [user]="u"
+  (closed)="resetPasswordFor.set(null)"
+  (done)="onPasswordReset()"
+/>

@@ -6,13 +6,14 @@ import { CaseService } from '../../core/services/case.service';
 import { ApiError } from '../../core/services/api-client.service';
 import { CaseDetail, CaseListResult, CaseStatus, CaseSummary } from '../../core/models/api.models';
 import { CreateCaseModalComponent } from '../../components/create-case-modal/create-case-modal.component';
+import { RevealDirective } from '../../core/directives/reveal.directive';
 
 const PAGE_SIZE = 20;
 
 @Component({
   selector: 'app-cases',
   standalone: true,
-  imports: [CommonModule, CreateCaseModalComponent],
+  imports: [CommonModule, CreateCaseModalComponent, RevealDirective],
   templateUrl: './cases.component.html',
   styleUrls: ['./cases.component.css']
 })
@@ -30,6 +31,9 @@ export class CasesComponent implements OnInit {
   readonly createOpen = signal(false);
 
   readonly statuses: CaseStatus[] = ['OPEN', 'UNDER_INVESTIGATION', 'SUBMITTED', 'UNDER_REVIEW', 'CLOSED', 'ARCHIVED'];
+
+  /** Placeholder rows rendered while the registry loads. */
+  readonly skeletonRows = Array.from({ length: 6 });
 
   ngOnInit() {
     this.fetch();

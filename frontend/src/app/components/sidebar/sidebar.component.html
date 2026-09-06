@@ -1,5 +1,5 @@
 <aside class="sidebar">
-  <div class="nav-section-title">NAVIGATION</div>
+  <div class="nav-section-title">Navigation</div>
 
   <nav class="nav-menu">
     <button
@@ -9,15 +9,58 @@
       [class.active]="isItemActive(item.target)"
       (click)="onNavClick(item.target)"
     >
-      <!-- Navigation Icon -->
-      <span class="nav-icon-indicator" [class.active]="isItemActive(item.target)">
-        <span *ngIf="item.label === 'Dashboard'" class="icon-shape square"></span>
-        <span *ngIf="item.label === 'Cases'" class="icon-shape rect"></span>
-        <span *ngIf="item.label === 'Upload Document'" class="icon-shape up-arrow"></span>
-        <span *ngIf="item.label === 'Shared With Me'" class="icon-shape diamond"></span>
-        <span *ngIf="item.label === 'Audit Log'" class="icon-shape shield"></span>
-        <span *ngIf="item.label === 'User Management'" class="icon-shape user"></span>
+      <span class="nav-rail" aria-hidden="true"></span>
+
+      <span class="nav-icon" aria-hidden="true">
+        <svg
+          *ngIf="item.label === 'Dashboard'"
+          viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+          stroke-linecap="round" stroke-linejoin="round"
+        >
+          <rect x="3" y="3" width="7" height="9" rx="1.5"></rect>
+          <rect x="14" y="3" width="7" height="5" rx="1.5"></rect>
+          <rect x="14" y="12" width="7" height="9" rx="1.5"></rect>
+          <rect x="3" y="16" width="7" height="5" rx="1.5"></rect>
+        </svg>
+
+        <svg
+          *ngIf="item.label === 'Cases'"
+          viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+          stroke-linecap="round" stroke-linejoin="round"
+        >
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+        </svg>
+
+        <svg
+          *ngIf="item.label === 'Upload Document'"
+          viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+          stroke-linecap="round" stroke-linejoin="round"
+        >
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="17 8 12 3 7 8"></polyline>
+          <line x1="12" y1="3" x2="12" y2="15"></line>
+        </svg>
+
+        <svg
+          *ngIf="item.label === 'Audit Log'"
+          viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+          stroke-linecap="round" stroke-linejoin="round"
+        >
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+          <path d="M9 12l2 2 4-4"></path>
+        </svg>
+
+        <svg
+          *ngIf="item.label === 'User Management'"
+          viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+          stroke-linecap="round" stroke-linejoin="round"
+        >
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+          <circle cx="9" cy="7" r="4"></circle>
+          <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+        </svg>
       </span>
+
       <span class="nav-label">{{ item.label }}</span>
     </button>
   </nav>
@@ -25,7 +68,7 @@
   <div class="sidebar-spacer"></div>
 
   <!-- Bottom Cryptographic Chain Status -->
-  <div class="chain-status-widget">
+  <div class="chain-status-widget" [class.tampered]="dms.simulateTamper()">
     <div class="status-header">
       <span class="status-title">Cryptographic Chain</span>
       <span class="status-version">v2.4</span>

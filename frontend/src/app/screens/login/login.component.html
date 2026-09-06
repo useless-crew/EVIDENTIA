@@ -1,112 +1,173 @@
 <div class="login-page">
-  <!-- Top Tricolor Ribbon -->
-  <div class="tricolor-ribbon">
-    <div class="stripe-saffron"></div>
-    <div class="stripe-white"></div>
-    <div class="stripe-green"></div>
-  </div>
-
-  <div class="login-container">
-    <!-- Brand Emblem -->
-    <div class="brand-header" (click)="goToLanding($event)" style="cursor: pointer;" title="Back to Landing Page">
-      <div class="seal-badge" aria-hidden="true">
-        <span class="seal-text">SEAL</span>
-      </div>
-      <div class="brand-titles">
-        <span class="brand-main">EVIDENTIA</span>
-        <span class="brand-sub">Secure Digital DMS · National Justice Network</span>
-      </div>
+  <!-- ==========================================================
+       Left pane — the editorial/trust half. Purely decorative on
+       mobile, where it collapses to a compact banner.
+       ========================================================== -->
+  <aside class="login-aside on-dark grain evidence-grid">
+    <div class="tricolor-ribbon" aria-hidden="true">
+      <div class="stripe-saffron"></div>
+      <div class="stripe-white"></div>
+      <div class="stripe-green"></div>
     </div>
 
-    <!-- Quick Role Accounts Demo Selector — local dev only, never rendered
-         in a production build (environment.demoMode is false there). -->
-    <div class="demo-accounts-card" *ngIf="demoMode">
-      <div class="demo-header">
-        <span class="demo-title">LOCAL DEV DEMO ACCOUNTS</span>
-        <span class="demo-badge font-mono">REAL BACKEND LOGIN</span>
+    <div class="aside-inner">
+      <div
+        class="brand-header"
+        role="button"
+        tabindex="0"
+        title="Back to Landing Page"
+        (click)="goToLanding($event)"
+        (keydown.enter)="goToLanding($event)"
+      >
+        <div class="seal-badge" aria-hidden="true">
+          <span class="seal-text">SEAL</span>
+        </div>
+        <div class="brand-titles">
+          <span class="brand-main">EVIDENTIA</span>
+          <span class="brand-sub">Secure Digital DMS · National Justice Network</span>
+        </div>
       </div>
-      <div class="demo-chips-grid">
-        <button
-          type="button"
-          *ngFor="let acc of demoAccounts()"
-          class="demo-chip"
-          [class.active]="selectedAccount?.email === acc.email"
-          [disabled]="submitting()"
-          (click)="quickSignIn(acc, $event)"
-          [title]="'Fill and sign in as ' + acc.name + ' (' + acc.role + ') — see backend/cmd/devuser'"
-        >
-          <span class="chip-role-badge" [attr.data-role]="acc.role">{{ acc.role }}</span>
-          <div class="chip-info">
-            <span class="chip-name">{{ acc.name }}</span>
-            <span class="chip-email font-mono">{{ acc.email }}</span>
+
+      <div class="aside-statement">
+        <span class="label-mono">Restricted system</span>
+        <p class="aside-quote">
+          Every file is fingerprinted on upload. Every action is
+          <em class="display-accent">logged</em>. Nothing can be quietly altered.
+        </p>
+      </div>
+
+      <ul class="trust-list">
+        <li class="trust-item">
+          <span class="trust-mark" aria-hidden="true"></span>
+          <span class="trust-key">SHA-256</span>
+          <span class="trust-value">Fingerprint recorded for every document</span>
+        </li>
+        <li class="trust-item">
+          <span class="trust-mark" aria-hidden="true"></span>
+          <span class="trust-key">ED25519</span>
+          <span class="trust-value">Append-only audit chain signature</span>
+        </li>
+        <li class="trust-item">
+          <span class="trust-mark" aria-hidden="true"></span>
+          <span class="trust-key">§65B</span>
+          <span class="trust-value">IT Act, 2000 &amp; Bharatiya Sakshya Adhiniyam, 2023</span>
+        </li>
+      </ul>
+    </div>
+  </aside>
+
+  <!-- ==========================================================
+       Right pane — the form
+       ========================================================== -->
+  <main class="login-main">
+    <div class="login-container">
+      <!-- Quick Role Accounts Demo Selector — local dev only, never rendered
+           in a production build (environment.demoMode is false there). -->
+      <div class="demo-accounts-card" *ngIf="demoMode">
+        <div class="demo-header">
+          <span class="demo-title">Local dev demo accounts</span>
+          <span class="demo-badge">Real backend login</span>
+        </div>
+        <div class="demo-chips-grid">
+          <button
+            type="button"
+            *ngFor="let acc of demoAccounts()"
+            class="demo-chip"
+            [class.active]="selectedAccount?.email === acc.email"
+            [disabled]="submitting()"
+            (click)="quickSignIn(acc, $event)"
+            [title]="'Fill and sign in as ' + acc.name + ' (' + acc.role + ') — see backend/cmd/devuser'"
+          >
+            <span class="chip-role-badge" [attr.data-role]="acc.role">{{ acc.role }}</span>
+            <span class="chip-info">
+              <span class="chip-name">{{ acc.name }}</span>
+              <span class="chip-email">{{ acc.email }}</span>
+            </span>
+            <span class="chip-action" aria-hidden="true">→</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Login Card -->
+      <div class="login-card">
+        <div class="card-header-row">
+          <div class="card-heading">
+            <span class="page-eyebrow">Authentication</span>
+            <h1 class="card-title">Authorized sign in</h1>
           </div>
-          <span class="chip-action">Sign In ›</span>
-        </button>
-      </div>
-    </div>
-
-    <!-- Login Card -->
-    <div class="login-card">
-      <div class="card-header-row">
-        <h1 class="card-title">Authorized Sign In</h1>
-        <span class="selected-role-tag" *ngIf="selectedAccount">{{ selectedAccount.role }} Clearance</span>
-      </div>
-      <p class="card-description">
-        Cryptographic evidence and case file management for India's justice system.
-      </p>
-
-      <div *ngIf="sessionExpired()" class="form-alert form-alert-warn">
-        Your session expired. Please sign in again.
-      </div>
-      <div *ngIf="errorMessage()" class="form-alert form-alert-error">
-        {{ errorMessage() }}
-      </div>
-
-      <form (ngSubmit)="signIn()" class="login-form">
-        <div class="form-field">
-          <label class="field-label">OFFICIAL GOVERNMENT EMAIL</label>
-          <input
-            type="email"
-            class="field-input"
-            [(ngModel)]="email"
-            name="email"
-            [disabled]="submitting()"
-            required
-          />
+          <span class="selected-role-tag" *ngIf="selectedAccount">
+            {{ selectedAccount.role }} clearance
+          </span>
         </div>
 
-        <div class="form-field">
-          <label class="field-label">SECURITY CREDENTIAL / KEY</label>
-          <input
-            type="password"
-            class="field-input font-mono"
-            [(ngModel)]="password"
-            name="password"
-            [disabled]="submitting()"
-            required
-          />
+        <p class="card-description">
+          Cryptographic evidence and case file management for India's justice system.
+        </p>
+
+        <div *ngIf="sessionExpired()" class="form-alert form-alert-warn">
+          <span class="alert-mark" aria-hidden="true"></span>
+          Your session expired. Please sign in again.
+        </div>
+        <div *ngIf="errorMessage()" class="form-alert form-alert-error">
+          <span class="alert-mark" aria-hidden="true"></span>
+          {{ errorMessage() }}
         </div>
 
-        <button type="submit" class="btn-primary btn-signin" [disabled]="submitting()">
-          {{ submitting() ? 'Signing in…' : 'Sign In' }}
-        </button>
-      </form>
+        <form (ngSubmit)="signIn()" class="login-form">
+          <div class="form-row">
+            <label class="form-label" for="login-email">Official government email</label>
+            <input
+              id="login-email"
+              type="email"
+              class="input"
+              autocomplete="username"
+              [(ngModel)]="email"
+              name="email"
+              [disabled]="submitting()"
+              required
+            />
+          </div>
 
-      <div class="card-footer">
-        <a href="#" class="forgot-link" (click)="goToLanding($event)">← Back to Landing Page</a>
-        <span class="version-tag font-mono">v2.4.1 (BSA-65B)</span>
+          <div class="form-row">
+            <label class="form-label" for="login-password">Security credential / key</label>
+            <input
+              id="login-password"
+              type="password"
+              class="input font-mono"
+              autocomplete="current-password"
+              [(ngModel)]="password"
+              name="password"
+              [disabled]="submitting()"
+              required
+            />
+          </div>
+
+          <button type="submit" class="btn-primary btn-signin" [disabled]="submitting()">
+            <span *ngIf="submitting()" class="btn-spinner animate-spin" aria-hidden="true"></span>
+            {{ submitting() ? 'Signing in…' : 'Sign In' }}
+          </button>
+        </form>
+
+        <div class="card-footer">
+          <a href="#" class="forgot-link link-underline" (click)="goToLanding($event)">
+            ← Back to landing page
+          </a>
+          <span class="version-tag">v2.4.1 (BSA-65B)</span>
+        </div>
+      </div>
+
+      <!-- Compliance Note -->
+      <div class="compliance-note">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="16" x2="12" y2="12"></line>
+          <line x1="12" y1="8" x2="12.01" y2="8"></line>
+        </svg>
+        <span>
+          Authorized personnel only — all access is cryptographically audited under §65B of the
+          IT Act, 2000.
+        </span>
       </div>
     </div>
-
-    <!-- Compliance Note -->
-    <div class="compliance-note">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="12" cy="12" r="10"></circle>
-        <line x1="12" y1="16" x2="12" y2="12"></line>
-        <line x1="12" y1="8" x2="12.01" y2="8"></line>
-      </svg>
-      <span>Authorized personnel only — all access is cryptographically audited under §65B of the IT Act, 2000.</span>
-    </div>
-  </div>
+  </main>
 </div>
-

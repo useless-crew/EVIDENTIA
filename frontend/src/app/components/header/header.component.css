@@ -1,7 +1,7 @@
 /* Tricolor Ribbon */
 .tricolor-ribbon {
   display: flex;
-  height: 3.5px;
+  height: var(--ribbon-h);
   width: 100%;
 }
 
@@ -20,16 +20,36 @@
   background-color: var(--tricolor-green);
 }
 
-/* Header Container */
+/* ==========================================================================
+   Header — navy glass bar. Uses the same mesh vocabulary as the landing hero
+   so the marketing and product surfaces read as one product.
+   ========================================================================== */
 .header {
-  height: 56px;
-  background: var(--color-navy-primary);
-  border-bottom: 1px solid var(--color-navy-dark);
+  position: relative;
+  height: var(--header-h);
+  background: linear-gradient(180deg, #16305240 0%, transparent 100%),
+    var(--color-navy-primary);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
   color: #ffffff;
-  position: sticky;
-  top: 0;
   z-index: 50;
-  box-shadow: 0 2px 4px rgba(14, 32, 56, 0.15);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25), 0 8px 24px -18px rgba(0, 0, 0, 0.9);
+}
+
+/* Faint saffron→green wash along the bottom edge, echoing the ribbon */
+.header::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    rgba(255, 153, 51, 0.5),
+    rgba(255, 255, 255, 0.12) 42%,
+    rgba(19, 136, 8, 0.4)
+  );
+  opacity: 0.6;
 }
 
 .header-inner {
@@ -37,7 +57,7 @@
   align-items: center;
   gap: 18px;
   height: 100%;
-  padding: 0 20px;
+  padding: 0 var(--sp-5);
 }
 
 /* Brand */
@@ -48,6 +68,13 @@
   flex: none;
   cursor: pointer;
   user-select: none;
+  padding: 4px 6px 4px 0;
+  border-radius: var(--r-sm);
+  transition: opacity var(--dur-base) ease;
+}
+
+.brand:hover {
+  opacity: 0.86;
 }
 
 .seal-badge {
@@ -61,6 +88,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: transform 0.9s var(--ease-out-expo), border-color var(--dur-base) ease;
+}
+
+.brand:hover .seal-badge {
+  transform: rotate(180deg);
+  border-color: var(--tricolor-saffron);
 }
 
 .seal-text {
@@ -79,40 +112,49 @@
 .brand-name {
   font-size: 15px;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
   color: #ffffff;
   line-height: 1.1;
 }
 
 .brand-tagline {
-  font-size: 9.5px;
-  color: rgba(255, 255, 255, 0.65);
-  letter-spacing: -0.01em;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.5);
 }
 
 /* Search Bar */
 .search-bar {
   flex: 1 1 200px;
-  max-width: 380px;
-  height: 32px;
-  background: rgba(255, 255, 255, 0.10);
-  border: 1px solid rgba(255, 255, 255, 0.20);
-  border-radius: 4px;
+  max-width: 420px;
+  height: 34px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 10px;
-  transition: all 0.2s ease;
+  gap: 9px;
+  padding: 0 14px;
+  transition: background-color var(--dur-base) ease, border-color var(--dur-base) ease,
+    box-shadow var(--dur-base) ease, max-width var(--dur-slow) var(--ease-out-expo);
 }
 
 .search-bar:focus-within {
-  background: rgba(255, 255, 255, 0.16);
-  border-color: rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.13);
+  border-color: rgba(255, 153, 51, 0.55);
+  box-shadow: 0 0 0 3px rgba(255, 153, 51, 0.12);
+  max-width: 520px;
 }
 
 .search-icon {
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(255, 255, 255, 0.55);
   flex: none;
+  transition: color var(--dur-base) ease;
+}
+
+.search-bar:focus-within .search-icon {
+  color: var(--tricolor-saffron);
 }
 
 .search-input {
@@ -126,7 +168,7 @@
 }
 
 .search-input::placeholder {
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(255, 255, 255, 0.45);
 }
 
 .header-spacer {
@@ -137,82 +179,8 @@
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: var(--sp-3);
   flex: none;
-}
-
-/* Role Selector */
-.role-selector-wrap {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 4px;
-  padding: 2px 6px;
-}
-
-.role-label {
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  color: rgba(255, 255, 255, 0.6);
-}
-
-.role-dropdown {
-  background: transparent;
-  color: #ffffff;
-  border: none;
-  outline: none;
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  padding: 2px 4px;
-}
-
-.role-dropdown option {
-  background: var(--color-navy-dark);
-  color: #ffffff;
-}
-
-/* Tamper Toggle */
-.tamper-toggle-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 9px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: rgba(255, 255, 255, 0.85);
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.tamper-toggle-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
-}
-
-.tamper-toggle-btn.active {
-  background: #3b1818;
-  border-color: #ef4444;
-  color: #fca5a5;
-}
-
-.tamper-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #10b981;
-}
-
-.tamper-dot.danger {
-  background: #ef4444;
-  animation: pulseDot 1.2s infinite;
 }
 
 /* Notification Bell */
@@ -221,47 +189,59 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255, 255, 255, 0.8);
+  color: rgba(255, 255, 255, 0.72);
   cursor: pointer;
-  padding: 4px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  transition: background-color var(--dur-base) ease, color var(--dur-base) ease;
+}
+
+.notification-wrap:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
 }
 
 .notification-indicator {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: 4px;
+  right: 4px;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--tricolor-saffron);
   border: 1.5px solid var(--color-navy-primary);
+  animation: pulseDot 2.4s ease-in-out infinite;
 }
 
 /* User Profile Badge */
 .user-profile {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding-left: 6px;
-  border-left: 1px solid rgba(255, 255, 255, 0.18);
+  gap: 9px;
+  padding-left: var(--sp-3);
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
 }
 
 .user-avatar {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.16);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: linear-gradient(140deg, rgba(255, 153, 51, 0.9), rgba(66, 109, 155, 0.9));
   display: flex;
   align-items: center;
   justify-content: center;
+  font-family: var(--font-mono);
   font-size: 10.5px;
-  font-weight: 700;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   color: #ffffff;
+  flex: none;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.22);
 }
 
 .user-meta {
-  line-height: 1.2;
+  line-height: 1.25;
 }
 
 .user-name {
@@ -271,26 +251,56 @@
 }
 
 .user-role-badge {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.65);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.52);
 }
 
 /* Logout Button */
 .btn-logout {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.22);
   color: rgba(255, 255, 255, 0.85);
-  height: 28px;
-  padding: 0 11px;
-  border-radius: 4px;
+  height: 30px;
+  padding: 0 13px;
+  border-radius: var(--r-sm);
   font-size: 11.5px;
   font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color var(--dur-base) ease, border-color var(--dur-base) ease;
+}
+
+.btn-logout::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: rgba(255, 255, 255, 0.14);
+  transform: scaleY(0);
+  transform-origin: bottom;
+  transition: transform var(--dur-base) var(--ease-out-expo);
 }
 
 .btn-logout:hover {
-  background: rgba(255, 255, 255, 0.12);
   color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.4);
+  border-color: rgba(255, 255, 255, 0.45);
+}
+
+.btn-logout:hover::before {
+  transform: scaleY(1);
+}
+
+@media (max-width: 860px) {
+  .brand-text,
+  .user-meta {
+    display: none;
+  }
+
+  .search-bar {
+    max-width: none;
+  }
 }

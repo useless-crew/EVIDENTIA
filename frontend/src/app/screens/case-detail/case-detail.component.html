@@ -1,27 +1,48 @@
-<div class="case-detail-view animate-fade-in">
-  <div class="state-panel" *ngIf="loading()">Loading case…</div>
+<div class="case-detail-view">
+  <!-- Loading -->
+  <div class="panel" *ngIf="loading()" aria-busy="true">
+    <div class="detail-skeleton">
+      <span class="skeleton skeleton-line" style="width: 130px; height: 13px"></span>
+      <span class="skeleton" style="width: 58%; height: 30px"></span>
+      <span class="skeleton skeleton-line" style="width: 90%"></span>
+      <span class="skeleton skeleton-line" style="width: 74%"></span>
+    </div>
+  </div>
 
-  <div class="state-panel state-error" *ngIf="!loading() && errorMessage()">
-    {{ errorMessage() }}
-    <button type="button" class="btn-secondary btn-retry" (click)="fetch()">Retry</button>
+  <!-- Error -->
+  <div class="panel" *ngIf="!loading() && errorMessage()">
+    <div class="state-block is-error">
+      <span class="state-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+      </span>
+      <span class="state-title">Could not load this case</span>
+      <span class="state-text">{{ errorMessage() }}</span>
+      <button type="button" class="btn-secondary" (click)="fetch()">Retry</button>
+    </div>
   </div>
 
   <ng-container *ngIf="!loading() && !errorMessage() && detail() as c">
     <!-- Case Header -->
-    <div class="case-header">
-      <div class="case-header-left">
-        <div class="case-badge-no font-mono">{{ c.case_number }}</div>
-        <h1 class="case-main-title">{{ c.title }}</h1>
-        <span
-          *ngIf="liveConnected()"
-          class="live-indicator"
-          title="Live updates connected — this case's document/certificate/share activity refreshes automatically"
-        >
-          <span class="live-dot"></span>Live
-        </span>
+    <header class="page-head">
+      <div class="page-head-titles">
+        <span class="page-eyebrow">{{ c.case_number }}</span>
+        <h1 class="page-title">{{ c.title }}</h1>
+        <div class="head-badges">
+          <span class="badge-status" [ngClass]="getStatusClass(c.status)">
+            {{ formatStatus(c.status) }}
+          </span>
+          <span class="head-meta">
+            {{ c.documents.length }} document{{ c.documents.length === 1 ? '' : 's' }}
+          </span>
+          <span class="head-meta">Updated {{ c.updated_at | date: 'mediumDate' }}</span>
+        </div>
       </div>
 
-      <div class="case-header-actions">
+      <div class="page-actions">
         <button type="button" class="btn-secondary" (click)="goToAccess()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
@@ -30,12 +51,7 @@
           Access Preview
         </button>
 
-        <button
-          *ngIf="canUpload()"
-          type="button"
-          class="btn-primary"
-          (click)="openUpload()"
-        >
+        <button *ngIf="canUpload()" type="button" class="btn-primary" (click)="openUpload()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
             <polyline points="17 8 12 3 7 8"></polyline>
@@ -44,84 +60,145 @@
           Upload Document
         </button>
       </div>
-    </div>
+    </header>
 
     <!-- Main Grid 2-Column Split -->
     <div class="case-layout-grid">
       <!-- Left Column: Metadata & Documents -->
       <div class="case-main-col">
         <!-- Metadata Summary Card -->
-        <div class="detail-card">
-          <div class="meta-grid">
-            <div class="meta-item">
-              <span class="meta-label">STATUS</span>
-              <span class="badge-status" [ngClass]="getStatusClass(c.status)">{{ formatStatus(c.status) }}</span>
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">CREATED</span>
-              <span class="meta-value">{{ c.created_at | date: 'mediumDate' }}</span>
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">LAST UPDATED</span>
-              <span class="meta-value">{{ c.updated_at | date: 'medium' }}</span>
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">YOUR RELATIONSHIP</span>
-              <span class="meta-value">{{ c.relationship.is_owner ? 'Owner' : (c.relationship.membership_type || 'Member') }}</span>
-            </div>
+        <section class="panel" appReveal [revealDistance]="16">
+          <div class="panel-head">
+            <h2 class="panel-title">Case Record</h2>
+            <span class="panel-hint">
+              {{ c.relationship.is_owner ? 'Owner' : (c.relationship.membership_type || 'Member') }}
+            </span>
           </div>
 
-          <div class="meta-desc-wrap" *ngIf="c.description">
-            <span class="meta-label">INCIDENT SUMMARY</span>
-            <p class="meta-desc">{{ c.description }}</p>
+          <div class="panel-body">
+            <div class="meta-list meta-grid">
+              <div class="meta-item">
+                <span class="meta-key">Status</span>
+                <span class="meta-value">
+                  <span class="badge-status" [ngClass]="getStatusClass(c.status)">
+                    {{ formatStatus(c.status) }}
+                  </span>
+                </span>
+              </div>
+              <div class="meta-item">
+                <span class="meta-key">Created</span>
+                <span class="meta-value">{{ c.created_at | date: 'mediumDate' }}</span>
+              </div>
+              <div class="meta-item">
+                <span class="meta-key">Last updated</span>
+                <span class="meta-value">{{ c.updated_at | date: 'medium' }}</span>
+              </div>
+              <div class="meta-item">
+                <span class="meta-key">Your relationship</span>
+                <span class="meta-value">
+                  {{ c.relationship.is_owner ? 'Owner' : (c.relationship.membership_type || 'Member') }}
+                </span>
+              </div>
+            </div>
+
+            <ng-container *ngIf="c.description">
+              <div class="section-rule">
+                <span class="section-rule-label">Incident summary</span>
+              </div>
+              <p class="meta-desc">{{ c.description }}</p>
+            </ng-container>
           </div>
-        </div>
+        </section>
 
         <!-- Case Documents Card -->
-        <div class="detail-card">
-          <div class="panel-header">
+        <section class="panel" appReveal [revealDelay]="0.06" [revealDistance]="16">
+          <div class="panel-head">
             <h2 class="panel-title">
-              Evidentiary Documents <span class="doc-count font-mono">· {{ c.documents.length }}</span>
+              Evidentiary Documents
+              <span class="doc-count">{{ c.documents.length }}</span>
             </h2>
-            <div class="view-toggle">
-              <button type="button" class="toggle-btn" [class.active]="viewMode === 'grid'" (click)="viewMode = 'grid'">Grid</button>
-              <button type="button" class="toggle-btn" [class.active]="viewMode === 'list'" (click)="viewMode = 'list'">List</button>
+            <div class="view-toggle" role="group" aria-label="Document layout">
+              <button
+                type="button"
+                class="toggle-btn"
+                [class.active]="viewMode === 'grid'"
+                (click)="viewMode = 'grid'"
+              >
+                Grid
+              </button>
+              <button
+                type="button"
+                class="toggle-btn"
+                [class.active]="viewMode === 'list'"
+                (click)="viewMode = 'list'"
+              >
+                List
+              </button>
             </div>
           </div>
 
-          <div class="state-panel" *ngIf="c.documents.length === 0">
-            No documents uploaded to this case yet.
+          <div class="state-block" *ngIf="c.documents.length === 0">
+            <span class="state-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                <rect x="5" y="3" width="14" height="18" rx="1.5"></rect>
+                <line x1="8.5" y1="8" x2="15.5" y2="8"></line>
+                <line x1="8.5" y1="12" x2="15.5" y2="12"></line>
+              </svg>
+            </span>
+            <span class="state-title">No documents yet</span>
+            <span class="state-text">
+              Nothing has been uploaded to this case file. Uploaded documents are fingerprinted
+              immediately and appear here.
+            </span>
+            <button *ngIf="canUpload()" type="button" class="btn-secondary" (click)="openUpload()">
+              Upload Document
+            </button>
           </div>
 
           <!-- Documents Grid -->
-          <div class="docs-grid" [class.list-view]="viewMode === 'list'" *ngIf="c.documents.length > 0">
-            <div *ngFor="let doc of c.documents" class="doc-card" (click)="openDoc(doc)">
+          <div
+            class="docs-grid"
+            [class.list-view]="viewMode === 'list'"
+            *ngIf="c.documents.length > 0"
+          >
+            <article
+              *ngFor="let doc of c.documents"
+              class="doc-card"
+              tabindex="0"
+              [class.is-tampered]="doc.status === 'TAMPERED'"
+              (click)="openDoc(doc)"
+              (keydown.enter)="openDoc(doc)"
+            >
               <div class="doc-preview-canvas doc-canvas-bg">
-                <span class="doc-kind-badge font-mono">{{ doc.document_type }}</span>
+                <span class="doc-kind-badge">{{ doc.document_type }}</span>
+                <span class="doc-open-hint" aria-hidden="true">Open →</span>
               </div>
               <div class="doc-info">
                 <div class="doc-name" [title]="doc.filename">{{ doc.filename }}</div>
                 <div class="doc-status-row">
-                  <span class="doc-status-dot" [style.background-color]="getDotColor(doc.status)"></span>
+                  <span
+                    class="doc-status-dot"
+                    [style.background-color]="getDotColor(doc.status)"
+                  ></span>
                   <span class="doc-status-label" [ngClass]="getDocBadgeClass(doc.status)">
                     {{ doc.status === 'TAMPERED' ? 'Integrity Failure' : 'Active' }}
                   </span>
                 </div>
-                <div class="doc-by-label font-mono">{{ doc.sha256_hash.slice(0, 16) }}…</div>
+                <div class="doc-hash">{{ doc.sha256_hash.slice(0, 16) }}…</div>
               </div>
-            </div>
+            </article>
           </div>
-        </div>
+        </section>
       </div>
 
       <!-- Right Column: Case Timeline & Involved Parties -->
       <div class="case-side-col">
         <!-- Case Timeline Card -->
-        <div class="detail-card">
-          <div class="panel-header">
+        <section class="panel" appReveal [revealDelay]="0.1" [revealDistance]="16">
+          <div class="panel-head">
             <h2 class="panel-title">Case Timeline</h2>
           </div>
-          <div class="timeline-container">
+          <div class="timeline-container" *ngIf="c.timeline.length > 0">
             <div *ngFor="let t of c.timeline; let last = last" class="timeline-step">
               <div class="step-axis">
                 <span class="step-dot" [class.latest]="last"></span>
@@ -129,31 +206,38 @@
               </div>
               <div class="step-body">
                 <div class="step-text">{{ t.summary }}</div>
-                <div class="step-time font-mono">{{ t.timestamp | date: 'medium' }}</div>
+                <div class="step-time">{{ t.timestamp | date: 'medium' }}</div>
               </div>
             </div>
-            <div class="state-panel" *ngIf="c.timeline.length === 0">No timeline events yet.</div>
           </div>
-        </div>
+          <div class="state-block state-block-compact" *ngIf="c.timeline.length === 0">
+            <span class="state-text">No timeline events yet.</span>
+          </div>
+        </section>
 
         <!-- Involved Parties Card -->
-        <div class="detail-card">
-          <div class="panel-header">
+        <section class="panel" appReveal [revealDelay]="0.14" [revealDistance]="16">
+          <div class="panel-head">
             <h2 class="panel-title">Involved Parties</h2>
+            <span class="panel-hint" *ngIf="c.involved_parties.length > 0">
+              {{ c.involved_parties.length }}
+            </span>
           </div>
-          <div class="parties-list">
+          <div class="parties-list" *ngIf="c.involved_parties.length > 0">
             <div *ngFor="let p of c.involved_parties" class="party-row">
-              <div class="party-avatar" style="border-left-color: #426d9b">
+              <span class="party-avatar" aria-hidden="true">
                 {{ p.display_name.slice(0, 2).toUpperCase() }}
-              </div>
-              <div class="party-info">
-                <div class="party-name">{{ p.display_name }}</div>
-                <div class="party-role">{{ p.party_type }}</div>
-              </div>
+              </span>
+              <span class="party-info">
+                <span class="party-name">{{ p.display_name }}</span>
+                <span class="party-role">{{ p.party_type }}</span>
+              </span>
             </div>
-            <div class="state-panel" *ngIf="c.involved_parties.length === 0">No involved parties recorded.</div>
           </div>
-        </div>
+          <div class="state-block state-block-compact" *ngIf="c.involved_parties.length === 0">
+            <span class="state-text">No involved parties recorded.</span>
+          </div>
+        </section>
       </div>
     </div>
   </ng-container>

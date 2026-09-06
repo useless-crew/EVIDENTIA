@@ -36,13 +36,13 @@
         <div class="form-row">
           <div class="form-group">
             <label class="form-label">ROLE</label>
-            <select class="form-input" [(ngModel)]="role" name="role" [disabled]="submitting()">
+            <select class="form-select" [(ngModel)]="role" name="role" [disabled]="submitting()">
               <option *ngFor="let r of roles" [value]="r">{{ r }}</option>
             </select>
           </div>
           <div class="form-group">
             <label class="form-label">STATUS</label>
-            <select class="form-input" [(ngModel)]="active" name="active" [disabled]="submitting()">
+            <select class="form-select" [(ngModel)]="active" name="active" [disabled]="submitting()">
               <option [ngValue]="true">Active</option>
               <option [ngValue]="false">Inactive</option>
             </select>

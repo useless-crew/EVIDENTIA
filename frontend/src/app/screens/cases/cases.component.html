@@ -1,100 +1,171 @@
-<div class="cases-view animate-fade-in">
+<div class="cases-view">
   <!-- Header Bar -->
-  <div class="cases-header">
-    <div>
-      <h1 class="cases-title">Case Registry</h1>
-      <p class="cases-subtitle">Official investigative files &amp; forensic dockets</p>
+  <header class="page-head">
+    <div class="page-head-titles">
+      <span class="page-eyebrow">Registry</span>
+      <h1 class="page-title">Case Registry</h1>
+      <p class="page-subtitle">Official investigative files &amp; forensic dockets</p>
     </div>
 
-    <button
-      *ngIf="dms.role() === 'Police' || dms.role() === 'Admin'"
-      type="button"
-      class="btn-primary"
-      (click)="openCreate()"
-    >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <line x1="12" y1="5" x2="12" y2="19"></line>
-        <line x1="5" y1="12" x2="19" y2="12"></line>
-      </svg>
-      New Case
-    </button>
-  </div>
+    <div class="page-actions">
+      <button
+        *ngIf="dms.role() === 'Police' || dms.role() === 'Admin'"
+        type="button"
+        class="btn-primary"
+        (click)="openCreate()"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+        New Case
+      </button>
+    </div>
+  </header>
 
   <!-- Main Table Container -->
-  <div class="cases-card">
+  <div class="panel cases-panel">
     <!-- Filter Bar -->
-    <div class="filter-bar">
-      <div class="search-field">
+    <div class="toolbar">
+      <div class="field field-grow">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="11" cy="11" r="8"></circle>
           <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
         </svg>
         <input
           type="text"
-          placeholder="Search by title..."
-          class="filter-input"
+          placeholder="Search by title…"
+          class="field-input"
           [value]="searchTerm()"
           (input)="onSearchInput($any($event.target).value)"
         />
       </div>
 
-      <select class="filter-pill status-select" [value]="statusFilter()" (change)="onStatusChange($any($event.target).value)">
+      <select
+        class="select select-sm"
+        [value]="statusFilter()"
+        (change)="onStatusChange($any($event.target).value)"
+      >
         <option value="">Status: Any</option>
         <option *ngFor="let s of statuses" [value]="s">{{ formatStatus(s) }}</option>
       </select>
 
-      <div class="filter-spacer"></div>
+      <div class="toolbar-spacer"></div>
 
-      <span class="result-count font-mono" *ngIf="result() as r">{{ r.cases.length }} of {{ r.meta.total }} results</span>
+      <span class="toolbar-count" *ngIf="result() as r">
+        {{ r.cases.length }} of {{ r.meta.total }} results
+      </span>
     </div>
 
-    <!-- Loading -->
-    <div class="state-panel" *ngIf="loading()">Loading cases…</div>
+    <!-- Loading: shaped skeleton rows so the table does not jump on arrival -->
+    <div *ngIf="loading()" class="skeleton-stack" aria-busy="true" aria-label="Loading cases">
+      <div class="skeleton-row cases-cols" *ngFor="let row of skeletonRows">
+        <span class="skeleton skeleton-line" style="width: 72%"></span>
+        <span class="skeleton skeleton-line" style="width: 88%"></span>
+        <span class="skeleton skeleton-line" style="width: 60%"></span>
+        <span class="skeleton skeleton-line" style="width: 76%"></span>
+      </div>
+    </div>
 
     <!-- Error -->
-    <div class="state-panel state-error" *ngIf="!loading() && errorMessage()">
-      {{ errorMessage() }}
-      <button type="button" class="btn-secondary btn-retry" (click)="fetch()">Retry</button>
+    <div class="state-block is-error" *ngIf="!loading() && errorMessage()">
+      <span class="state-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+      </span>
+      <span class="state-title">Could not load the registry</span>
+      <span class="state-text">{{ errorMessage() }}</span>
+      <button type="button" class="btn-secondary" (click)="fetch()">Retry</button>
     </div>
 
     <!-- Empty -->
-    <div class="state-panel" *ngIf="!loading() && !errorMessage() && result() && result()!.cases.length === 0">
-      No cases found. {{ dms.role() === 'Police' || dms.role() === 'Admin' ? 'Create one to get started.' : '' }}
+    <div
+      class="state-block"
+      *ngIf="!loading() && !errorMessage() && result() && result()!.cases.length === 0"
+    >
+      <span class="state-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+        </svg>
+      </span>
+      <span class="state-title">No cases found</span>
+      <span class="state-text">
+        {{ dms.role() === 'Police' || dms.role() === 'Admin'
+          ? 'Nothing matches the current filters. Create a case file to get started.'
+          : 'Nothing matches the current filters.' }}
+      </span>
+      <button
+        *ngIf="dms.role() === 'Police' || dms.role() === 'Admin'"
+        type="button"
+        class="btn-secondary"
+        (click)="openCreate()"
+      >
+        New Case
+      </button>
     </div>
 
     <ng-container *ngIf="!loading() && !errorMessage() && result() && result()!.cases.length > 0">
       <!-- Table Header -->
-      <div class="table-header">
-        <span class="col-caseno">CASE NO.</span>
-        <span class="col-title">TITLE</span>
-        <span class="col-status">STATUS</span>
-        <span class="col-updated">LAST UPDATED</span>
+      <div class="data-head cases-cols">
+        <span>Case No.</span>
+        <span>Title</span>
+        <span>Status</span>
+        <span>Last Updated</span>
       </div>
 
       <!-- Table Rows -->
-      <div class="table-body">
-        <div *ngFor="let c of result()!.cases" class="table-row" (click)="openCase(c)">
-          <span class="col-caseno font-mono case-no-link">{{ c.case_number }}</span>
-          <span class="col-title case-title-text">{{ c.title }}</span>
-          <span class="col-status">
+      <div class="table-body" appReveal revealStagger=".data-row" [revealDistance]="12">
+        <div
+          *ngFor="let c of result()!.cases"
+          class="data-row cases-cols"
+          tabindex="0"
+          (click)="openCase(c)"
+          (keydown.enter)="openCase(c)"
+        >
+          <span class="cell-mono cell-link">{{ c.case_number }}</span>
+          <span class="cell-strong case-title-text">{{ c.title }}</span>
+          <span>
             <span class="badge-status" [ngClass]="getStatusClass(c.status)">
               {{ formatStatus(c.status) }}
             </span>
           </span>
-          <span class="col-updated">{{ c.updated_at | date: 'medium' }}</span>
+          <span class="cell-muted">{{ c.updated_at | date: 'medium' }}</span>
         </div>
       </div>
 
       <!-- Pagination Footer -->
-      <div class="pagination-footer" *ngIf="result()!.meta.total_pages > 1">
-        <span class="page-count">Page {{ result()!.meta.page }} of {{ result()!.meta.total_pages }}</span>
-        <div class="page-buttons">
-          <button type="button" class="btn-page" [class.disabled]="page() <= 1" (click)="goToPage(page() - 1)">Prev</button>
-          <button type="button" class="btn-page" [class.disabled]="page() >= result()!.meta.total_pages" (click)="goToPage(page() + 1)">Next</button>
+      <div class="pagination" *ngIf="result()!.meta.total_pages > 1">
+        <span class="pagination-count">
+          Page {{ result()!.meta.page }} of {{ result()!.meta.total_pages }}
+        </span>
+        <div class="pagination-buttons">
+          <button
+            type="button"
+            class="btn-page"
+            [class.disabled]="page() <= 1"
+            (click)="goToPage(page() - 1)"
+          >
+            Prev
+          </button>
+          <button
+            type="button"
+            class="btn-page"
+            [class.disabled]="page() >= result()!.meta.total_pages"
+            (click)="goToPage(page() + 1)"
+          >
+            Next
+          </button>
         </div>
       </div>
     </ng-container>
   </div>
 </div>
 
-<app-create-case-modal *ngIf="createOpen()" (closed)="createOpen.set(false)" (created)="onCaseCreated($event)"></app-create-case-modal>
+<app-create-case-modal
+  *ngIf="createOpen()"
+  (closed)="createOpen.set(false)"
+  (created)="onCaseCreated($event)"
+></app-create-case-modal>

@@ -1,80 +1,117 @@
 .faq-list {
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--color-border);
 }
 
 .faq-item {
   border-bottom: 1px solid var(--color-border);
-  transition: background-color 0.25s ease;
+  transition: border-color var(--dur-base) ease;
+}
+
+.faq-item:first-child {
+  border-top: 1px solid var(--color-border);
 }
 
 .faq-item.open {
-  background: rgba(245, 246, 248, 0.6);
+  border-color: rgba(66, 109, 155, 0.35);
 }
 
+/* ==========================================================================
+   Question row
+   ========================================================================== */
 .faq-header {
-  width: 100%;
-  background: none;
-  border: none;
-  padding: 20px 12px;
-  border-radius: 6px;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--sp-4);
+  width: 100%;
   text-align: left;
+  background: transparent;
+  border: none;
+  padding: var(--sp-5) var(--sp-4) var(--sp-5) 0;
+  font-family: inherit;
   cursor: pointer;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition: padding-left var(--dur-base) var(--ease-out-expo);
 }
 
-.faq-header:hover {
-  background: var(--color-section-alt);
+/* Accent rule that slides in from the left on hover and stays while open */
+.faq-header::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  translate: 0 -50%;
+  width: 2px;
+  height: 46%;
+  background: var(--tricolor-saffron);
+  transform: scaleY(0);
+  transition: transform var(--dur-base) var(--ease-out-expo);
+}
+
+.faq-header:hover,
+.faq-item.open .faq-header {
+  padding-left: var(--sp-4);
+}
+
+.faq-header:hover::before,
+.faq-item.open .faq-header::before {
+  transform: scaleY(1);
 }
 
 .faq-question {
-  font: 600 15px/1.4 var(--font-sans);
+  font-size: clamp(15px, 1.4vw, 17px);
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: -0.005em;
   color: var(--color-text-primary);
+  min-width: 0;
 }
 
-.faq-header:hover .faq-question {
+.faq-item.open .faq-question {
   color: var(--color-navy-primary);
 }
 
 .faq-icon-svg {
   flex: none;
-  color: var(--color-text-secondary);
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), stroke 0.2s ease;
-}
-
-.faq-header:hover .faq-icon-svg {
-  stroke: var(--color-accent-blue);
+  color: var(--color-text-muted);
+  transition: rotate var(--dur-base) var(--ease-out-expo), color var(--dur-base) ease;
 }
 
 .faq-icon-svg.rotated {
-  transform: rotate(180deg);
-  stroke: var(--color-navy-primary);
+  rotate: 180deg;
+  color: var(--color-accent-blue);
 }
 
+/* ==========================================================================
+   Answer
+   ========================================================================== */
 .faq-answer-container {
-  padding: 0 12px 20px;
-  animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  padding: 0 var(--sp-6) var(--sp-5) var(--sp-4);
+  /* Height is not animatable from a *ngIf, so the reveal is a fade + rise */
+  animation: faqReveal 0.34s var(--ease-out-expo);
 }
 
-@keyframes fadeIn {
+@keyframes faqReveal {
   from {
     opacity: 0;
     transform: translateY(-6px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 
 .faq-answer {
-  font: 400 14.5px/1.65 var(--font-sans);
+  font-size: 14px;
+  line-height: 1.72;
   color: var(--color-text-secondary);
-  max-width: 740px;
+  max-width: 72ch;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .faq-answer-container {
+    animation: none;
+  }
+}

@@ -353,6 +353,13 @@
   align-items: start;
 }
 
+/* Grid children default to min-width:auto, which lets the card grid inside
+   .split-main push the whole row wider than the shell. */
+.split-aside,
+.split-main {
+  min-width: 0;
+}
+
 .split-aside-inner {
   position: sticky;
   top: 120px;
