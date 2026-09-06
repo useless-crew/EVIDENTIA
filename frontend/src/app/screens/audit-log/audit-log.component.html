@@ -142,50 +142,52 @@
     </div>
 
     <ng-container *ngIf="!loading() && !errorMessage() && entries().length > 0">
-      <div class="data-head audit-cols">
-        <span>Timestamp</span>
-        <span>Role</span>
-        <span>Action</span>
-        <span>Resource</span>
-        <span>Seq</span>
-      </div>
+      <div class="audit-table-scroll-wrap">
+        <div class="data-head audit-cols">
+          <span>Timestamp</span>
+          <span>Role</span>
+          <span>Action</span>
+          <span>Resource</span>
+          <span>Seq</span>
+        </div>
 
-      <div class="audit-table-body">
-        <div *ngFor="let row of entries()" class="audit-row-group">
-          <div
-            class="data-row audit-cols"
-            tabindex="0"
-            [class.is-expanded]="expandedId() === row.id"
-            (click)="toggleRow(row.id)"
-            (keydown.enter)="toggleRow(row.id)"
-          >
-            <span class="cell-mono cell-muted">{{ row.timestamp | date: 'medium' }}</span>
-            <span class="role-tag">{{ row.role || '—' }}</span>
-            <span>
-              <span class="action-tag" [ngClass]="getActionBadgeClass(row.action)">
-                {{ row.action }}
+        <div class="audit-table-body">
+          <div *ngFor="let row of entries()" class="audit-row-group">
+            <div
+              class="data-row audit-cols"
+              tabindex="0"
+              [class.is-expanded]="expandedId() === row.id"
+              (click)="toggleRow(row.id)"
+              (keydown.enter)="toggleRow(row.id)"
+            >
+              <span class="cell-mono cell-muted">{{ row.timestamp | date: 'medium' }}</span>
+              <span class="role-tag">{{ row.role || '—' }}</span>
+              <span class="col-action">
+                <span class="action-tag" [ngClass]="getActionBadgeClass(row.action)">
+                  {{ row.action }}
+                </span>
               </span>
-            </span>
-            <span class="col-resource" [title]="row.resource_type + (row.resource_id ? ' · ' + row.resource_id : '')">
-              {{ row.resource_type }}<span *ngIf="row.resource_id"> · {{ row.resource_id }}</span>
-            </span>
-            <span class="cell-mono cell-muted">#{{ row.seq }}</span>
-          </div>
-
-          <!-- Expandable Cryptographic Details Drawer -->
-          <div *ngIf="expandedId() === row.id" class="audit-details-drawer animate-fade-in">
-            <div class="drawer-grid">
-              <div class="meta-item">
-                <span class="meta-key">Entry hash (SHA-256)</span>
-                <span class="hash-chip">{{ row.hash }}</span>
-              </div>
-              <div class="meta-item" *ngIf="row.prev_hash">
-                <span class="meta-key">Previous entry hash (parent link)</span>
-                <span class="hash-chip prev-hash">{{ row.prev_hash }}</span>
-              </div>
+              <span class="col-resource" [title]="row.resource_type + (row.resource_id ? ' · ' + row.resource_id : '')">
+                {{ row.resource_type }}<span *ngIf="row.resource_id"> · {{ row.resource_id }}</span>
+              </span>
+              <span class="cell-mono cell-muted">#{{ row.seq }}</span>
             </div>
-            <div class="drawer-meta">
-              User {{ row.user_id || 'system' }}<span *ngIf="row.case_id"> · Case {{ row.case_id }}</span>
+
+            <!-- Expandable Cryptographic Details Drawer -->
+            <div *ngIf="expandedId() === row.id" class="audit-details-drawer animate-fade-in">
+              <div class="drawer-grid">
+                <div class="meta-item">
+                  <span class="meta-key">Entry hash (SHA-256)</span>
+                  <span class="hash-chip">{{ row.hash }}</span>
+                </div>
+                <div class="meta-item" *ngIf="row.prev_hash">
+                  <span class="meta-key">Previous entry hash (parent link)</span>
+                  <span class="hash-chip prev-hash">{{ row.prev_hash }}</span>
+                </div>
+              </div>
+              <div class="drawer-meta">
+                User {{ row.user_id || 'system' }}<span *ngIf="row.case_id"> · Case {{ row.case_id }}</span>
+              </div>
             </div>
           </div>
         </div>

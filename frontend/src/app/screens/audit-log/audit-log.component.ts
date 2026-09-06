@@ -160,10 +160,10 @@ export class AuditLogComponent implements OnInit, OnDestroy {
 
   getActionBadgeClass(action: string): string {
     const a = (action || '').toUpperCase();
+    if (a.includes('DENIED') || a.includes('FAILURE') || a.includes('FAILED')) return 'action-denied';
     if (a.includes('UPLOAD')) return 'action-upload';
     if (a.includes('VERIF')) return 'action-verify';
     if (a.includes('REDACT')) return 'action-redact';
-    if (a.includes('DENIED') || a.includes('FAILURE') || a.includes('FAILED')) return 'action-denied';
     if (a.includes('VIEW') || a.includes('DOWNLOAD') || a.includes('ACCESS')) return 'action-view';
     if (a.includes('STATUS') || a.includes('ROLE') || a.includes('CREATED') || a.includes('UPDATED')) return 'action-status';
     return 'action-default';

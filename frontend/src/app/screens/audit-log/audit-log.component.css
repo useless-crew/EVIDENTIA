@@ -175,13 +175,21 @@
 /* ==========================================================================
    Ledger table
    ========================================================================== */
+.audit-table-scroll-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .audit-cols {
+  min-width: 860px;
   grid-template-columns:
-    minmax(140px, 0.9fr)
-    minmax(120px, 1fr)
-    minmax(96px, 0.6fr)
-    minmax(120px, 0.8fr)
-    minmax(160px, 1.6fr);
+    minmax(170px, 1.2fr)
+    minmax(90px, 0.6fr)
+    minmax(310px, 2.2fr)
+    minmax(240px, 1.8fr)
+    minmax(70px, 0.4fr);
+  align-items: center;
 }
 
 .audit-table-body {
@@ -224,18 +232,27 @@
   color: var(--color-text-secondary);
 }
 
+.col-action {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
 .action-tag {
   display: inline-flex;
   align-items: center;
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   border-radius: 4px;
   padding: 3px 8px;
   border: 1px solid transparent;
   white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .action-upload,
