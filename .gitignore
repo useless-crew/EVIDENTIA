@@ -12,6 +12,7 @@ bin/
 tmp/
 backend/bin/
 backend/tmp/
+*.exe
 
 # Test coverage
 coverage.out
