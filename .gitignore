@@ -36,6 +36,10 @@ backend/docs/swagger/swagger.yaml
 !backend/certs/README.md
 secrets/
 
+# Backups (System 17 — scripts/backup.sh output): case/document metadata,
+# audit history, and evidence objects, never appropriate to commit.
+/backups/
+
 # ---- Frontend (Angular, rooted at frontend/) ----
 
 # Compiled output

@@ -1,0 +1,45 @@
+# Evidentia — Local Development Convenience Ports (System 17)
+#
+# Auto-loaded by `docker compose up`/`build`/etc. whenever no `-f`/`--file`
+# flag is given — this is standard Docker Compose behavior (it always
+# looks for docker-compose.yml + docker-compose.override.yml together by
+# default), not a custom mechanism this repository invented. It exists
+# SOLELY to publish host ports for local development convenience
+# (`curl localhost:8080/health`, connecting a DB client to
+# localhost:5432, etc.) — every port here is either loopback-only or,
+# for the backend API, the one port meant to be reached directly in
+# local dev (there is no reverse proxy running by default — see
+# docker-compose.prod.yml for the deployment that has one).
+#
+# The production overlay (docker-compose.prod.yml) is used via EXPLICIT
+# `-f docker-compose.yml -f docker-compose.prod.yml`, which does NOT
+# auto-load this file — production has no reason to publish any of these
+# ports (postgres/redis/minio should never be reachable outside the
+# deployment; the backend is reached only via docker-compose.prod.yml's
+# reverse-proxy). This split exists because Compose merges a
+# re-specified `ports:` list as a UNION across files, never a
+# replacement — an override cannot "remove" a port the base file
+# published, so the base file (docker-compose.yml) now publishes none at
+# all, and this file is the only place local-dev convenience ports live.
+
+services:
+  backend:
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+
+  frontend:
+    ports:
+      - "${FRONTEND_PORT:-4200}:4200"
+
+  postgres:
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+
+  minio:
+    ports:
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+
+  redis:
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"

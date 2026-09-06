@@ -1,0 +1,287 @@
+# Evidentia — Production-Like Deployment Overlay (System 17)
+#
+# An OVERLAY, not a standalone file: it extends docker-compose.yml (which
+# already defines postgres/redis/minio/backend with healthchecks,
+# persistent volumes, and loopback-only infrastructure ports — System 15)
+# rather than duplicating it. Compose merges the two in order, so run
+# BOTH files together:
+#
+#   export COMPOSE_PROFILES=frontend   # activates the base file's
+#                                       # profile-gated `frontend` service
+#                                       # — see that service's own comment
+#                                       # below for why an override alone
+#                                       # cannot do this.
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml build
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# See docs/DEPLOYMENT.md's "Production-like deployment" section for the
+# full walkthrough (TLS certs, environment, smoke test).
+#
+# What this overlay adds on top of the base file:
+#   - reverse-proxy: the ONE service that publishes a host port (80/443).
+#     TLS termination, HTTP->HTTPS redirect, SSE-aware proxying — see
+#     ops/reverse-proxy/nginx.conf.template.
+#   - frontend: the real Angular production build (frontend/Dockerfile),
+#     replacing the base file's unbuilt placeholder profile.
+#   - worker: the Asynq background worker as its OWN container (cmd/
+#     worker) — independently restartable/scalable from the API, unlike
+#     the base file's combined process. See cmd/server/main.go's
+#     DISABLE_EMBEDDED_WORKER doc comment: `backend` below sets that flag
+#     so the two never redundantly consume the same queue.
+#   - migrate: a one-shot init service (golang-migrate via cmd/migrate)
+#     that must complete successfully before `backend`/`worker` start —
+#     migrations are never run by hand against a production database.
+#   - postgres/redis/minio: host ports removed entirely (the base file
+#     already binds them to 127.0.0.1 only; this overlay removes even
+#     that, since a real deployment's host may not be single-tenant).
+#   - Resource limits (mem_limit/cpus) — see docs/DEPLOYMENT.md's
+#     "Resource limits" section for the reasoning behind each value; they
+#     are inspection-based starting points, not load-tested guarantees.
+
+services:
+  migrate:
+    build:
+      context: ./backend
+    # Schema migrations, then the fixed reference-data seed (roles/
+    # permissions — internal/bootstrap.EnsureBootstrapAdmin below cannot
+    # create the ADMIN account without the ADMIN role already existing).
+    # Both are idempotent, so re-running this service (e.g. redeploying
+    # an already-migrated/seeded database) is always safe.
+    entrypoint: ["sh", "-c"]
+    command: ["/app/migrate up && /app/migrate seed"]
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: ${POSTGRES_DB:-evidentia}
+      DATABASE_SSLMODE: disable
+      # The schema-owning superuser (see docs/DATABASE_SCHEMA.md) — NOT
+      # evidentia_app, which this migration itself creates/grants.
+      DATABASE_MIGRATOR_USER: ${POSTGRES_USER:-evidentia}
+      DATABASE_MIGRATOR_PASSWORD: ${POSTGRES_PASSWORD:-changeme_example}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # One-shot: must never restart-loop just because the LAST run already
+    # applied everything (golang-migrate's ErrNoChange is treated as
+    # success — see cmd/migrate's own doc comment) or because a genuine
+    # migration error needs an operator to look at logs, not a silent
+    # infinite retry.
+    restart: "no"
+    # backend/Dockerfile's own HEALTHCHECK (an HTTP GET against the
+    # SERVER's /health) is baked into the image regardless of which
+    # entrypoint a service overrides to — meaningless for this one-shot,
+    # non-HTTP command, so disabled explicitly rather than left to
+    # (correctly, but confusingly) never pass.
+    healthcheck:
+      disable: true
+    mem_limit: 128m
+    cpus: 0.5
+    networks:
+      - internal
+
+  backend:
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      # See cmd/server/main.go's doc comment: the separate `worker`
+      # service below handles System 11's background jobs in production;
+      # `backend` must not ALSO run one, or the two would redundantly
+      # compete for the same Asynq queue.
+      DISABLE_EMBEDDED_WORKER: "true"
+      # A real deployment terminates TLS at the reverse-proxy container
+      # (see ops/reverse-proxy/) — trust exactly that one hop for
+      # ClientIP() (request logging, the System 15 login throttle), never
+      # a wildcard. ${PROD_NETWORK_SUBNET} is this file's own `internal`
+      # network below, not a value you need to look up elsewhere.
+      TRUSTED_PROXIES: ${PROD_NETWORK_SUBNET:-172.28.0.0/16}
+    # No `ports:` published — docker-compose.yml itself no longer
+    # publishes one either (see that file's own comment on `backend`),
+    # and this deployment never loads docker-compose.override.yml (which
+    # does). Only the reverse proxy below is reachable from outside this
+    # deployment.
+    mem_limit: 512m
+    cpus: "1.0"
+    networks:
+      - internal
+
+  worker:
+    build:
+      context: ./backend
+    entrypoint: ["/app/worker"]
+    # Same configuration surface as `backend` — internal/config.Load is
+    # one monolithic validation pass (see internal/app.New), so every
+    # variable it requires must be present even though this process only
+    # exercises the audit/database/redis-related subset of it. Kept as an
+    # explicit, self-contained block rather than a YAML anchor shared
+    # with `backend`: Compose parses each `-f` file independently before
+    # merging, so an anchor defined in docker-compose.yml is not visible
+    # here in docker-compose.prod.yml.
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      APP_NAME: evidentia-worker
+      APP_VERSION: ${APP_VERSION:-dev}
+
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USER: evidentia_app
+      DATABASE_PASSWORD: changeme_example
+      DATABASE_NAME: ${POSTGRES_DB:-evidentia}
+      DATABASE_SSLMODE: disable
+
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-changeme_example}
+
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-evidentia_minio}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-changeme_example}
+      MINIO_USE_SSL: "false"
+      MINIO_BUCKET: ${MINIO_BUCKET:-evidentia-documents}
+
+      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-52428800}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost}
+
+      JWT_ISSUER: ${JWT_ISSUER:-evidentia-api}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-evidentia-client}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-168h}
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-changeme_example_jwt_signing_key_pad_to_32}
+      BCRYPT_COST: ${BCRYPT_COST:-12}
+
+      CERTIFICATE_SIGNING_KEY: ${CERTIFICATE_SIGNING_KEY:-}
+
+      # The worker never runs bootstrap (only cmd/server does — see
+      # cmd/worker/main.go's doc comment), but internal/config.Load
+      # itself doesn't require these, so leaving them unset here is fine.
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    # Same reasoning as `migrate` above — this image's baked-in
+    # HEALTHCHECK targets the HTTP server's /health, which this
+    # entrypoint never serves.
+    healthcheck:
+      disable: true
+    mem_limit: 256m
+    cpus: "0.5"
+    networks:
+      - internal
+
+  frontend:
+    build:
+      context: ./frontend
+    # Overrides the base file's placeholder (port 4200, no Dockerfile)
+    # entirely: the real production build, reachable only through the
+    # reverse proxy. The base file gates this service behind the
+    # "frontend" Compose profile (so a backend-only local dev session
+    # skips it) — Compose merges `profiles:` as a UNION across files, so
+    # an override cannot clear it; every production command in
+    # docs/DEPLOYMENT.md instead sets COMPOSE_PROFILES=frontend (or
+    # --profile frontend) to activate it. Forgetting that flag is exactly
+    # the same depends_on error `docker compose config` gives at the
+    # bottom of this file's own doc comment. No `ports:` published —
+    # same reasoning as `backend` above; reachable only through the
+    # reverse proxy. No `healthcheck:` override either — frontend/
+    # Dockerfile already defines an equivalent one (which Compose would
+    # only replace, not add to).
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: "0.5"
+    networks:
+      - internal
+
+  reverse-proxy:
+    image: nginxinc/nginx-unprivileged:1.27-alpine
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    environment:
+      PUBLIC_HTTPS_PORT: ${HTTPS_PORT:-443}
+      NGINX_CLIENT_MAX_BODY_SIZE: ${NGINX_CLIENT_MAX_BODY_SIZE:-55m}
+      # Limits envsubst-on-startup templating to exactly these two names
+      # — never nginx's own runtime "$host"/"$remote_addr"-style
+      # variables, which use the identical ${VAR}/$VAR syntax in the
+      # template file (see ops/reverse-proxy/nginx.conf.template's doc
+      # comment).
+      NGINX_ENVSUBST_FILTER: "^(PUBLIC_HTTPS_PORT|NGINX_CLIENT_MAX_BODY_SIZE)$$"
+    volumes:
+      - ./ops/reverse-proxy/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./backend/certs:/etc/nginx/certs:ro
+    ports:
+      - "${HTTP_PORT:-80}:8080"
+      - "${HTTPS_PORT:-443}:8443"
+    healthcheck:
+      # 127.0.0.1, not localhost — see frontend/Dockerfile's identical
+      # comment: this image's IPv6 loopback resolves first but nginx
+      # only listens on IPv4, so "localhost" spuriously fails here.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: "0.5"
+    networks:
+      - internal
+
+  postgres:
+    mem_limit: 512m
+    networks:
+      - internal
+
+  redis:
+    # noeviction (not the redis image's own default, which is
+    # noeviction already for a server with no maxmemory set — set
+    # explicitly here alongside a real maxmemory ceiling): Asynq's
+    # enqueued-but-not-yet-processed audit-verification jobs live in
+    # Redis. Evicting keys under memory pressure (allkeys-lru etc.) would
+    # silently DROP a queued job; refusing new writes instead (returning
+    # an error Asynq surfaces/retries) is the only safe policy for a
+    # queue, never silent data loss.
+    command: redis-server --requirepass ${REDIS_PASSWORD:-changeme_example} --maxmemory 256mb --maxmemory-policy noeviction
+    mem_limit: 320m
+    networks:
+      - internal
+
+  minio:
+    # No S3 API port published (never needed outside this deployment —
+    # every download streams through the backend). The console port is
+    # OPTIONAL and commented out below by design: this repository does
+    # not decide for you whether your deployment needs interactive MinIO
+    # administration. To enable it for a demo, uncomment the two lines
+    # below — loopback-only, NOT a public production endpoint even then
+    # (see docs/DEPLOYMENT.md's "MinIO console access" note).
+    # ports:
+    #   - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    mem_limit: 512m
+    networks:
+      - internal
+
+networks:
+  # A fixed subnet so TRUSTED_PROXIES (above) can name it precisely
+  # instead of trusting an unpredictable auto-assigned range. Every
+  # service in this deployment is a container Evidentia itself defines —
+  # there is no untrusted third party on this network that a fixed,
+  # documented subnet would expose anything to.
+  internal:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

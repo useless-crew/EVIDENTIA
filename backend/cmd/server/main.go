@@ -82,19 +82,27 @@ func startup(ctx context.Context) (*app.App, error) {
 }
 
 // run serves both the HTTP API and System 11's Asynq worker from this ONE
-// process/binary — there is no separate "worker" deployment unit in this
-// project's docker-compose (see docker-compose.yml: postgres/redis/minio/
-// backend, nothing else), and audit-chain verification's own workload
-// (a handful of sequential batched reads against the same PostgreSQL pool
+// process/binary by default — audit-chain verification's own workload (a
+// handful of sequential batched reads against the same PostgreSQL pool
 // the HTTP server already shares) does not warrant the operational
 // complexity of a second container/binary just to run asynq.Server.Run in
-// its own process. A future system with a genuinely different scaling
-// profile can still introduce `cmd/worker` later without this file's
-// HTTP-serving half needing to change at all — jobs.NewServer/NewMux take
-// no dependency on httpserver or vice versa.
+// its own process, so this remains the default for local development and
+// the base docker-compose.yml.
+//
+// System 17 (production deployment): docker-compose.prod.yml runs a
+// SEPARATE `worker` service (cmd/worker — the exact same
+// jobs.NewServer/NewMux construction as below, zero duplicated business
+// logic) for independent restart/scaling/failure isolation, and sets
+// DISABLE_EMBEDDED_WORKER=true on the `api` service so the two never
+// redundantly compete for the same Asynq queue. Reading the raw env var
+// here rather than threading it through internal/config is deliberate:
+// this is a deployment-TOPOLOGY switch (which process runs the worker),
+// not application configuration.
 func run(ctx context.Context, a *app.App) {
 	router := httpserver.NewRouter(a)
 	server := httpserver.New(a.Config.Server, router)
+
+	runEmbeddedWorker := os.Getenv("DISABLE_EMBEDDED_WORKER") != "true"
 
 	redisOpt := asynq.RedisClientOpt{Addr: a.Config.Redis.Addr, Password: a.Config.Redis.Password, DB: a.Config.Redis.DB}
 	errorHandler := jobs.NewAuditVerificationErrorHandler(a.AuditService, a.Logger)
@@ -106,9 +114,6 @@ func run(ctx context.Context, a *app.App) {
 		slog.String("env", a.Config.App.Env),
 		slog.String("version", a.Config.App.Version),
 	)
-	a.Logger.Info("starting background worker",
-		slog.String("queues", fmt.Sprintf("%s=6,%s=2", jobs.QueueCritical, jobs.QueueDefault)),
-	)
 
 	serverErr := make(chan error, 1)
 	go func() {
@@ -119,10 +124,21 @@ func run(ctx context.Context, a *app.App) {
 		serverErr <- nil
 	}()
 
+	// workerErr is intentionally never sent to when runEmbeddedWorker is
+	// false — an unused receive in the select below simply never fires,
+	// which is the correct, simplest way to disable this branch without
+	// restructuring the select itself.
 	workerErr := make(chan error, 1)
-	go func() {
-		workerErr <- worker.Run(mux)
-	}()
+	if runEmbeddedWorker {
+		a.Logger.Info("starting background worker",
+			slog.String("queues", fmt.Sprintf("%s=6,%s=2", jobs.QueueCritical, jobs.QueueDefault)),
+		)
+		go func() {
+			workerErr <- worker.Run(mux)
+		}()
+	} else {
+		a.Logger.Info("embedded background worker disabled (DISABLE_EMBEDDED_WORKER=true) — expecting a separate worker process/container")
+	}
 
 	// SSEManager.Start subscribes to Redis (internal/events.Channel) and
 	// fans out to every locally-registered SSE connection until sseCtx is
@@ -163,9 +179,13 @@ func run(ctx context.Context, a *app.App) {
 	// stopping — a verification already RUNNING is allowed to reach its
 	// own next checkpoint (batch boundary) rather than being killed
 	// mid-batch, so it never leaves audit_verifications in a state neither
-	// "properly progressed" nor "properly failed".
-	worker.Shutdown()
-	a.Logger.Info("audit verification worker stopped")
+	// "properly progressed" nor "properly failed". Only called when this
+	// process actually started the worker (Shutdown on a never-Run server
+	// is undefined/unnecessary).
+	if runEmbeddedWorker {
+		worker.Shutdown()
+		a.Logger.Info("audit verification worker stopped")
+	}
 
 	// Unconditionally stop SSEManager (see sseCtx's own doc comment above
 	// for why this must not rely on ctx alone), then wait for its Redis

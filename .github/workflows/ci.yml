@@ -1,4 +1,5 @@
-# Evidentia CI — System 15 (Security Hardening & Compliance Layer)
+# Evidentia CI — System 15 (Security Hardening & Compliance Layer),
+# extended by System 17 (Production Deployment & DevOps)
 #
 # Runs the same checks docs/SECURITY.md's "Final Validation" section
 # expects a contributor to run locally before merging: gofmt, go vet, go
@@ -6,9 +7,12 @@
 # tests under backend/tests/ and *_integration_test.go require live
 # Postgres/Redis/MinIO and are intentionally NOT run here — see
 # docs/DEPLOYMENT.md for how to run those against docker-compose), plus a
-# production Angular build for the frontend. This is deliberately a
-# build/test gate, not a security scanner — see master prompt §39: "Do
-# not introduce an external security scanner unless necessary."
+# production Angular build for the frontend, plus (System 17) that both
+# production Dockerfiles still build. This is deliberately a build/test
+# gate, not a security scanner or a full deployment rehearsal — see
+# master prompt §39: "Do not introduce an external security scanner
+# unless necessary," and docs/DEPLOYMENT.md for the full docker-compose
+# validation this does not attempt to replicate in CI.
 name: CI
 
 on:
@@ -39,7 +43,7 @@ jobs:
         run: go vet ./...
 
       - name: go build
-        run: go build -trimpath -o /dev/null ./cmd/server ./cmd/migrate ./cmd/devuser
+        run: go build -trimpath -o /dev/null ./cmd/server ./cmd/worker ./cmd/migrate ./cmd/devuser
 
       - name: go test (unit only — integration tests need live infra)
         run: go test ./...
@@ -63,3 +67,15 @@ jobs:
 
       - name: Production build
         run: npm run build
+
+  docker:
+    name: Docker (build only — no compose rehearsal, see docs/DEPLOYMENT.md)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build -t evidentia-backend-ci ./backend
+
+      - name: Build frontend image
+        run: docker build -t evidentia-frontend-ci ./frontend
