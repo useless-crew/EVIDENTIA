@@ -127,21 +127,20 @@
       <section class="panel integrity-panel" appReveal [revealDelay]="0.12" [revealDistance]="18">
         <div class="panel-head">
           <h2 class="panel-title">Chain Integrity Guarantee</h2>
-          <span class="panel-hint">ED25519-01</span>
         </div>
         <div class="panel-body">
           <p class="integrity-desc">
-            Every evidentiary document is hashed on client upload and appended to the immutable
-            system chain signed by key ED25519-01.
+            Every evidence file is hashed by the backend on upload and appended to an
+            append-only, hash-chained audit ledger. Open the Audit Log to inspect entries and run
+            a full cryptographic chain verification.
           </p>
 
-          <div class="live-pill" [class.is-danger]="dms.simulateTamper()">
+          <div class="live-pill">
             <span class="live-dot" aria-hidden="true"></span>
-            <span>
-              {{ dms.simulateTamper()
-                ? 'Tampering detected on chain entry #1198'
-                : 'No integrity issues · Chain intact' }}
-            </span>
+            <span
+              (click)="goToAudit()"
+              style="cursor: pointer; text-decoration: underline; text-underline-offset: 2px;"
+            >View Audit Log →</span>
           </div>
         </div>
       </section>

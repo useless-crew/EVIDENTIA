@@ -58,8 +58,8 @@
         <button
           type="button"
           class="btn-primary"
-          disabled
-          title="Document sharing is not available yet"
+          *ngIf="canManageShares()"
+          (click)="openShareDialog()"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="18" cy="5" r="3"></circle>
@@ -276,7 +276,52 @@
             </div>
           </div>
         </section>
+
+        <!-- Sharing -->
+        <section class="panel" *ngIf="canManageShares()">
+          <div class="panel-head">
+            <h2 class="panel-title">Shared With</h2>
+          </div>
+
+          <div class="panel-body">
+            <div class="state-block is-error inline-error" *ngIf="shareActionError()">
+              <span class="state-text">{{ shareActionError() }}</span>
+            </div>
+
+            <div *ngIf="sharesLoading()" class="cert-state">Loading shares…</div>
+
+            <div *ngIf="!sharesLoading() && shares().length === 0" class="cert-state">
+              Not shared with anyone yet.
+            </div>
+
+            <div *ngIf="!sharesLoading() && shares().length > 0" class="meta-list">
+              <div class="meta-item share-item" *ngFor="let s of shares()">
+                <div class="share-item-info">
+                  <span class="meta-value">{{ s.permission }} · {{ s.effective_status }}</span>
+                  <span class="meta-key" *ngIf="s.expires_at">Expires {{ s.expires_at | date: 'medium' }}</span>
+                </div>
+                <button
+                  type="button"
+                  class="btn-secondary btn-sm"
+                  *ngIf="s.effective_status === 'ACTIVE'"
+                  [disabled]="revokingShareId() === s.share_id"
+                  (click)="revokeShare(s.share_id)"
+                >
+                  {{ revokingShareId() === s.share_id ? 'Revoking…' : 'Revoke' }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
+
+    <app-share-dialog
+      *ngIf="shareDialogOpen()"
+      [documentId]="documentId"
+      [documentFilename]="d.filename"
+      (closed)="onShareDialogClosed()"
+      (shared)="onShared($event)"
+    ></app-share-dialog>
   </ng-container>
 </div>

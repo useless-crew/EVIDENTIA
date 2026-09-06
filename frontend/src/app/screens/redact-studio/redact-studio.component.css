@@ -50,45 +50,28 @@
   color: var(--color-text-muted);
 }
 
+.canvas-scroll {
+  max-height: 640px;
+  overflow: auto;
+  background: var(--color-neutral-bg, #f4f4f5);
+}
+
 .redact-canvas {
   position: relative;
-  min-height: 500px;
-  padding: var(--sp-6);
-  overflow: hidden;
-  /* Crosshair signals the drag-to-mask interaction before any tooltip does */
+  display: inline-block;
+  /* Sized exactly to the rendered <img> below (block, no CSS scaling) so
+     on-screen mouse coordinates equal the source image's own pixel
+     coordinates — no scale-factor conversion needed before submitting a
+     region to the backend. */
   cursor: crosshair;
   user-select: none;
 }
 
-/* Simulated document underlay */
-.mock-statement-text {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 13px;
-  max-width: 720px;
-  padding: var(--sp-6) var(--sp-5);
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid var(--color-border);
-  border-radius: var(--r-sm);
-  box-shadow: var(--shadow-lg);
+.redact-source-image {
+  display: block;
+  max-width: none;
+  user-select: none;
   pointer-events: none;
-}
-
-.doc-line {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  line-height: 1.7;
-  letter-spacing: -0.01em;
-  color: var(--color-text-secondary);
-}
-
-.doc-line.bold {
-  font-weight: 700;
-  color: var(--color-text-primary);
-  padding-bottom: 9px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid var(--color-border);
 }
 
 /* Placed masks */
@@ -284,6 +267,14 @@
   margin-top: 2px;
 }
 
+.form-body {
+  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+}
+
+.inline-error {
+  padding: var(--sp-3) var(--sp-4);
+}
+
 /* ==========================================================================
    Responsive
    ========================================================================== */
@@ -292,8 +283,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .redact-canvas {
-    min-height: 400px;
-    padding: var(--sp-4);
+  .canvas-scroll {
+    max-height: 420px;
   }
 }

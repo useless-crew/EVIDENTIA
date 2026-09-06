@@ -75,6 +75,10 @@ func NewRouter(a *app.App) *gin.Engine {
 	r.GET("/health", health.Liveness(a.Config.App.Name, a.Config.App.Version))
 	r.GET("/ready", health.Readiness(a.DB, a.Cache, a.Storage))
 
+	// A no-op unless built with `-tags swaggerui` — see swagger_ui.go's
+	// doc comment.
+	registerSwaggerUI(r)
+
 	jsonBodyLimit := middleware.BodyLimit(a.Config.Server.MaxBodyBytes)
 	authMW := middleware.Auth(a.JWTManager, a.AuthService, a.Logger)
 

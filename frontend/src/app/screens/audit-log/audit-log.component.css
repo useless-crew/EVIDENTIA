@@ -133,87 +133,43 @@
 }
 
 /* ==========================================================================
-   Tabs — sliding underline
+   Integrity summary
    ========================================================================== */
-.audit-tabs {
+.integrity-card {
   display: flex;
-  gap: var(--sp-1);
-  border-bottom: 1px solid var(--color-border);
+  flex-wrap: wrap;
+  gap: var(--sp-5);
+  padding: var(--sp-4) var(--sp-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-lg);
+  background: var(--color-card-bg);
+  box-shadow: var(--shadow-sm);
 }
 
-.tab-btn {
-  position: relative;
-  background: transparent;
-  border: none;
-  padding: 10px 16px;
-  font-family: inherit;
-  font-size: 12.8px;
-  font-weight: 500;
-  color: var(--color-text-secondary);
-  transition: color var(--dur-base) ease;
+.integrity-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
 
-.tab-btn::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
-  height: 2px;
-  background: var(--color-navy-primary);
-  transform: scaleX(0);
-  transition: transform var(--dur-base) var(--ease-out-expo);
+.integrity-label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
 }
 
-.tab-btn:hover {
+.integrity-value {
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--color-text-primary);
 }
 
-.tab-btn.active {
-  color: var(--color-navy-primary);
-  font-weight: 600;
-}
-
-.tab-btn.active::after {
-  transform: scaleX(1);
-}
-
-/* ==========================================================================
-   Filter pills
-   ========================================================================== */
-.filter-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 30px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 1px solid var(--color-border);
-  background: var(--color-card-bg);
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--color-text-secondary);
-  transition: border-color var(--dur-base) ease, color var(--dur-base) ease,
-    background-color var(--dur-base) ease;
-}
-
-/* Caret drawn in CSS rather than a "▼" glyph, which renders inconsistently */
-.filter-pill::after {
-  content: '';
-  width: 5px;
-  height: 5px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  rotate: 45deg;
-  translate: 0 -1px;
-  opacity: 0.6;
-}
-
-.filter-pill:hover {
-  border-color: var(--color-accent-blue);
-  background: var(--color-accent-blue-light);
-  color: var(--color-accent-blue);
+.inline-error {
+  padding: var(--sp-3) var(--sp-4);
 }
 
 /* ==========================================================================
@@ -351,143 +307,6 @@
   color: var(--color-text-muted);
   padding-top: var(--sp-2);
   border-top: 1px solid var(--color-border);
-}
-
-/* ==========================================================================
-   Blockchain graph
-   ========================================================================== */
-.graph-card {
-  padding: 0;
-}
-
-.graph-info-banner {
-  font-size: 12.5px;
-  line-height: 1.6;
-  color: var(--color-text-secondary);
-  background: var(--color-info-bg);
-  border-bottom: 1px solid var(--color-info-border);
-  padding: var(--sp-3) var(--sp-5);
-}
-
-.verify-inline-link {
-  background: none;
-  border: none;
-  padding: 0;
-  font: inherit;
-  font-weight: 600;
-  color: var(--color-accent-blue);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-
-.graph-container {
-  padding: var(--sp-5);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-5);
-  overflow-x: auto;
-}
-
-.chain-row {
-  display: flex;
-  align-items: center;
-  min-width: min-content;
-}
-
-.chain-node-wrapper {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-}
-
-.node-block {
-  position: relative;
-  flex: none;
-  width: 84px;
-  padding: 9px 8px;
-  border-radius: var(--r-md);
-  border: 1px solid var(--color-border);
-  background: var(--color-card-bg);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-  transition: border-color var(--dur-base) ease, box-shadow var(--dur-base) ease,
-    transform var(--dur-base) var(--ease-out-expo);
-}
-
-.node-block.verified {
-  border-color: var(--color-success-border);
-  background: var(--color-success-bg);
-  box-shadow: 0 0 0 3px rgba(46, 125, 79, 0.08);
-}
-
-.node-block.tampered {
-  border-color: var(--color-danger);
-  background: var(--color-danger-bg);
-  box-shadow: 0 0 0 3px rgba(197, 48, 48, 0.12);
-  animation: pulseDot 1.4s ease-in-out infinite;
-}
-
-.node-badge {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--color-border);
-  background: var(--color-neutral-bg);
-  color: var(--color-text-muted);
-}
-
-.node-badge.verified {
-  border-color: var(--color-success);
-  background: var(--color-success);
-  color: #ffffff;
-}
-
-.node-badge.tampered {
-  border-color: var(--color-danger);
-  background: var(--color-danger);
-  color: #ffffff;
-}
-
-.node-tick {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.node-id {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-
-.node-frag {
-  font-family: var(--font-mono);
-  font-size: 8.5px;
-  color: var(--color-text-muted);
-}
-
-.node-link-line {
-  flex: 1;
-  min-width: 14px;
-  height: 1.5px;
-  background: var(--color-border);
-  transition: background-color var(--dur-base) ease;
-}
-
-.node-link-line.verified {
-  background: var(--color-success);
-}
-
-.node-link-line.tampered {
-  background: var(--color-danger);
 }
 
 /* ==========================================================================

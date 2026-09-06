@@ -23,50 +23,6 @@ export interface StatItem {
   deltaColor: string;
 }
 
-export interface AuditRow {
-  id: number;
-  ts: string;
-  user: string;
-  role: string;
-  action: string;
-  resource: string;
-  actionType: 'upload' | 'hash' | 'status' | 'view' | 'redact' | 'denied' | 'verify';
-  hash: string;
-  prev: string;
-  ip: string;
-  session: string;
-  open?: boolean;
-}
-
-export interface ChainNode {
-  id: string;
-  frag: string;
-  tick: string;
-  verified: boolean;
-  tampered: boolean;
-  link: boolean;
-  flex: string;
-}
-
-export interface RedactionRegion {
-  id: number;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  dims: string;
-  reason: string;
-}
-
-// Fixed demo hash used ONLY by the redact-studio mock (no redaction
-// backend exists yet — a future system's scope, see docs/SECURITY.md's
-// "What System 7 does not do"). Document verification/certificates no
-// longer use a hardcoded hash anywhere — see document-viewer.component.ts,
-// which now displays the real sha256_hash/stored_hash/computed_hash
-// values POST /documents/:id/verify and GET /documents/:id/certificate
-// actually return.
-export const H_RED = 'a09c73e51bd82f460a7e3c19d54b06f2837ea1c9b0d64f5382e17ca09bd435f6';
-
 const BACKEND_TO_UI_ROLE: Record<BackendRole, Role> = {
   ADMIN: 'Admin',
   POLICE: 'Police',
@@ -92,14 +48,18 @@ const BACKEND_TO_UI_ROLE: Record<BackendRole, Role> = {
  * Also gone: casesList/caseDocuments/caseTimeline/caseParties/
  * chainOfCustody, the hardcoded single-demo-case arrays the old mock UI
  * read from — CasesComponent/CaseDetailComponent/DocumentViewerComponent
- * now fetch real data directly from CaseService/DocumentService. Also gone
- * (System 8): adminUsers — AdminComponent now fetches real data from
- * AdminUserService (GET /admin/users). What REMAINS mock (dashboardInfo
- * stats, activityFeed, auditRows/chainRows, accessFields) has no backend
- * equivalent yet (dashboard stats, audit-log read, and chain verification
- * are not implemented by any system yet — see ARCHITECTURE.md) and is
- * left as clearly-illustrative content, per master prompt's explicit
- * "do not implement functionality belonging to Systems 8+".
+ * now fetch real data directly from CaseService/DocumentService. Also gone:
+ * adminUsers (AdminComponent uses AdminUserService), auditRows/chainRows/
+ * verifyChain (AuditLogComponent now uses AuditService/
+ * AuditVerificationService — real GET /audit and the real Asynq-backed
+ * POST /audit/verify-chain flow), and the redaction canvas state
+ * (RedactStudioComponent now calls the real DocumentService.redact()).
+ *
+ * What REMAINS mock (dashboardInfo stats, activityFeed, accessFields) has
+ * no backend equivalent: there is no aggregate-dashboard-stats endpoint,
+ * no generic activity-feed endpoint, and the access-preview screen isn't
+ * backed by any specific endpoint. Left as clearly-illustrative content —
+ * see each signal's own comment below.
  */
 @Injectable({
   providedIn: 'root'
@@ -183,16 +143,6 @@ export class DmsStateService {
   signOut() {
     this.auth.logout().subscribe(() => this.router.navigateByUrl('/login'));
   }
-
-  // Legacy demo-only chain-tamper visual flag — no toggle exists in the
-  // UI any more (removing the header's toggle was necessary: a
-  // client-side flag with no relationship to a real backend check would
-  // otherwise sit right next to the now-REAL "Verify Integrity" action
-  // and look like it does something). Always false; kept only so the
-  // still-mock audit-log/dashboard/sidebar chain-status widgets (System
-  // 8's audit-chain verification is not implemented by any system
-  // through 7) keep compiling unchanged.
-  readonly simulateTamper = signal<boolean>(false);
 
   readonly roles: Role[] = ['Police', 'Judge', 'Lawyer', 'Forensics', 'Admin'];
 
@@ -337,81 +287,6 @@ export class DmsStateService {
     { label: 'Investigating Officer Field Diary', value: 'Suspect vehicle registration DL-3C-AZ-9912 traced via toll gantry camera', restricted: true }
   ];
 
-  // Audit Rows — illustrative only; no GET /audit endpoint is implemented
-  // by any system through 7 (audit_log is written to operationally but
-  // has no read API yet — see docs/AUDIT_CHAIN.md).
-  readonly auditRows: AuditRow[] = [
-    { id: 1, ts: '18 Feb 10:14:07', user: 'Dr. A. Iyer', role: 'Forensics', action: 'DOCUMENT_UPLOAD', resource: 'Forensic_Report_UPI_4521.pdf', actionType: 'upload', hash: 'd41f9a3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58', prev: '7b2e4c91a08df365c4a17e0b92d5f83a6c1e074bd39f52a8e6c0b74132fd9e05', ip: '10.14.6.21', session: 's-8107' },
-    { id: 2, ts: '18 Feb 10:14:09', user: 'system', role: 'System', action: 'HASH_RECORDED', resource: 'sha256:d41f9a3c…', actionType: 'hash', hash: '1f9a3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d4', prev: 'd41f9a3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58', ip: '127.0.0.1', session: 'daemon-sys' },
-    { id: 3, ts: '18 Feb 11:02:41', user: 'SI R. Mehra', role: 'Police', action: 'CASE_STATUS_CHANGE', resource: 'FIR/2026/4521', actionType: 'status', hash: '9a3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f', prev: '1f9a3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d4', ip: '10.14.6.22', session: 's-8114' },
-    { id: 4, ts: '18 Feb 12:33:18', user: 'Adv. S. Bhat', role: 'Lawyer', action: 'DOCUMENT_VIEW', resource: 'Witness_statement_02.pdf', actionType: 'view', hash: '3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f9a', prev: '9a3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f', ip: '10.14.6.23', session: 's-8121' },
-    { id: 5, ts: '18 Feb 12:41:55', user: 'SI R. Mehra', role: 'Police', action: 'REDACTION_APPLIED', resource: 'Witness_statement_02.pdf', actionType: 'redact', hash: '7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f9a3c', prev: '3c7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f9a', ip: '10.14.6.24', session: 's-8128' },
-    { id: 6, ts: '18 Feb 13:07:02', user: 'Adv. M. Qureshi', role: 'Lawyer', action: 'ACCESS_DENIED', resource: 'Exhibit E-04 (police-only)', actionType: 'denied', hash: '208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f9a3c7b', prev: '7b208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f9a3c', ip: '10.14.6.25', session: 's-8135' },
-    { id: 7, ts: '18 Feb 13:58:20', user: 'Hon. K. Mahadevan', role: 'Judge', action: 'DOCUMENT_VIEW', resource: 'FIR_4521_scan.pdf', actionType: 'view', hash: '8e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f9a3c7b20', prev: '208e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f9a3c7b', ip: '10.14.6.26', session: 's-8142' },
-    { id: 8, ts: '18 Feb 14:02:00', user: 'system', role: 'System', action: 'CHAIN_VERIFY', resource: '1,204 entries — intact', actionType: 'verify', hash: '5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f9a3c7b208e', prev: '8e5641c0ba97e3f5d2a80c6b491e7fa3d5c28b0e1947fc63a2d58d41f9a3c7b20', ip: '127.0.0.1', session: 'daemon-sys' }
-  ];
-
-  // Chain Verification State — illustrative sweep animation; no
-  // audit-chain verification endpoint exists yet (System 8's scope — see
-  // docs/AUDIT_CHAIN.md).
-  readonly chainRunning = signal<boolean>(false);
-  readonly chainDone = signal<boolean>(false);
-  readonly chainCount = signal<number>(0);
-  readonly auditTab = signal<'table' | 'graph'>('table');
-  readonly expandedAuditId = signal<number | null>(null);
-
-  readonly chainRows = computed(() => {
-    const swept = Math.round((this.chainCount() / 1204) * 24);
-    const isDone = this.chainDone();
-    const isRunning = this.chainRunning();
-    const tamper = this.simulateTamper();
-
-    const nodes: ChainNode[] = Array.from({ length: 24 }, (_, i) => {
-      const on = isDone || (isRunning && i < swept);
-      const broken = tamper && isDone && i === 17;
-      return {
-        id: '#' + (1181 + i),
-        frag: H_RED.slice(i, i + 4),
-        tick: broken ? '×' : (on ? '✓' : ''),
-        verified: on && !broken,
-        tampered: broken,
-        link: i % 8 !== 7,
-        flex: i % 8 === 7 ? '0 0 auto' : '1'
-      };
-    });
-
-    return [
-      { nodes: nodes.slice(0, 8) },
-      { nodes: nodes.slice(8, 16) },
-      { nodes: nodes.slice(16, 24) }
-    ];
-  });
-
-  verifyChain() {
-    this.chainRunning.set(true);
-    this.chainDone.set(false);
-    this.chainCount.set(0);
-
-    const timerId = setInterval(() => {
-      const next = Math.min(1204, this.chainCount() + 48);
-      this.chainCount.set(next);
-
-      if (next >= 1204) {
-        clearInterval(timerId);
-        setTimeout(() => {
-          this.chainRunning.set(false);
-          this.chainDone.set(true);
-        }, 200);
-      }
-    }, 45);
-
-    this.activeTimers.push(timerId);
-  }
-
-  toggleAuditRow(id: number) {
-    this.expandedAuditId.set(this.expandedAuditId() === id ? null : id);
-  }
-
   // ---- Upload Modal (REAL — POST /cases/:id/documents) ----
   readonly uploadOpen = signal<boolean>(false);
   readonly uploadCaseId = signal<string | null>(null);
@@ -437,7 +312,6 @@ export class DmsStateService {
   closeUploadModal() {
     this.uploadOpen.set(false);
     this.uploadPhase.set('idle');
-    this.clearTimers();
   }
 
   /** Performs the real multipart upload, driving uploadPct from actual
@@ -470,62 +344,4 @@ export class DmsStateService {
     });
   }
 
-  // Timers for the still-mock chain-verify sweep animation above.
-  private activeTimers: any[] = [];
-  private clearTimers() {
-    this.activeTimers.forEach(t => clearInterval(t));
-    this.activeTimers = [];
-  }
-
-  // ---- Redaction Canvas State (mock — redaction has no backend yet) ----
-  readonly redactions = signal<RedactionRegion[]>([]);
-  readonly draft = signal<{ x: number; y: number; w: number; h: number } | null>(null);
-  readonly redactSaved = signal<boolean>(false);
-
-  startDraft(x: number, y: number) {
-    this.draft.set({ x, y, w: 0, h: 0 });
-  }
-
-  updateDraft(currentX: number, currentY: number) {
-    const d = this.draft();
-    if (!d) return;
-    const originX = d.x;
-    const originY = d.y;
-    const x = Math.min(currentX, originX);
-    const y = Math.min(currentY, originY);
-    const w = Math.abs(currentX - originX);
-    const h = Math.abs(currentY - originY);
-    this.draft.set({ x, y, w, h });
-  }
-
-  endDraft() {
-    const d = this.draft();
-    if (d && d.w > 12 && d.h > 10) {
-      const currentList = this.redactions();
-      const id = currentList.length + 1;
-      const dims = `${Math.round(d.w)}×${Math.round(d.h)} px @ ${Math.round(d.x)},${Math.round(d.y)}`;
-      this.redactions.set([
-        ...currentList,
-        {
-          id,
-          x: d.x,
-          y: d.y,
-          w: d.w,
-          h: d.h,
-          dims,
-          reason: 'Witness identity — §228A IPC / §72 BNS'
-        }
-      ]);
-      this.redactSaved.set(false);
-    }
-    this.draft.set(null);
-  }
-
-  removeRedaction(id: number) {
-    this.redactions.set(this.redactions().filter(r => r.id !== id));
-  }
-
-  saveRedactedCopy() {
-    this.redactSaved.set(true);
-  }
 }
