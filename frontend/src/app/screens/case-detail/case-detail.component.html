@@ -32,9 +32,45 @@
         <span class="page-eyebrow">{{ c.case_number }}</span>
         <h1 class="page-title">{{ c.title }}</h1>
         <div class="head-badges">
-          <span class="badge-status" [ngClass]="getStatusClass(c.status)">
-            {{ formatStatus(c.status) }}
-          </span>
+          <div class="status-badge-container">
+            <span class="badge-status" [ngClass]="getStatusClass(c.status)">
+              {{ formatStatus(c.status) }}
+            </span>
+            <button
+              *ngIf="canManageMembers() && getAvailableTransitions().length > 0"
+              type="button"
+              class="btn-status-toggle"
+              (click)="toggleStatusMenu()"
+              [attr.aria-expanded]="showStatusMenu()"
+              title="Change Case Status"
+            >
+              <span>Change</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+
+            <!-- Status Dropdown Menu -->
+            <div class="status-dropdown-menu" *ngIf="showStatusMenu()">
+              <div class="status-menu-header">Advance Status</div>
+              <div class="status-menu-options">
+                <button
+                  *ngFor="let next of getAvailableTransitions()"
+                  type="button"
+                  class="status-option-btn"
+                  [disabled]="updatingStatus()"
+                  (click)="changeStatus(next)"
+                >
+                  <span class="badge-status-sm" [ngClass]="getStatusClass(next)">
+                    {{ formatStatus(next) }}
+                  </span>
+                </button>
+              </div>
+              <div *ngIf="statusError()" class="status-menu-error">
+                {{ statusError() }}
+              </div>
+            </div>
+          </div>
           <span class="head-meta">
             {{ c.documents.length }} document{{ c.documents.length === 1 ? '' : 's' }}
           </span>
@@ -43,6 +79,16 @@
       </div>
 
       <div class="page-actions">
+        <button *ngIf="canManageMembers()" type="button" class="btn-secondary" (click)="openAssignMember()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+            <circle cx="8.5" cy="7" r="4"></circle>
+            <line x1="20" y1="8" x2="20" y2="14"></line>
+            <line x1="23" y1="11" x2="17" y2="11"></line>
+          </svg>
+          Assign Member
+        </button>
+
         <button type="button" class="btn-secondary" (click)="goToAccess()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
@@ -79,10 +125,19 @@
             <div class="meta-list meta-grid">
               <div class="meta-item">
                 <span class="meta-key">Status</span>
-                <span class="meta-value">
+                <span class="meta-value meta-status-row">
                   <span class="badge-status" [ngClass]="getStatusClass(c.status)">
                     {{ formatStatus(c.status) }}
                   </span>
+                  <button
+                    *ngIf="canManageMembers() && getAvailableTransitions().length > 0"
+                    type="button"
+                    class="btn-status-quick"
+                    (click)="toggleStatusMenu()"
+                    title="Change Case Status"
+                  >
+                    Change Status
+                  </button>
                 </span>
               </div>
               <div class="meta-item">
@@ -215,6 +270,61 @@
           </div>
         </section>
 
+        <!-- Case Team & Collaborators Card -->
+        <section class="panel" appReveal [revealDelay]="0.12" [revealDistance]="16">
+          <div class="panel-head">
+            <h2 class="panel-title">Case Team &amp; Collaborators</h2>
+            <div class="panel-head-actions">
+              <span class="panel-hint" *ngIf="members().length > 0">
+                {{ members().length }}
+              </span>
+              <button
+                *ngIf="canManageMembers()"
+                type="button"
+                class="btn-text-action"
+                (click)="openAssignMember()"
+                title="Assign member to case"
+              >
+                + Assign
+              </button>
+            </div>
+          </div>
+
+          <div class="members-list" *ngIf="members().length > 0">
+            <div *ngFor="let m of members()" class="member-row">
+              <span class="member-avatar" [ngClass]="getMembershipBadgeClass(m.membership_type)" aria-hidden="true">
+                {{ (m.display_name.slice(0, 2) || 'US').toUpperCase() }}
+              </span>
+              <div class="member-info">
+                <div class="member-name-row">
+                  <span class="member-name">{{ m.display_name }}</span>
+                  <span class="badge-member-role" [ngClass]="getMembershipBadgeClass(m.membership_type)">
+                    {{ m.membership_type }}
+                  </span>
+                </div>
+                <span class="member-email font-mono">{{ m.email }}</span>
+              </div>
+              <button
+                *ngIf="canManageMembers() && m.membership_type !== 'OWNER'"
+                type="button"
+                class="btn-remove-member"
+                (click)="removeMember(m)"
+                [disabled]="removingMemberId() === m.user_id"
+                title="Remove from case"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="state-block state-block-compact" *ngIf="!loadingMembers() && members().length === 0">
+            <span class="state-text">No additional members assigned.</span>
+          </div>
+        </section>
+
         <!-- Involved Parties Card -->
         <section class="panel" appReveal [revealDelay]="0.14" [revealDistance]="16">
           <div class="panel-head">
@@ -240,5 +350,14 @@
         </section>
       </div>
     </div>
+
+    <!-- Add Member Dialog Modal -->
+    <app-add-member-dialog
+      *ngIf="showAddMemberModal()"
+      [caseId]="caseId()"
+      [caseNumber]="c.case_number"
+      (closed)="closeAssignMember()"
+      (memberAdded)="onMemberAdded($event)"
+    ></app-add-member-dialog>
   </ng-container>
 </div>

@@ -4,6 +4,8 @@ import {
   CaseDetail,
   CaseListFilter,
   CaseListResult,
+  CaseMemberSummary,
+  AddCaseMemberRequest,
   CreateCaseRequest,
   UpdateCaseRequest,
 } from '../models/api.models';
@@ -43,5 +45,20 @@ export class CaseService {
    * metadata, not a partial patch (see UpdateCaseRequest's own doc). */
   update(id: string, request: UpdateCaseRequest): Observable<CaseDetail> {
     return this.api.put<CaseDetail>(`/cases/${id}`, request);
+  }
+
+  /** GET /cases/:id/members — list active members/collaborators for this case. */
+  listMembers(caseId: string): Observable<CaseMemberSummary[]> {
+    return this.api.get<CaseMemberSummary[]>(`/cases/${caseId}/members`);
+  }
+
+  /** POST /cases/:id/members — assign a user to this case. */
+  addMember(caseId: string, request: AddCaseMemberRequest): Observable<CaseMemberSummary> {
+    return this.api.post<CaseMemberSummary>(`/cases/${caseId}/members`, request);
+  }
+
+  /** DELETE /cases/:id/members/:userId — remove a member from this case. */
+  removeMember(caseId: string, userId: string): Observable<{ removed: boolean }> {
+    return this.api.delete<{ removed: boolean }>(`/cases/${caseId}/members/${userId}`);
   }
 }

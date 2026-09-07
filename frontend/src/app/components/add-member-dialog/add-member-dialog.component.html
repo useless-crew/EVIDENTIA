@@ -1,0 +1,80 @@
+<div class="modal-backdrop" (click)="cancel()">
+  <div class="modal-dialog" (click)="$event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title-group">
+        <h2 class="modal-title">Assign Member to Case</h2>
+        <span class="modal-subtitle font-mono">{{ caseNumber }}</span>
+      </div>
+      <button type="button" class="btn-close" (click)="cancel()">×</button>
+    </div>
+
+    <div class="modal-body">
+      <!-- Recipient Search / Picker -->
+      <div class="form-group">
+        <label class="form-label">SELECT OFFICER / PERSONNEL</label>
+        <div class="recipient-picked" *ngIf="selectedRecipient() as r">
+          <div class="recipient-info">
+            <span class="recipient-name">{{ r.first_name }} {{ r.last_name }}</span>
+            <span class="recipient-meta font-mono">{{ r.email }} · {{ r.roles.join(', ') }}</span>
+          </div>
+          <button type="button" class="btn-clear-recipient" (click)="clearRecipient()">Change</button>
+        </div>
+        <input
+          *ngIf="!selectedRecipient()"
+          class="form-input"
+          type="text"
+          placeholder="Search officer by name or email (e.g. Priya, cfl.gov.in)..."
+          [value]="query"
+          (input)="onQueryInput($any($event.target).value)"
+        />
+        <div *ngIf="searching()" class="search-hint">Searching active directory...</div>
+        <div class="candidate-list" *ngIf="!selectedRecipient() && candidates().length > 0">
+          <button
+            type="button"
+            class="candidate-item"
+            *ngFor="let c of candidates()"
+            (click)="selectRecipient(c)"
+          >
+            <span class="candidate-name">{{ c.first_name }} {{ c.last_name }}</span>
+            <span class="candidate-email font-mono">{{ c.email }}</span>
+            <span class="candidate-role">{{ c.roles.join(', ') }}</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Membership Role Selection -->
+      <div class="form-group">
+        <label class="form-label">CASE ASSIGNMENT ROLE</label>
+        <select class="form-select" [(ngModel)]="membershipType" name="membershipType">
+          <option value="FORENSICS">Forensic Examiner (Can view case &amp; upload Forensic Reports)</option>
+          <option value="INVESTIGATOR">Investigating Officer (Full investigative access)</option>
+          <option value="LAWYER">Legal Counsel / Public Prosecutor</option>
+          <option value="JUDGE">Judicial Officer / Court Magistrate</option>
+          <option value="VIEWER">Read-Only Case Viewer</option>
+        </select>
+        <span class="role-hint" *ngIf="membershipType === 'FORENSICS'">
+          Assigned Forensic personnel receive direct standing access to this case to review case documents and upload certified forensic reports into the case file.
+        </span>
+        <span class="role-hint" *ngIf="membershipType === 'INVESTIGATOR'">
+          Assigned investigators can review all documents, upload case files, and track case progress.
+        </span>
+      </div>
+
+      <div class="inline-error" *ngIf="error()">{{ error() }}</div>
+
+      <div class="legal-notice">
+        <span class="notice-bullet">ℹ</span>
+        <span>
+          Case membership establishes cryptographically audited, role-based access. All actions taken by assigned members will be permanently recorded in the immutable audit trail.
+        </span>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button type="button" class="btn-secondary" (click)="cancel()">Cancel</button>
+      <button type="button" class="btn-primary" [disabled]="submitting()" (click)="submit()">
+        {{ submitting() ? 'Assigning…' : 'Assign to Case' }}
+      </button>
+    </div>
+  </div>
+</div>

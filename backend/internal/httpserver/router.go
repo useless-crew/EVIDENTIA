@@ -108,6 +108,9 @@ func NewRouter(a *app.App) *gin.Engine {
 	caseGroup.GET("", authMW, middleware.RequirePermission(a.AuthzService, authz.ActionCaseRead), casehandlers.List(a.CaseService))
 	caseGroup.GET("/:id", authMW, middleware.RequireCaseAccess(a.AuthzService, authz.ActionCaseRead, "id"), casehandlers.Get(a.CaseService))
 	caseGroup.PUT("/:id", authMW, middleware.RequireCaseAccess(a.AuthzService, authz.ActionCaseUpdate, "id"), casehandlers.Update(a.CaseService))
+	caseGroup.GET("/:id/members", authMW, middleware.RequireCaseAccess(a.AuthzService, authz.ActionCaseRead, "id"), casehandlers.ListMembers(a.CaseService))
+	caseGroup.POST("/:id/members", authMW, middleware.RequireCaseAccess(a.AuthzService, authz.ActionCaseUpdate, "id"), casehandlers.AddMember(a.CaseService))
+	caseGroup.DELETE("/:id/members/:userId", authMW, middleware.RequireCaseAccess(a.AuthzService, authz.ActionCaseUpdate, "id"), casehandlers.RemoveMember(a.CaseService))
 	// Events (System 13): a real-time notification stream for this ONE
 	// case — document verification/certificate/redaction/share activity —
 	// gated by the SAME case:read authorization GET /cases/:id already

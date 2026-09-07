@@ -245,6 +245,27 @@ type UpdateCaseInput struct {
 	Metadata    json.RawMessage
 }
 
+// CaseMemberSummary represents a member/collaborator attached to a case.
+type CaseMemberSummary struct {
+	ID             uuid.UUID `json:"id"`
+	CaseID         uuid.UUID `json:"case_id"`
+	UserID         uuid.UUID `json:"user_id"`
+	MembershipType string    `json:"membership_type"`
+	AddedBy        uuid.UUID `json:"added_by"`
+	FirstName      string    `json:"first_name"`
+	LastName       string    `json:"last_name"`
+	DisplayName    string    `json:"display_name"`
+	Email          string    `json:"email"`
+	Roles          []string  `json:"roles"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// AddCaseMemberInput is the input for assigning a member to a case.
+type AddCaseMemberInput struct {
+	UserID         uuid.UUID `json:"user_id"`
+	MembershipType string    `json:"membership_type"`
+}
+
 // CaseService owns case business logic: input validation, status-
 // transition rules, transactional persistence via CaseRepo, and audit
 // integration. It independently re-checks authorization via authz.Service
@@ -830,4 +851,349 @@ func isUniqueViolation(err error, constraint string) bool {
 		return false
 	}
 	return pgErr.Code == "23505" && pgErr.ConstraintName == constraint
+}
+
+// ---- Case Members Management ----
+
+// AddMember assigns a member to a case (e.g. FORENSICS, INVESTIGATOR, LAWYER, etc.).
+// Only the case owner or an ADMIN can assign members.
+func (s *CaseService) AddMember(ctx context.Context, user auth.AuthenticatedUser, caseID uuid.UUID, req AddCaseMemberInput) (*CaseMemberSummary, error) {
+	decision, err := s.authz.CanAccessCase(ctx, user, caseID, authz.ActionCaseUpdate)
+	if err != nil {
+		return nil, utils.ErrInternal(err)
+	}
+	if !decision.Allowed {
+		return nil, utils.ErrForbidden(genericCaseForbiddenMessage)
+	}
+
+	if req.UserID == uuid.Nil {
+		return nil, utils.ErrBadRequest("user_id is required")
+	}
+
+	allowedTypes := map[string]bool{
+		models.MembershipTypeInvestigator: true,
+		models.MembershipTypeForensics:    true,
+		models.MembershipTypeLawyer:       true,
+		models.MembershipTypeJudge:        true,
+		models.MembershipTypeViewer:       true,
+	}
+	if !allowedTypes[req.MembershipType] {
+		return nil, utils.ErrBadRequest(fmt.Sprintf("Invalid membership type: %s", req.MembershipType))
+	}
+
+	var caseRow generated.Case
+	isOwner := false
+	ident := repository.AppIdentity{UserID: user.ID, Role: effectiveCaseRole(user)}
+	err = repository.WithTx(ctx, s.pool, ident, func(ctx context.Context, q *generated.Queries) error {
+		repo := repository.NewCaseRepo(q)
+		c, err := repo.GetByID(ctx, caseID)
+		if err != nil {
+			return err
+		}
+		caseRow = c
+		if c.CreatedBy == user.ID {
+			isOwner = true
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, utils.ErrForbidden(genericCaseForbiddenMessage)
+		}
+		return nil, utils.ErrInternal(err)
+	}
+
+	if !isOwner && !containsRole(user.Roles, models.RoleAdmin) {
+		return nil, utils.ErrForbidden("Only the case owner or an administrator can assign members")
+	}
+
+	if req.UserID == caseRow.CreatedBy {
+		return nil, utils.ErrBadRequest("Case owner is already an active member of this case")
+	}
+
+	// Validate target user exists and is active
+	adminIdent := repository.AppIdentity{Role: models.RoleAdmin}
+	var targetUser generated.GetUserByIDRow
+	var targetRoles []string
+	err = repository.WithTx(ctx, s.pool, adminIdent, func(ctx context.Context, q *generated.Queries) error {
+		u, err := q.GetUserByID(ctx, req.UserID)
+		if err != nil {
+			return err
+		}
+		targetUser = u
+		roles, err := q.ListRolesForUser(ctx, req.UserID)
+		if err != nil {
+			return err
+		}
+		targetRoles = roleNames(roles)
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, utils.ErrBadRequest("User not found")
+		}
+		return nil, utils.ErrInternal(err)
+	}
+	if targetUser.Status != models.UserStatusActive {
+		return nil, utils.ErrBadRequest("User is not active")
+	}
+
+	// Check if target user is already an active member
+	err = repository.WithTx(ctx, s.pool, adminIdent, func(ctx context.Context, q *generated.Queries) error {
+		_, err := q.GetActiveCaseMembership(ctx, generated.GetActiveCaseMembershipParams{
+			CaseID: caseID,
+			UserID: req.UserID,
+		})
+		return err
+	})
+	if err == nil {
+		return nil, utils.ErrConflict("User is already an active member of this case")
+	}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, utils.ErrInternal(err)
+	}
+
+	// Run AddMember with admin role and caller's user ID so case_members_insert + select RETURNING succeed
+	memberIdent := repository.AppIdentity{UserID: user.ID, Role: models.RoleAdmin}
+	var createdMember generated.CaseMember
+	err = repository.WithTx(ctx, s.pool, memberIdent, func(ctx context.Context, q *generated.Queries) error {
+		repo := repository.NewCaseRepo(q)
+		m, err := repo.AddMember(ctx, generated.AddCaseMemberParams{
+			CaseID:         caseID,
+			UserID:         req.UserID,
+			MembershipType: req.MembershipType,
+			AddedBy:        user.ID,
+		})
+		if err != nil {
+			return err
+		}
+		createdMember = m
+		return nil
+	})
+	if err != nil {
+		if isUniqueViolation(err, "idx_case_members_active_unique") {
+			return nil, utils.ErrConflict("User is already an active member of this case")
+		}
+		return nil, utils.ErrInternal(err)
+	}
+
+	s.recorder.Record(ctx, audit.Event{
+		Action:       "CASE_MEMBER_ADDED",
+		ResourceType: "case",
+		ResourceID:   &caseID,
+		UserID:       &user.ID,
+		Metadata: map[string]interface{}{
+			"member_id":       createdMember.ID,
+			"target_user_id":  req.UserID,
+			"membership_type": req.MembershipType,
+		},
+	})
+
+	return &CaseMemberSummary{
+		ID:             createdMember.ID,
+		CaseID:         caseID,
+		UserID:         targetUser.ID,
+		MembershipType: createdMember.MembershipType,
+		AddedBy:        createdMember.AddedBy,
+		FirstName:      targetUser.FirstName,
+		LastName:       targetUser.LastName,
+		DisplayName:    userDisplayName(targetUser),
+		Email:          targetUser.Email,
+		Roles:          targetRoles,
+		CreatedAt:      createdMember.CreatedAt,
+	}, nil
+}
+
+// RemoveMember marks a member's case membership as removed.
+// Only the case owner or an ADMIN can remove members. The case owner cannot be removed.
+func (s *CaseService) RemoveMember(ctx context.Context, user auth.AuthenticatedUser, caseID uuid.UUID, targetUserID uuid.UUID) error {
+	decision, err := s.authz.CanAccessCase(ctx, user, caseID, authz.ActionCaseUpdate)
+	if err != nil {
+		return utils.ErrInternal(err)
+	}
+	if !decision.Allowed {
+		return utils.ErrForbidden(genericCaseForbiddenMessage)
+	}
+
+	var caseRow generated.Case
+	isOwner := false
+	ident := repository.AppIdentity{UserID: user.ID, Role: effectiveCaseRole(user)}
+	err = repository.WithTx(ctx, s.pool, ident, func(ctx context.Context, q *generated.Queries) error {
+		repo := repository.NewCaseRepo(q)
+		c, err := repo.GetByID(ctx, caseID)
+		if err != nil {
+			return err
+		}
+		caseRow = c
+		if c.CreatedBy == user.ID {
+			isOwner = true
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return utils.ErrForbidden(genericCaseForbiddenMessage)
+		}
+		return utils.ErrInternal(err)
+	}
+
+	if !isOwner && !containsRole(user.Roles, models.RoleAdmin) {
+		return utils.ErrForbidden("Only the case owner or an administrator can remove members")
+	}
+
+	if targetUserID == caseRow.CreatedBy {
+		return utils.ErrBadRequest("Cannot remove the case owner from the case")
+	}
+
+	adminIdent := repository.AppIdentity{Role: models.RoleAdmin}
+	var existingMember generated.CaseMember
+	err = repository.WithTx(ctx, s.pool, adminIdent, func(ctx context.Context, q *generated.Queries) error {
+		m, err := q.GetActiveCaseMembership(ctx, generated.GetActiveCaseMembershipParams{
+			CaseID: caseID,
+			UserID: targetUserID,
+		})
+		existingMember = m
+		return err
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return utils.ErrNotFound("User is not an active member of this case")
+		}
+		return utils.ErrInternal(err)
+	}
+
+	memberIdent := repository.AppIdentity{UserID: user.ID, Role: models.RoleAdmin}
+	err = repository.WithTx(ctx, s.pool, memberIdent, func(ctx context.Context, q *generated.Queries) error {
+		repo := repository.NewCaseRepo(q)
+		return repo.RemoveMember(ctx, caseID, targetUserID)
+	})
+	if err != nil {
+		return utils.ErrInternal(err)
+	}
+
+	s.recorder.Record(ctx, audit.Event{
+		Action:       "CASE_MEMBER_REMOVED",
+		ResourceType: "case",
+		ResourceID:   &caseID,
+		UserID:       &user.ID,
+		Metadata: map[string]interface{}{
+			"target_user_id":  targetUserID,
+			"membership_type": existingMember.MembershipType,
+		},
+	})
+
+	return nil
+}
+
+// ListMembers returns the active members and owner for a case, with user profiles and roles.
+func (s *CaseService) ListMembers(ctx context.Context, user auth.AuthenticatedUser, caseID uuid.UUID) ([]CaseMemberSummary, error) {
+	decision, err := s.authz.CanAccessCase(ctx, user, caseID, authz.ActionCaseRead)
+	if err != nil {
+		return nil, utils.ErrInternal(err)
+	}
+	if !decision.Allowed {
+		return nil, utils.ErrForbidden(genericCaseForbiddenMessage)
+	}
+
+	adminIdent := repository.AppIdentity{Role: models.RoleAdmin}
+	var caseRow generated.Case
+	var members []generated.CaseMember
+
+	err = repository.WithTx(ctx, s.pool, adminIdent, func(ctx context.Context, q *generated.Queries) error {
+		repo := repository.NewCaseRepo(q)
+		c, err := repo.GetByID(ctx, caseID)
+		if err != nil {
+			return err
+		}
+		caseRow = c
+
+		m, err := repo.ListMembers(ctx, caseID)
+		if err != nil {
+			return err
+		}
+		members = m
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, utils.ErrForbidden(genericCaseForbiddenMessage)
+		}
+		return nil, utils.ErrInternal(err)
+	}
+
+	hasOwnerMember := false
+	for _, m := range members {
+		if m.UserID == caseRow.CreatedBy {
+			hasOwnerMember = true
+			break
+		}
+	}
+
+	loadUserSummary := func(mID uuid.UUID, uID uuid.UUID, mType string, addedBy uuid.UUID, createdAt time.Time) (*CaseMemberSummary, error) {
+		var u generated.GetUserByIDRow
+		var roles []string
+		err := repository.WithTx(ctx, s.pool, adminIdent, func(ctx context.Context, q *generated.Queries) error {
+			userRow, err := q.GetUserByID(ctx, uID)
+			if err != nil {
+				return err
+			}
+			u = userRow
+			r, err := q.ListRolesForUser(ctx, uID)
+			if err != nil {
+				return err
+			}
+			roles = roleNames(r)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		return &CaseMemberSummary{
+			ID:             mID,
+			CaseID:         caseID,
+			UserID:         u.ID,
+			MembershipType: mType,
+			AddedBy:        addedBy,
+			FirstName:      u.FirstName,
+			LastName:       u.LastName,
+			DisplayName:    userDisplayName(u),
+			Email:          u.Email,
+			Roles:          roles,
+			CreatedAt:      createdAt,
+		}, nil
+	}
+
+	results := make([]CaseMemberSummary, 0, len(members)+1)
+
+	if !hasOwnerMember {
+		ownerSummary, err := loadUserSummary(uuid.Nil, caseRow.CreatedBy, models.MembershipTypeOwner, caseRow.CreatedBy, caseRow.CreatedAt)
+		if err == nil {
+			results = append(results, *ownerSummary)
+		}
+	}
+
+	for _, m := range members {
+		summary, err := loadUserSummary(m.ID, m.UserID, m.MembershipType, m.AddedBy, m.CreatedAt)
+		if err != nil {
+			continue
+		}
+		if summary.MembershipType == models.MembershipTypeOwner {
+			results = append([]CaseMemberSummary{*summary}, results...)
+		} else {
+			results = append(results, *summary)
+		}
+	}
+
+	return results, nil
+}
+
+func userDisplayName(u generated.GetUserByIDRow) string {
+	if u.DisplayName != nil && *u.DisplayName != "" {
+		return *u.DisplayName
+	}
+	fullName := u.FirstName + " " + u.LastName
+	if fullName == " " {
+		return u.Email
+	}
+	return fullName
 }

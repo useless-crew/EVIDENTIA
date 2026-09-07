@@ -1,5 +1,6 @@
 import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { AdminUserService } from '../../core/services/admin-user.service';
 import { AdminService } from '../../core/services/admin.service';
 import { AuthService } from '../../core/services/auth.service';
@@ -31,7 +32,7 @@ const PAGE_SIZE = 20;
 @Component({
   selector: 'app-admin',
   standalone: true,
-  imports: [CommonModule, CreateUserModalComponent, ResetPasswordModalComponent],
+  imports: [CommonModule, FormsModule, CreateUserModalComponent, ResetPasswordModalComponent],
   templateUrl: './admin.component.html',
   styleUrls: ['./admin.component.css'],
 })

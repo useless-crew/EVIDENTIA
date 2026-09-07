@@ -130,8 +130,58 @@
 }
 
 /* ==========================================================================
-   Infrastructure & Health
+   Infrastructure & Health & Common Panel Headers
    ========================================================================== */
+.panel-head,
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: linear-gradient(to bottom, #ffffff, var(--color-card-raised));
+}
+
+.btn-subtle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-navy-primary);
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--r-sm);
+  padding: 6px 12px;
+  cursor: pointer;
+  box-shadow: var(--shadow-xs);
+  transition: all var(--dur-fast) ease;
+}
+
+.btn-subtle:hover:not(:disabled) {
+  background: var(--color-card-raised);
+  border-color: var(--color-accent-blue);
+  color: var(--color-accent-blue);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-subtle:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.is-spinning {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .panel-badge {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -150,96 +200,170 @@
   color: var(--color-success);
 }
 
+/* Component Diagnostics Grid */
 .health-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: var(--sp-3);
-  padding: var(--sp-4);
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--sp-4);
+  padding: var(--sp-5);
 }
 
 .health-item {
-  background: var(--color-card-raised);
+  background: var(--color-card-bg);
   border: 1px solid var(--color-border);
-  border-radius: var(--r-md);
-  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-lg);
+  padding: var(--sp-4) var(--sp-5);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--sp-3);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--dur-fast) ease, transform var(--dur-fast) ease;
+}
+
+.health-item:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 .health-item-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.health-name-wrap {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.health-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-sm);
+  background: rgba(19, 42, 73, 0.04);
+  color: var(--color-navy-primary);
+  border: 1px solid var(--color-border-subtle);
 }
 
 .health-name {
   font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   color: var(--color-text-primary);
 }
 
 .health-details {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--color-text-secondary);
-  line-height: 1.4;
+  line-height: 1.45;
+  flex: 1;
+}
+
+.health-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--color-border-subtle);
 }
 
 .health-latency {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--color-text-muted);
 }
 
 .health-extra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.extra-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-family: var(--font-mono);
   font-size: 11px;
-  background: var(--color-bg-page);
-  padding: 6px 8px;
-  border-radius: var(--r-sm);
+  background: var(--color-card-raised);
   border: 1px solid var(--color-border-subtle);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  border-radius: var(--r-sm);
+  padding: 4px 8px;
+  line-height: 1.3;
 }
 
 .extra-key {
-  color: var(--color-accent-blue);
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.extra-val {
+  color: var(--color-text-primary);
   font-weight: 600;
 }
 
 /* Runtime Grid */
 .runtime-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: var(--sp-3);
-  padding: var(--sp-4);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--sp-4);
+  padding: var(--sp-5);
 }
 
 .runtime-item {
-  background: var(--color-card-raised);
+  background: var(--color-card-bg);
   border: 1px solid var(--color-border);
-  border-radius: var(--r-md);
-  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-lg);
+  padding: var(--sp-4) var(--sp-5);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--dur-fast) ease, transform var(--dur-fast) ease;
+}
+
+.runtime-item:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.runtime-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-muted);
 }
 
 .runtime-label {
   font-family: var(--font-mono);
   font-size: 10.5px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--color-text-muted);
+  letter-spacing: 0.07em;
+  color: var(--color-text-secondary);
 }
 
 .runtime-val {
-  font-family: var(--font-mono);
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--color-navy-primary);
+  line-height: 1.2;
+}
+
+.runtime-desc {
+  font-size: 11.5px;
+  color: var(--color-text-muted);
 }
 
 /* ==========================================================================
@@ -576,11 +700,16 @@
 }
 
 .status-pill[data-status='inactive'],
-.status-pill[data-status='disabled'],
 .status-pill[data-status='suspended'] {
   color: var(--color-danger);
   background: var(--color-danger-bg);
   border-color: var(--color-danger-border);
+}
+
+.status-pill[data-status='disabled'] {
+  color: var(--color-text-secondary);
+  background: rgba(19, 42, 73, 0.05);
+  border-color: var(--color-border);
 }
 
 /* Row actions */

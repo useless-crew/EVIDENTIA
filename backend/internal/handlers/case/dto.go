@@ -10,6 +10,7 @@ package cases
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -56,8 +57,12 @@ type caseDetailResponse = service.CaseDetail
 // detail).
 func writeServiceError(c *gin.Context, err error) {
 	if appErr, ok := utils.AsAppError(err); ok {
+		if appErr.Status == http.StatusInternalServerError && appErr.Err != nil {
+			slog.Error("case service internal error", "err", appErr.Err, "request_id", utils.GetRequestID(c))
+		}
 		response.FromAppError(c, appErr)
 		return
 	}
+	slog.Error("case service unexpected error", "err", err, "request_id", utils.GetRequestID(c))
 	response.Error(c, http.StatusInternalServerError, utils.CodeInternal, "An unexpected error occurred")
 }

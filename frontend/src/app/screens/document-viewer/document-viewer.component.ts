@@ -1,5 +1,6 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { ActivatedRoute, Router } from '@angular/router';
 import { DmsStateService } from '../../core/services/dms-state.service';
 import { CaseService } from '../../core/services/case.service';
@@ -17,13 +18,14 @@ import { IntegrityWorkspaceComponent } from '../../components/integrity-workspac
   templateUrl: './document-viewer.component.html',
   styleUrls: ['./document-viewer.component.css']
 })
-export class DocumentViewerComponent implements OnInit {
+export class DocumentViewerComponent implements OnInit, OnDestroy {
   dms = inject(DmsStateService);
   private readonly caseService = inject(CaseService);
   private readonly documentService = inject(DocumentService);
   private readonly shareService = inject(ShareService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  private readonly sanitizer = inject(DomSanitizer);
 
   caseId = '';
   documentId = '';
@@ -33,6 +35,19 @@ export class DocumentViewerComponent implements OnInit {
   readonly doc = signal<DocumentSummary | null>(null);
 
   zoomLevel = 100;
+  readonly isFullScreen = signal(false);
+
+  toggleFullScreen() {
+    this.isFullScreen.set(!this.isFullScreen());
+  }
+
+  // ---- Document In-line Preview ----
+  readonly previewLoading = signal(false);
+  readonly previewError = signal<string | null>(null);
+  readonly previewUrl = signal<string | null>(null);
+  readonly safePreviewUrl = signal<SafeResourceUrl | null>(null);
+  readonly previewTextContent = signal<string | null>(null);
+  private previewObjectUrl: string | null = null;
 
   // ---- POST /documents/:id/verify (System 7) ----
   readonly verifying = signal(false);
@@ -93,6 +108,105 @@ export class DocumentViewerComponent implements OnInit {
     });
   }
 
+  ngOnDestroy() {
+    this.releasePreviewUrl();
+  }
+
+  get isImage(): boolean {
+    const mime = this.doc()?.mime_type?.toLowerCase() || '';
+    const fn = this.doc()?.filename?.toLowerCase() || '';
+    return (
+      mime.startsWith('image/') ||
+      fn.endsWith('.png') ||
+      fn.endsWith('.jpg') ||
+      fn.endsWith('.jpeg') ||
+      fn.endsWith('.webp') ||
+      fn.endsWith('.gif') ||
+      fn.endsWith('.svg')
+    );
+  }
+
+  get isPdf(): boolean {
+    const mime = this.doc()?.mime_type?.toLowerCase() || '';
+    const fn = this.doc()?.filename?.toLowerCase() || '';
+    return mime === 'application/pdf' || fn.endsWith('.pdf');
+  }
+
+  get isText(): boolean {
+    const mime = this.doc()?.mime_type?.toLowerCase() || '';
+    const fn = this.doc()?.filename?.toLowerCase() || '';
+    return (
+      mime.startsWith('text/') ||
+      mime === 'application/json' ||
+      mime === 'application/xml' ||
+      fn.endsWith('.txt') ||
+      fn.endsWith('.json') ||
+      fn.endsWith('.csv') ||
+      fn.endsWith('.log') ||
+      fn.endsWith('.md')
+    );
+  }
+
+  get isAudio(): boolean {
+    const mime = this.doc()?.mime_type?.toLowerCase() || '';
+    const fn = this.doc()?.filename?.toLowerCase() || '';
+    return mime.startsWith('audio/') || fn.endsWith('.mp3') || fn.endsWith('.wav') || fn.endsWith('.ogg');
+  }
+
+  get isVideo(): boolean {
+    const mime = this.doc()?.mime_type?.toLowerCase() || '';
+    const fn = this.doc()?.filename?.toLowerCase() || '';
+    return mime.startsWith('video/') || fn.endsWith('.mp4') || fn.endsWith('.webm') || fn.endsWith('.mov');
+  }
+
+  get canInlinePreview(): boolean {
+    return this.isImage || this.isPdf || this.isText || this.isAudio || this.isVideo;
+  }
+
+  /** Fetches the document bytes through the backend download API to display inline. */
+  loadPreview() {
+    if (!this.canInlinePreview) return;
+    this.previewLoading.set(true);
+    this.previewError.set(null);
+    this.documentService.download(this.documentId).subscribe({
+      next: ({ blob }) => {
+        this.releasePreviewUrl();
+        if (this.isText) {
+          blob.text().then((text) => {
+            this.previewTextContent.set(text);
+            this.previewLoading.set(false);
+          }).catch(() => {
+            this.previewError.set('Could not read text preview.');
+            this.previewLoading.set(false);
+          });
+        } else {
+          // Specify explicit type if missing for proper browser media/pdf rendering
+          const effectiveBlob = this.isPdf && blob.type !== 'application/pdf' 
+            ? new Blob([blob], { type: 'application/pdf' })
+            : blob;
+          this.previewObjectUrl = URL.createObjectURL(effectiveBlob);
+          this.previewUrl.set(this.previewObjectUrl);
+          this.safePreviewUrl.set(this.sanitizer.bypassSecurityTrustResourceUrl(this.previewObjectUrl));
+          this.previewLoading.set(false);
+        }
+      },
+      error: (err: ApiError) => {
+        this.previewLoading.set(false);
+        this.previewError.set(err.message || 'Could not load inline preview.');
+      }
+    });
+  }
+
+  private releasePreviewUrl() {
+    if (this.previewObjectUrl) {
+      URL.revokeObjectURL(this.previewObjectUrl);
+      this.previewObjectUrl = null;
+    }
+    this.previewUrl.set(null);
+    this.safePreviewUrl.set(null);
+    this.previewTextContent.set(null);
+  }
+
   /** No standalone GET /documents/:id exists yet — the primary source of
    * a document's metadata (filename, mime_type, uploaded_by, ...) is the
    * embedded documents[] array on GET /cases/:id (see
@@ -119,6 +233,7 @@ export class DocumentViewerComponent implements OnInit {
         this.doc.set(found);
         this.loadShares();
         this.loading.set(false);
+        this.loadPreview();
       },
       error: () => this.fetchViaSharedWithMe(),
     });
@@ -132,6 +247,7 @@ export class DocumentViewerComponent implements OnInit {
         const match = result.documents.find((d) => d.document.id === this.documentId);
         if (match) {
           this.doc.set(match.document);
+          this.loadPreview();
           // A pure recipient never manages this document's sharing —
           // GET /documents/:id/shares would 403 for them too; skip the
           // call entirely rather than surface an expected denial.

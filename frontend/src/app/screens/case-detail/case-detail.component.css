@@ -19,6 +19,130 @@
   margin-top: 3px;
 }
 
+.status-badge-container {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-status-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e2e8f0);
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--color-text-secondary, #475569);
+  cursor: pointer;
+  transition: all var(--dur-fast, 150ms) ease;
+}
+
+.btn-status-toggle:hover {
+  background: var(--color-surface-hover, #f8fafc);
+  border-color: var(--color-accent, #0f172a);
+  color: var(--color-accent, #0f172a);
+}
+
+.status-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 100;
+  min-width: 210px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.15), 0 8px 10px -6px rgba(15, 23, 42, 0.1);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.status-menu-header {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+  padding: 4px 6px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.status-menu-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.status-option-btn {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color var(--dur-fast, 150ms) ease;
+}
+
+.status-option-btn:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+.status-option-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.badge-status-sm {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  display: inline-block;
+  letter-spacing: 0.03em;
+}
+
+.status-menu-error {
+  font-size: 11px;
+  color: #b91c1c;
+  padding: 4px 6px;
+  background: #fef2f2;
+  border-radius: 4px;
+}
+
+.meta-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-status-quick {
+  background: none;
+  border: none;
+  color: #2563eb;
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+  font-family: var(--font-mono, monospace);
+}
+
+.btn-status-quick:hover {
+  color: #1d4ed8;
+}
+
 .head-meta {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -414,6 +538,186 @@
 /* Compact empty state inside side panels */
 .state-block-compact {
   padding: var(--sp-6) var(--sp-5);
+}
+
+/* ==========================================================================
+   Case Team & Collaborators
+   ========================================================================== */
+.panel-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-text-action {
+  background: transparent;
+  border: none;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-accent-blue);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background-color var(--dur-fast) ease;
+}
+
+.btn-text-action:hover {
+  background: rgba(14, 116, 144, 0.1);
+}
+
+.members-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.member-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 10px var(--sp-5);
+  border-bottom: 1px solid var(--color-border-subtle);
+  transition: background-color var(--dur-fast) ease;
+}
+
+.member-row:last-child {
+  border-bottom: none;
+}
+
+.member-row:hover {
+  background: var(--color-hover-row);
+}
+
+.member-avatar {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: #ffffff;
+  background: var(--color-navy-primary);
+}
+
+.member-avatar.badge-owner {
+  background: linear-gradient(135deg, #1e3a8a, #2563eb);
+}
+
+.member-avatar.badge-forensics {
+  background: linear-gradient(135deg, #701a75, #a21caf);
+}
+
+.member-avatar.badge-investigator {
+  background: linear-gradient(135deg, #0e7490, #0284c7);
+}
+
+.member-avatar.badge-lawyer {
+  background: linear-gradient(135deg, #854d0e, #d97706);
+}
+
+.member-avatar.badge-judge {
+  background: linear-gradient(135deg, #3f3f46, #71717a);
+}
+
+.member-avatar.badge-viewer {
+  background: linear-gradient(135deg, #475569, #64748b);
+}
+
+.member-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.member-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.member-name {
+  font-size: 12.8px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.member-email {
+  font-size: 10.5px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.badge-member-role {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.badge-member-role.badge-owner {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.badge-member-role.badge-forensics {
+  background: #fdf4ff;
+  color: #86198f;
+  border: 1px solid #f5d0fe;
+}
+
+.badge-member-role.badge-investigator {
+  background: #ecfeff;
+  color: #0e7490;
+  border: 1px solid #a5f3fc;
+}
+
+.badge-member-role.badge-lawyer {
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+
+.badge-member-role.badge-judge {
+  background: #f4f4f5;
+  color: #3f3f46;
+  border: 1px solid #e4e4e7;
+}
+
+.badge-member-role.badge-viewer {
+  background: #f8fafc;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+}
+
+.btn-remove-member {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--dur-fast) ease;
+}
+
+.btn-remove-member:hover {
+  color: #ef4444;
+  background: #fef2f2;
 }
 
 /* ==========================================================================

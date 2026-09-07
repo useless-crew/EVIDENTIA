@@ -5,13 +5,14 @@ import { DmsStateService } from '../../core/services/dms-state.service';
 import { CaseService } from '../../core/services/case.service';
 import { ApiError } from '../../core/services/api-client.service';
 import { EventStreamService } from '../../core/services/event-stream.service';
-import { CaseDetail, DocumentSummary } from '../../core/models/api.models';
+import { CaseDetail, CaseMemberSummary, CaseStatus, DocumentSummary } from '../../core/models/api.models';
 import { RevealDirective } from '../../core/directives/reveal.directive';
+import { AddMemberDialogComponent } from '../../components/add-member-dialog/add-member-dialog.component';
 
 @Component({
   selector: 'app-case-detail',
   standalone: true,
-  imports: [CommonModule, RevealDirective],
+  imports: [CommonModule, RevealDirective, AddMemberDialogComponent],
   templateUrl: './case-detail.component.html',
   styleUrls: ['./case-detail.component.css']
 })
@@ -28,6 +29,24 @@ export class CaseDetailComponent implements OnInit, OnDestroy {
   readonly loading = signal(true);
   readonly errorMessage = signal<string | null>(null);
   readonly detail = signal<CaseDetail | null>(null);
+  readonly members = signal<CaseMemberSummary[]>([]);
+  readonly loadingMembers = signal(false);
+  readonly showAddMemberModal = signal(false);
+  readonly removingMemberId = signal<string | null>(null);
+  /** Allowed next statuses map adhering to backend caseStatusTransitions */
+  readonly allowedTransitions: Record<string, CaseStatus[]> = {
+    OPEN: ['UNDER_INVESTIGATION', 'ARCHIVED'],
+    UNDER_INVESTIGATION: ['SUBMITTED', 'ARCHIVED'],
+    SUBMITTED: ['UNDER_REVIEW', 'UNDER_INVESTIGATION', 'ARCHIVED'],
+    UNDER_REVIEW: ['CLOSED', 'UNDER_INVESTIGATION', 'ARCHIVED'],
+    CLOSED: ['ARCHIVED'],
+    ARCHIVED: []
+  };
+
+  readonly showStatusMenu = signal(false);
+  readonly updatingStatus = signal(false);
+  readonly statusError = signal<string | null>(null);
+
   /** System 13: whether this case's real-time event stream
    * (GET /cases/:id/events) is currently connected — a subtle indicator
    * only; the page remains fully usable via REST regardless (see
@@ -105,6 +124,111 @@ export class CaseDetailComponent implements OnInit, OnDestroy {
         this.loading.set(false);
       },
     });
+    this.loadMembers();
+  }
+
+  loadMembers() {
+    const id = this.caseId();
+    if (!id) return;
+    this.loadingMembers.set(true);
+    this.caseService.listMembers(id).subscribe({
+      next: (m) => {
+        this.members.set(m);
+        this.loadingMembers.set(false);
+      },
+      error: () => {
+        this.loadingMembers.set(false);
+      },
+    });
+  }
+
+  canManageMembers(): boolean {
+    const d = this.detail();
+    if (!d) return false;
+    return d.relationship?.is_owner || this.dms.role() === 'Admin';
+  }
+
+  getAvailableTransitions(): CaseStatus[] {
+    const current = this.detail()?.status;
+    if (!current) return [];
+    return this.allowedTransitions[current] || [];
+  }
+
+  toggleStatusMenu() {
+    this.showStatusMenu.update(v => !v);
+  }
+
+  closeStatusMenu() {
+    this.showStatusMenu.set(false);
+  }
+
+  changeStatus(nextStatus: CaseStatus) {
+    const d = this.detail();
+    if (!d || this.updatingStatus()) return;
+
+    this.updatingStatus.set(true);
+    this.statusError.set(null);
+
+    this.caseService.update(this.caseId(), {
+      title: d.title,
+      description: d.description,
+      status: nextStatus,
+      metadata: d.metadata || {}
+    }).subscribe({
+      next: (updated) => {
+        this.updatingStatus.set(false);
+        this.showStatusMenu.set(false);
+        this.detail.set(updated);
+        this.fetch();
+      },
+      error: (err: ApiError) => {
+        this.updatingStatus.set(false);
+        this.statusError.set(err.message || 'Failed to update case status');
+      }
+    });
+  }
+
+  openAssignMember() {
+    this.showAddMemberModal.set(true);
+  }
+
+  closeAssignMember() {
+    this.showAddMemberModal.set(false);
+  }
+
+  onMemberAdded(member: CaseMemberSummary) {
+    this.loadMembers();
+    this.fetch();
+  }
+
+  removeMember(member: CaseMemberSummary) {
+    if (member.membership_type === 'OWNER') return;
+    const confirmMsg = `Remove ${member.display_name} (${member.membership_type}) from this case?`;
+    if (!confirm(confirmMsg)) return;
+
+    this.removingMemberId.set(member.user_id);
+    this.caseService.removeMember(this.caseId(), member.user_id).subscribe({
+      next: () => {
+        this.removingMemberId.set(null);
+        this.loadMembers();
+        this.fetch();
+      },
+      error: (err: ApiError) => {
+        this.removingMemberId.set(null);
+        alert(err.message || 'Failed to remove member');
+      },
+    });
+  }
+
+  getMembershipBadgeClass(type: string): string {
+    switch (type) {
+      case 'OWNER': return 'badge-owner';
+      case 'FORENSICS': return 'badge-forensics';
+      case 'INVESTIGATOR': return 'badge-investigator';
+      case 'LAWYER': return 'badge-lawyer';
+      case 'JUDGE': return 'badge-judge';
+      default: return 'badge-viewer';
+    }
   }
 
   openDoc(d: DocumentSummary) {

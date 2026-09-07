@@ -62,6 +62,13 @@ export class ApiClientService {
     );
   }
 
+  delete<T>(path: string): Observable<T> {
+    return this.http.delete<ApiEnvelope<T>>(this.url(path)).pipe(
+      map((env) => this.unwrap(env)),
+      catchError((err) => this.rethrow(err))
+    );
+  }
+
   /**
    * A multipart POST (document upload) with real upload-progress events —
    * see internal/handlers/document/upload.go: the file is streamed

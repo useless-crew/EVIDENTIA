@@ -79,31 +79,148 @@
     </div>
 
     <!-- Viewer 2-Column Split -->
-    <div class="doc-layout-grid">
+    <div class="doc-layout-grid" [class.is-expanded]="isFullScreen()">
       <!-- Left Column: Document Canvas & Controls -->
-      <section class="panel viewer-card">
+      <section class="panel viewer-card" [class.is-fullscreen]="isFullScreen()">
         <div class="viewer-toolbar">
-          <button type="button" class="btn-icon" (click)="zoomOut()" aria-label="Zoom out">
+          <button type="button" class="btn-icon" (click)="zoomOut()" aria-label="Zoom out" [disabled]="isPdf">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="5" y1="12" x2="19" y2="12"></line>
             </svg>
           </button>
-          <button type="button" class="btn-icon" (click)="zoomIn()" aria-label="Zoom in">
+          <button type="button" class="btn-icon" (click)="zoomIn()" aria-label="Zoom in" [disabled]="isPdf">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="12" y1="5" x2="12" y2="19"></line>
               <line x1="5" y1="12" x2="19" y2="12"></line>
             </svg>
           </button>
-          <span class="zoom-indicator">{{ zoomLevel }}%</span>
+          <span class="zoom-indicator" *ngIf="!isPdf">{{ zoomLevel }}%</span>
+          <span class="zoom-indicator pdf-hint" *ngIf="isPdf">PDF Controls</span>
           <div class="toolbar-spacer"></div>
-          <button type="button" class="btn-ghost" (click)="resetZoom()">Reset</button>
+          <button type="button" class="btn-ghost" *ngIf="!isPdf" (click)="resetZoom()">Reset</button>
+
+          <!-- Expand / Full-Size Toggle -->
+          <button
+            type="button"
+            class="btn-icon btn-fullscreen-toggle"
+            (click)="toggleFullScreen()"
+            [title]="isFullScreen() ? 'Restore side panel' : 'Expand window to full size'"
+            [attr.aria-label]="isFullScreen() ? 'Restore side panel' : 'Expand window to full size'"
+          >
+            <!-- Collapse icon when fullscreen -->
+            <svg *ngIf="isFullScreen()" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="4 14 10 14 10 20"></polyline>
+              <polyline points="20 10 14 10 14 4"></polyline>
+              <line x1="14" y1="10" x2="21" y2="3"></line>
+              <line x1="3" y1="21" x2="10" y2="14"></line>
+            </svg>
+            <!-- Expand icon when normal -->
+            <svg *ngIf="!isFullScreen()" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="15 3 21 3 21 9"></polyline>
+              <polyline points="9 21 3 21 3 15"></polyline>
+              <line x1="21" y1="3" x2="14" y2="10"></line>
+              <line x1="3" y1="21" x2="10" y2="14"></line>
+            </svg>
+          </button>
         </div>
 
-        <!-- No inline renderer for arbitrary evidence file types — download
-             to view the original bytes; this box never fabricates content
-             for what's actually stored. -->
-        <div class="viewer-viewport doc-canvas-bg">
-          <div class="preview-placeholder" [style.transform]="'scale(' + zoomLevel / 100 + ')'">
+        <!-- Real inline renderer for images, PDFs, text, audio, video, or fallback -->
+        <div class="viewer-viewport doc-canvas-bg" [class.has-pdf]="isPdf">
+          <!-- Loading State -->
+          <div *ngIf="previewLoading()" class="preview-state-container animate-fade-in">
+            <span class="preview-spinner animate-spin"></span>
+            <span class="preview-state-text">Loading evidence content from secure vault…</span>
+          </div>
+
+          <!-- Error State -->
+          <div *ngIf="!previewLoading() && previewError()" class="preview-state-container animate-fade-in">
+            <div class="preview-placeholder">
+              <span class="preview-icon error" aria-hidden="true">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <line x1="12" y1="8" x2="12" y2="12"></line>
+                  <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+              </span>
+              <div class="preview-filename">{{ d.filename }}</div>
+              <p class="preview-note text-danger">{{ previewError() }}</p>
+              <button type="button" class="btn-secondary btn-sm" (click)="loadPreview()">
+                Retry Preview
+              </button>
+            </div>
+          </div>
+
+          <!-- Active Preview: Image -->
+          <div
+            *ngIf="!previewLoading() && !previewError() && isImage && previewUrl() as imgUrl"
+            class="image-preview-wrapper animate-fade-in"
+          >
+            <img
+              [src]="imgUrl"
+              [alt]="d.filename"
+              class="preview-image"
+              [style.transform]="'scale(' + zoomLevel / 100 + ')'"
+            />
+          </div>
+
+          <!-- Active Preview: PDF Document (Full-size viewport) -->
+          <div
+            *ngIf="!previewLoading() && !previewError() && isPdf && safePreviewUrl() as pdfUrl"
+            class="pdf-preview-wrapper animate-fade-in"
+          >
+            <iframe
+              [src]="pdfUrl"
+              class="pdf-frame"
+              title="PDF Evidence Preview"
+            ></iframe>
+          </div>
+
+          <!-- Active Preview: Text / Code / JSON -->
+          <div
+            *ngIf="!previewLoading() && !previewError() && isText && previewTextContent() !== null"
+            class="text-preview-wrapper animate-fade-in"
+            [style.transform]="'scale(' + zoomLevel / 100 + ')'"
+          >
+            <pre class="text-preview-content font-mono">{{ previewTextContent() }}</pre>
+          </div>
+
+          <!-- Active Preview: Audio -->
+          <div
+            *ngIf="!previewLoading() && !previewError() && isAudio && previewUrl() as audioUrl"
+            class="media-preview-wrapper animate-fade-in"
+          >
+            <div class="media-card">
+              <div class="media-icon">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 18V5l12-2v13"></path>
+                  <circle cx="6" cy="18" r="3"></circle>
+                  <circle cx="18" cy="16" r="3"></circle>
+                </svg>
+              </div>
+              <div class="media-title">{{ d.filename }}</div>
+              <audio [src]="audioUrl" controls class="media-player"></audio>
+            </div>
+          </div>
+
+          <!-- Active Preview: Video -->
+          <div
+            *ngIf="!previewLoading() && !previewError() && isVideo && previewUrl() as videoUrl"
+            class="video-preview-wrapper animate-fade-in"
+          >
+            <video
+              [src]="videoUrl"
+              controls
+              class="video-player"
+              [style.transform]="'scale(' + zoomLevel / 100 + ')'"
+            ></video>
+          </div>
+
+          <!-- Fallback: Non-previewable File Type -->
+          <div
+            *ngIf="!previewLoading() && !previewError() && !canInlinePreview"
+            class="preview-placeholder"
+            [style.transform]="'scale(' + zoomLevel / 100 + ')'"
+          >
             <span class="preview-icon" aria-hidden="true">
               <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
                 <rect x="5" y="3" width="14" height="18" rx="1.5"></rect>
@@ -115,9 +232,11 @@
             <div class="preview-filename">{{ d.filename }}</div>
             <div class="preview-type">{{ d.mime_type }}</div>
             <p class="preview-note">
-              Inline preview is not available for this file type. Use Download to view the original
-              evidence file.
+              Inline preview is not available for this binary format. Click Download below to inspect the original evidence file.
             </p>
+            <button type="button" class="btn-primary btn-sm" (click)="download()">
+              Download File
+            </button>
           </div>
         </div>
       </section>

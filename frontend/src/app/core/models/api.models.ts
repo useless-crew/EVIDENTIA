@@ -115,6 +115,27 @@ export interface CaseRelationship {
   membership_type?: string;
 }
 
+/** internal/service.CaseMemberSummary — team member/collaborator on a case. */
+export interface CaseMemberSummary {
+  id: string;
+  case_id: string;
+  user_id: string;
+  membership_type: 'OWNER' | 'INVESTIGATOR' | 'FORENSICS' | 'LAWYER' | 'JUDGE' | 'VIEWER' | string;
+  added_by: string;
+  first_name: string;
+  last_name: string;
+  display_name: string;
+  email: string;
+  roles: string[];
+  created_at: string;
+}
+
+/** POST /cases/:id/members request body. */
+export interface AddCaseMemberRequest {
+  user_id: string;
+  membership_type: string;
+}
+
 /** internal/service.CaseDetail — CaseSummary plus the four embedded blocks. */
 export interface CaseDetail extends CaseSummary {
   involved_parties: InvolvedPartySummary[];

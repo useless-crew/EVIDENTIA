@@ -1,7 +1,6 @@
 import { Component, OnInit, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { SmoothScrollService } from './core/services/smooth-scroll.service';
-import { CursorComponent } from './components/cursor/cursor.component';
 
 /**
  * The application root — now just the top-level route outlet.
@@ -18,7 +17,7 @@ import { CursorComponent } from './components/cursor/cursor.component';
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, CursorComponent],
+  imports: [RouterOutlet],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css'],
 })
