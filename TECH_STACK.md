@@ -1,7 +1,25 @@
 # Evidentia — Technology Stack
 
 This document is the **authoritative** technology stack for the Evidentia
-backend. It reflects decisions already made; it is not a menu of options.
+frontend and backend. It reflects decisions already made; it is not a menu of
+options.
+
+## Frontend
+
+- Angular 22 with standalone components
+- TypeScript 6
+- Angular Router for client-side navigation
+- Angular Forms for form handling
+- RxJS 7 for reactive programming
+- GSAP for animations
+- Lenis for smooth scrolling
+- Angular CLI with the esbuild-based application builder
+- Vitest and jsdom for unit testing
+- Prettier for code formatting
+
+The frontend source code is located in `frontend/`. Local development uses
+Angular's development server on port 4200, and production builds are generated
+with `ng build`.
 
 ## Core
 
