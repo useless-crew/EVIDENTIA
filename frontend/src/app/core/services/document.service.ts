@@ -4,6 +4,7 @@ import {
   BlockchainAnchorSummary,
   CertificateSummary,
   DocumentType,
+  EvidenceExportSummary,
   IntegrityVerifyResult,
   RedactRegion,
   RedactionSummary,
@@ -60,6 +61,21 @@ export class DocumentService {
       map((res) => ({
         blob: res.body as Blob,
         filename: this.filenameFromContentDisposition(res.headers.get('Content-Disposition')) ?? 'document',
+      }))
+    );
+  }
+
+  /** POST /documents/:id/export — initiates a forensic export and returns the export summary */
+  requestExport(documentId: string): Observable<EvidenceExportSummary> {
+    return this.api.post<EvidenceExportSummary>(`/documents/${documentId}/export`);
+  }
+
+  /** GET /exports/:export_id/download — streamed server-side watermarked bytes */
+  downloadExport(exportId: string): Observable<DownloadedFile> {
+    return this.api.getBlob(`/exports/${exportId}/download`).pipe(
+      map((res) => ({
+        blob: res.body as Blob,
+        filename: this.filenameFromContentDisposition(res.headers.get('Content-Disposition')) ?? `export-${exportId}`,
       }))
     );
   }

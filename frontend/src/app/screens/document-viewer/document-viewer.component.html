@@ -47,6 +47,14 @@
           {{ downloading() ? 'Downloading…' : 'Download' }}
         </button>
 
+        <button type="button" class="btn-primary" (click)="secureExport()" [disabled]="exporting()" title="Export with forensic watermark and provenance">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2v20"></path>
+            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+          </svg>
+          {{ exporting() ? 'Securing…' : 'Secure Export' }}
+        </button>
+
         <button type="button" class="btn-secondary" (click)="goToRedact()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 20h9"></path>
@@ -76,6 +84,11 @@
     <div class="form-alert form-alert-error" *ngIf="downloadError()">
       <span class="alert-mark" aria-hidden="true"></span>
       {{ downloadError() }}
+    </div>
+
+    <div class="form-alert form-alert-error" *ngIf="exportError()">
+      <span class="alert-mark" aria-hidden="true"></span>
+      {{ exportError() }}
     </div>
 
     <!-- Viewer 2-Column Split -->

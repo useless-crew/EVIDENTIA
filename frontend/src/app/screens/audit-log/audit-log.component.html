@@ -185,6 +185,12 @@
                   <span class="hash-chip prev-hash">{{ row.prev_hash }}</span>
                 </div>
               </div>
+              <div class="drawer-grid" *ngIf="row.metadata" style="margin-top: 1rem;">
+                <div class="meta-item" *ngFor="let kv of row.metadata | keyvalue">
+                  <span class="meta-key" style="text-transform: capitalize;">{{ kv.key.replace('_', ' ') }}</span>
+                  <span class="meta-value">{{ kv.value }}</span>
+                </div>
+              </div>
               <div class="drawer-meta">
                 User {{ row.user_id || 'system' }}<span *ngIf="row.case_id"> · Case {{ row.case_id }}</span>
               </div>

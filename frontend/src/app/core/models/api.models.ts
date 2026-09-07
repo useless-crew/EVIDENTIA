@@ -274,6 +274,18 @@ export interface RedactionSummary {
   document: DocumentSummary;
 }
 
+/** POST /documents/:id/export's response data (service.EvidenceExportSummary) */
+export interface EvidenceExportSummary {
+  id: string;
+  export_id: string;
+  document_id: string;
+  status: string;
+  export_type: string;
+  watermark_status: string;
+  created_at: string;
+  export_fingerprint: string;
+}
+
 /** document_shares.permission — VIEW (read + download + certificate
  * read) or VERIFY (VIEW's grants plus document:verify). Never implies
  * redact/reshare/delete. */

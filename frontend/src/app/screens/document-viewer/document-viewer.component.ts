@@ -66,6 +66,10 @@ export class DocumentViewerComponent implements OnInit, OnDestroy {
   readonly downloading = signal(false);
   readonly downloadError = signal<string | null>(null);
 
+  // ---- POST /documents/:id/export (System 22) ----
+  readonly exporting = signal(false);
+  readonly exportError = signal<string | null>(null);
+
   // ---- Document sharing ----
   // canManageShares reflects a REAL backend authorization result (whether
   // GET /documents/:id/shares succeeded), never a client-side guess — a
@@ -358,6 +362,41 @@ export class DocumentViewerComponent implements OnInit, OnDestroy {
         this.downloading.set(false);
         this.downloadError.set(err.message);
       },
+    });
+  }
+
+  /** Initiates the secure forensic export pipeline and downloads the result. */
+  secureExport() {
+    if (this.exporting()) return;
+    if (!confirm('Are you sure you want to securely export this evidence? The downloaded file will contain an invisible forensic watermark tracking your identity and IP address. This action will be audited and anchored to the blockchain.')) return;
+
+    this.exporting.set(true);
+    this.exportError.set(null);
+    
+    // Step 1: Request the export (generates watermark + hash + blockchain anchor)
+    this.documentService.requestExport(this.documentId).subscribe({
+      next: (summary) => {
+        // Step 2: Download the newly generated payload using the specific export ID
+        this.documentService.downloadExport(summary.export_id).subscribe({
+          next: ({ blob, filename }) => {
+            this.exporting.set(false);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+          },
+          error: (err: ApiError) => {
+            this.exporting.set(false);
+            this.exportError.set(err.message || 'Failed to download the exported file.');
+          }
+        });
+      },
+      error: (err: ApiError) => {
+        this.exporting.set(false);
+        this.exportError.set(err.message || 'Failed to initiate secure export.');
+      }
     });
   }
 

@@ -164,8 +164,8 @@ export class AuditLogComponent implements OnInit, OnDestroy {
     if (a.includes('UPLOAD')) return 'action-upload';
     if (a.includes('VERIF')) return 'action-verify';
     if (a.includes('REDACT')) return 'action-redact';
-    if (a.includes('VIEW') || a.includes('DOWNLOAD') || a.includes('ACCESS')) return 'action-view';
-    if (a.includes('STATUS') || a.includes('ROLE') || a.includes('CREATED') || a.includes('UPDATED')) return 'action-status';
+    if (a.includes('VIEW') || a.includes('DOWNLOAD') || a.includes('ACCESS') || a.includes('EXPORT')) return 'action-view';
+    if (a.includes('STATUS') || a.includes('ROLE') || a.includes('CREATED') || a.includes('UPDATED') || a.includes('WATERMARK')) return 'action-status';
     return 'action-default';
   }
 }
