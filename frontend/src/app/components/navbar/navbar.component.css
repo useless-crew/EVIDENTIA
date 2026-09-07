@@ -31,29 +31,17 @@
   user-select: none;
 }
 
-.seal-badge {
+.brand-logo {
   position: relative;
   width: 42px;
   height: 42px;
-  border-radius: 50%;
   flex: none;
-  border: 1.5px dashed rgba(255, 255, 255, 0.45);
-  background: repeating-conic-gradient(rgba(255, 255, 255, 0.10) 0deg 10deg, transparent 10deg 20deg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  object-fit: contain;
   transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s ease;
 }
 
-.brand:hover .seal-badge {
+.brand:hover .brand-logo {
   transform: rotate(180deg);
-  border-color: var(--tricolor-saffron);
-}
-
-.seal-text {
-  font: 600 6.5px var(--font-mono);
-  letter-spacing: 0.04em;
-  color: rgba(255, 255, 255, 0.75);
 }
 
 .brand-text {
