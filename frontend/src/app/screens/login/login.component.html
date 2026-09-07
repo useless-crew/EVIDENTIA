@@ -61,33 +61,6 @@
        ========================================================== -->
   <main class="login-main">
     <div class="login-container">
-      <!-- Quick Role Accounts Demo Selector — local dev only, never rendered
-           in a production build (environment.demoMode is false there). -->
-      <div class="demo-accounts-card" *ngIf="demoMode">
-        <div class="demo-header">
-          <span class="demo-title">Local dev demo accounts</span>
-          <span class="demo-badge">Real backend login</span>
-        </div>
-        <div class="demo-chips-grid">
-          <button
-            type="button"
-            *ngFor="let acc of demoAccounts()"
-            class="demo-chip"
-            [class.active]="selectedAccount?.email === acc.email"
-            [disabled]="submitting()"
-            (click)="quickSignIn(acc, $event)"
-            [title]="'Fill and sign in as ' + acc.name + ' (' + acc.role + ') — see backend/cmd/devuser'"
-          >
-            <span class="chip-role-badge" [attr.data-role]="acc.role">{{ acc.role }}</span>
-            <span class="chip-info">
-              <span class="chip-name">{{ acc.name }}</span>
-              <span class="chip-email">{{ acc.email }}</span>
-            </span>
-            <span class="chip-action" aria-hidden="true">→</span>
-          </button>
-        </div>
-      </div>
-
       <!-- Login Card -->
       <div class="login-card">
         <div class="card-header-row">
@@ -95,9 +68,6 @@
             <span class="page-eyebrow">Authentication</span>
             <h1 class="card-title">Authorized sign in</h1>
           </div>
-          <span class="selected-role-tag" *ngIf="selectedAccount">
-            {{ selectedAccount.role }} clearance
-          </span>
         </div>
 
         <p class="card-description">

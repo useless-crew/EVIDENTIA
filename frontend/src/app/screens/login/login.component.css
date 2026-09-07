@@ -177,133 +177,6 @@
   animation: fadeSlideIn 0.45s var(--ease-out-expo) both;
 }
 
-/* Demo accounts */
-.demo-accounts-card {
-  border: 1px dashed var(--color-border);
-  background: var(--color-card-raised);
-  border-radius: var(--r-lg);
-  padding: var(--sp-3) var(--sp-4) var(--sp-4);
-}
-
-.demo-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  margin-bottom: var(--sp-3);
-  flex-wrap: wrap;
-}
-
-.demo-title {
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.15em;
-  text-transform: uppercase;
-  color: var(--color-text-secondary);
-}
-
-.demo-badge {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--color-warning);
-  background: var(--color-warning-bg);
-  border: 1px solid var(--color-warning-border);
-  border-radius: 999px;
-  padding: 2px 8px;
-}
-
-.demo-chips-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.demo-chip {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  width: 100%;
-  text-align: left;
-  background: var(--color-card-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--r-md);
-  padding: 8px 11px;
-  font-family: inherit;
-  transition: border-color var(--dur-base) ease, background-color var(--dur-base) ease,
-    transform var(--dur-base) var(--ease-out-expo);
-}
-
-.demo-chip:hover:not(:disabled) {
-  border-color: var(--color-accent-blue);
-  background: var(--color-accent-blue-light);
-  transform: translateX(3px);
-}
-
-.demo-chip.active {
-  border-color: var(--color-accent-blue);
-  box-shadow: 0 0 0 3px rgba(66, 109, 155, 0.14);
-}
-
-.demo-chip:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.chip-role-badge {
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--color-navy-primary);
-  background: var(--color-neutral-bg);
-  border: 1px solid var(--color-neutral-border);
-  border-radius: 4px;
-  padding: 3px 6px;
-  min-width: 66px;
-  text-align: center;
-}
-
-.chip-info {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  flex: 1;
-}
-
-.chip-name {
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--color-text-primary);
-}
-
-.chip-email {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--color-text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chip-action {
-  flex: none;
-  font-size: 13px;
-  color: var(--color-accent-blue);
-  opacity: 0;
-  translate: -5px 0;
-  transition: opacity var(--dur-base) ease, translate var(--dur-base) var(--ease-out-expo);
-}
-
-.demo-chip:hover:not(:disabled) .chip-action {
-  opacity: 1;
-  translate: 0 0;
-}
-
 /* --------------------------------------------------------------------------
    Login card
    -------------------------------------------------------------------------- */
@@ -400,6 +273,34 @@
   margin-top: var(--sp-5);
 }
 
+.login-form .form-row {
+  grid-template-columns: 1fr;
+  gap: 7px;
+}
+
+.login-form .form-label {
+  margin-bottom: 0;
+  line-height: 1.35;
+}
+
+.login-form .input {
+  min-height: 52px;
+  padding: 13px 14px;
+  border-color: #cbd5df;
+  border-radius: 7px;
+  background: #ffffff;
+  box-shadow: inset 0 1px 2px rgba(22, 47, 82, 0.04);
+}
+
+.login-form .input:hover {
+  border-color: #9eafc1;
+}
+
+.login-form .input:focus {
+  border-color: var(--color-accent-blue);
+  box-shadow: 0 0 0 3px rgba(66, 109, 155, 0.16), inset 0 1px 2px rgba(22, 47, 82, 0.04);
+}
+
 .btn-signin {
   width: 100%;
   justify-content: center;
@@ -407,7 +308,7 @@
   font-weight: 600;
   padding: 12px 20px;
   border-radius: var(--r-sm);
-  margin-top: var(--sp-2);
+  margin-top: var(--sp-5);
 }
 
 .btn-signin:disabled {
@@ -492,11 +393,7 @@
 }
 
 @media (max-width: 520px) {
-  .demo-chip {
-    flex-wrap: wrap;
-  }
-
-  .chip-role-badge {
-    min-width: 0;
+  .login-form .form-row + .form-row {
+    margin-top: var(--sp-4);
   }
 }
