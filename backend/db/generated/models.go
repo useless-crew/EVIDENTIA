@@ -12,6 +12,34 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type EvidenceExport struct {
+	ID                   uuid.UUID          `json:"id"`
+	ExportID             string             `json:"export_id"`
+	DocumentID           uuid.UUID          `json:"document_id"`
+	DocumentVersion      int32              `json:"document_version"`
+	CaseID               uuid.UUID          `json:"case_id"`
+	UserID               uuid.UUID          `json:"user_id"`
+	RecipientUserID      uuid.UUID          `json:"recipient_user_id"`
+	ShareID              *uuid.UUID         `json:"share_id"`
+	OriginalSha256       []byte             `json:"original_sha256"`
+	ExportSha256         []byte             `json:"export_sha256"`
+	ExportFingerprint    []byte             `json:"export_fingerprint"`
+	WatermarkStatus      string             `json:"watermark_status"`
+	WatermarkVersion     int32              `json:"watermark_version"`
+	ExportType           string             `json:"export_type"`
+	Permission           string             `json:"permission"`
+	SourceIP             *string            `json:"source_ip"`
+	UserAgent            *string            `json:"user_agent"`
+	SessionReferenceHash *string            `json:"session_reference_hash"`
+	Status               string             `json:"status"`
+	FailureReason        *string            `json:"failure_reason"`
+	AuditEventID         *uuid.UUID         `json:"audit_event_id"`
+	BlockchainAnchorID   *uuid.UUID         `json:"blockchain_anchor_id"`
+	Metadata             json.RawMessage    `json:"metadata"`
+	CreatedAt            time.Time          `json:"created_at"`
+	CompletedAt          pgtype.Timestamptz `json:"completed_at"`
+}
+
 // Append-only, hash-chained security audit trail. id (UUID) is the external identifier; seq (an identity column) is the deterministic, gap-free monotonic ordering used for chain traversal — timestamps alone are not trusted for ordering (clock skew, concurrent inserts). user_id/case_id are nullable (a system-initiated action, or an action with no case context, e.g. login, still gets an entry). resource_id is intentionally NOT a foreign key: resource_type varies across multiple tables (documents, cases, users, ...) and Postgres cannot express a polymorphic FK — referential integrity for it is an application-layer concern. This table's runtime privileges grant SELECT and INSERT only (see grants below): no UPDATE, no DELETE, at the database level, not just in application code. Hash chain computation (hash/prev_hash values) belongs to System 8 — this migration only establishes storage, constraints, and the invariant that at most one row may claim a given predecessor (see the partial unique indexes below).
 type AuditLog struct {
 	ID        uuid.UUID  `json:"id"`
@@ -28,6 +56,29 @@ type AuditLog struct {
 	// NULL only for the single genesis entry (see idx_audit_log_single_genesis below, which enforces that "only one" at the database level).
 	PrevHash []byte `json:"prev_hash"`
 	Hash     []byte `json:"hash"`
+}
+
+// One row per Hyperledger Fabric blockchain anchoring attempt for an Evidentia document (System 20). Stores the document SHA-256, event type, Fabric transaction ID (once confirmed), and lifecycle status. Evidence content is NEVER stored here — only cryptographic references. This table is the outbox between PostgreSQL and the Fabric network; it does NOT replace the existing audit_log chain.
+type BlockchainAnchor struct {
+	ID              uuid.UUID `json:"id"`
+	DocumentID      uuid.UUID `json:"document_id"`
+	DocumentVersion int32     `json:"document_version"`
+	EventType       string    `json:"event_type"`
+	// SHA-256 of the document at anchor time — exactly 32 bytes, matching documents.sha256_hash. Stored redundantly here so the anchor record is self-contained and survives document record evolution.
+	DocumentHash []byte `json:"document_hash"`
+	// PENDING: anchor requested, not yet submitted. CONFIRMED: Fabric tx committed and validated. FAILED: terminal failure after retries exhausted.
+	Status string `json:"status"`
+	// The real Hyperledger Fabric transaction ID returned by the peer after the transaction is committed to the ledger. NULL until CONFIRMED. Never a fabricated/local placeholder.
+	FabricTxID       *string            `json:"fabric_tx_id"`
+	FabricChannel    *string            `json:"fabric_channel"`
+	FabricChaincode  *string            `json:"fabric_chaincode"`
+	Organization     *string            `json:"organization"`
+	LastError        *string            `json:"last_error"`
+	RetryCount       int32              `json:"retry_count"`
+	Metadata         json.RawMessage    `json:"metadata"`
+	CreatedAt        time.Time          `json:"created_at"`
+	ConfirmedAt      pgtype.Timestamptz `json:"confirmed_at"`
+	UpdatedAt        time.Time          `json:"updated_at"`
 }
 
 // One row per audit-chain verification run (System 11) — the durable, evidentiary record of "was the chain intact as of this check", independent of whatever transport (SSE, polling) a client used to observe it while running. Never mutates audit_log; read-only against it. id is the verification_id every System 11 API/SSE route is keyed by. requested_by_role is captured verbatim at request time, mirroring audit_log.role's own rationale (a user's roles can change after the fact, but this record should reflect what was true when requested).

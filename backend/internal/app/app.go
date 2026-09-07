@@ -135,6 +135,10 @@ type App struct {
 	// for evidence anchoring, provenance retrieval, and blockchain
 	// verification. Depends on BlockchainService and JobClient.
 	BlockchainAnchorService *service.BlockchainAnchorService
+
+	// ExportService manages forensic evidence export processing,
+	// integrating with watermark service, object storage, and audit logs.
+	ExportService *service.ExportService
 }
 
 // New loads configuration and connects every infrastructure dependency in
@@ -250,6 +254,9 @@ func New(ctx context.Context) (*App, error) {
 		log.Info("blockchain: Hyperledger Fabric integration disabled (FABRIC_ENABLED=false)")
 	}
 
+	watermarkService := service.NewWatermarkService()
+	exportService := service.NewExportService(db.Pool(), authzService, recorder, objectStorage, watermarkService, log)
+	
 	blockchainAnchorSvc := service.NewBlockchainAnchorService(
 		db.Pool(),
 		authzService,
@@ -266,6 +273,7 @@ func New(ctx context.Context) (*App, error) {
 	// Wire the blockchain hook into DocumentService after both are
 	// constructed — see DocumentService.SetBlockchainService's doc comment.
 	documentService.SetBlockchainService(blockchainAnchorSvc)
+	exportService.SetBlockchainService(blockchainAnchorSvc)
 
 	return &App{
 		Config:                  cfg,
@@ -286,6 +294,7 @@ func New(ctx context.Context) (*App, error) {
 		SSEManager:              sseManager,
 		BlockchainService:       blockchainSvc,
 		BlockchainAnchorService: blockchainAnchorSvc,
+		ExportService:           exportService,
 	}, nil
 }
 

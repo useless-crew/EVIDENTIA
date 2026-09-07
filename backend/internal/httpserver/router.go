@@ -132,6 +132,11 @@ func NewRouter(a *app.App) *gin.Engine {
 	uploadBodyLimit := middleware.BodyLimit(a.Config.Documents.MaxUploadSize)
 	r.POST("/api/v1/cases/:id/documents", authMW, middleware.RequireCaseAccess(a.AuthzService, authz.ActionDocumentUpload, "id"), uploadBodyLimit, documenthandlers.Upload(a.DocumentService))
 	r.GET("/api/v1/documents/:id/download", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentDownload, "id"), documenthandlers.Download(a.DocumentService))
+	
+	// Export routes (System 22)
+	r.POST("/api/v1/documents/:id/export", authMW, middleware.RequireDocumentAccess(a.AuthzService, authz.ActionDocumentDownload, "id"), documenthandlers.RequestExport(a.ExportService))
+	r.GET("/api/v1/exports/:export_id/download", authMW, documenthandlers.DownloadExport(a.ExportService))
+
 
 	// Verification & compliance certificates (System 7): both routes are
 	// document-scoped (:id is the DOCUMENT id) and use RequireDocumentAccess,
