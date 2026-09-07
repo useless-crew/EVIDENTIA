@@ -110,7 +110,7 @@ export class LandingPageComponent implements OnInit, AfterViewInit, OnDestroy {
       .from(supporting, { y: 18, opacity: 0, duration: 0.7, stagger: 0.07 }, '-=0.65')
       // Deliberately no `y` here: the scrub parallax below owns the card's y,
       // and two tweens writing the same property fight during the intro.
-      .from('.fingerprint-card', { opacity: 0, scale: 0.96, duration: 1 }, '-=0.8')
+      .from('.iso-chain-wrapper', { opacity: 0, scale: 0.94, duration: 1 }, '-=0.8')
       .from('.hero-card-halo', { opacity: 0, scale: 0.85, duration: 1.2 }, '<');
   }
 

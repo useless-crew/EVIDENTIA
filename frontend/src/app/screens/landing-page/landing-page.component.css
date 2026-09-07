@@ -120,147 +120,96 @@
   inset: -18% -12%;
   z-index: -1;
   border-radius: 50%;
-  background: radial-gradient(
-    circle at 50% 50%,
-    rgba(66, 109, 155, 0.55) 0%,
-    rgba(255, 153, 51, 0.14) 42%,
-    transparent 70%
-  );
+  background: radial-gradient(circle at 50% 50%,
+      rgba(66, 109, 155, 0.55) 0%,
+      rgba(255, 153, 51, 0.14) 42%,
+      transparent 70%);
   filter: blur(48px);
 }
 
-.fingerprint-card {
+/* =========================================================================
+   Isometric Blockchain Chain
+   ========================================================================= */
+.iso-chain-wrapper {
   position: relative;
   width: 100%;
-  max-width: 430px;
-  padding: 26px;
-  border-radius: 14px;
-  /* Glass over the mesh — the one place blur is used, so it stays an accent */
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
-  box-shadow: 0 28px 60px -24px rgba(0, 0, 0, 0.6);
-  color: var(--color-text-light);
-  transition:
-    transform var(--dur-base) var(--ease-out-expo),
-    border-color var(--dur-base) var(--ease-out-expo),
-    box-shadow var(--dur-base) var(--ease-out-expo);
-}
-
-.fingerprint-card:hover {
-  transform: translateY(-6px);
-  border-color: rgba(255, 153, 51, 0.45);
-  box-shadow: 0 34px 70px -26px rgba(0, 0, 0, 0.7), var(--glow-saffron);
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding-bottom: 15px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.62);
-}
-
-.card-header-icon {
-  flex: none;
-  transition: transform var(--dur-base) var(--ease-out-expo), color var(--dur-base) ease;
-}
-
-.fingerprint-card:hover .card-header-icon {
-  transform: scale(1.1);
-  color: var(--tricolor-saffron);
-}
-
-.file-name {
-  font: 500 13px var(--font-mono);
-  color: #ffffff;
-  letter-spacing: 0.01em;
-}
-
-.card-chip {
-  margin-left: auto;
-  font: 500 10px var(--font-mono);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--tricolor-saffron);
-  border: 1px solid rgba(255, 153, 51, 0.4);
-  background: rgba(255, 153, 51, 0.1);
-  padding: 3px 8px;
-  border-radius: 999px;
-}
-
-.card-body {
-  padding-top: 18px;
+  max-width: 540px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  align-items: center;
+  gap: 0;
 }
 
-.hash-label {
-  font: 500 10.5px var(--font-mono);
-  color: rgba(255, 255, 255, 0.5);
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
+.hero-3d-image {
+  width: 100%;
+  max-width: 480px;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+  animation: heroFloat 6s ease-in-out infinite;
+  filter: drop-shadow(0 15px 35px rgba(0, 0, 0, 0.5));
 }
 
-.hash-value {
-  font: 400 12.5px var(--font-mono);
-  color: #ffffff;
-  word-break: break-all;
-  background: rgba(0, 0, 0, 0.28);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  padding: 10px 12px;
-  transition: border-color var(--dur-base) ease, background-color var(--dur-base) ease;
+@keyframes heroFloat {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-15px); }
 }
 
-.fingerprint-card:hover .hash-value {
-  border-color: rgba(255, 255, 255, 0.24);
-  background: rgba(0, 0, 0, 0.36);
-}
-
-.status-indicator {
+/* ── Status strip ── */
+.iso-status-strip {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 6px;
+  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 16px;
+  padding: 10px 18px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.065);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  margin-top: 4px;
+  width: fit-content;
+  max-width: 100%;
 }
 
-.status-pulse {
-  width: 7px;
-  height: 7px;
+.iso-status-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.iso-status-pulse {
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: #4ade80;
   box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.6);
-  animation: statusPulse 2.4s var(--ease-out-quart) infinite;
+  animation: statusPulse 2.4s ease-in-out infinite;
 }
 
 @keyframes statusPulse {
-  0% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.55); }
-  70% { box-shadow: 0 0 0 9px rgba(74, 222, 128, 0); }
+  0%   { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.55); }
+  70%  { box-shadow: 0 0 0 8px rgba(74, 222, 128, 0); }
   100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
 }
 
-.status-text {
-  font: 500 12.5px var(--font-sans);
+.iso-status-text {
+  font: 500 10.5px var(--font-mono);
   color: #86efac;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
-.card-footer {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+.iso-status-text.muted {
+  color: rgba(255, 255, 255, 0.38);
+  font-weight: 400;
 }
 
-.footer-meta {
-  font: 400 10.5px var(--font-mono);
-  letter-spacing: 0.06em;
-  color: rgba(255, 255, 255, 0.42);
+.iso-status-divider {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.15);
 }
 
 /* Hero stat strip */
@@ -642,6 +591,7 @@
    Responsive
    ========================================================================== */
 @media (max-width: 980px) {
+
   .hero-inner,
   .split-shell {
     grid-template-columns: minmax(0, 1fr);
