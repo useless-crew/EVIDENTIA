@@ -8,6 +8,7 @@ package app
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 
@@ -227,6 +228,11 @@ func New(ctx context.Context) (*App, error) {
 	// Redis instance, not a shared pool: Asynq's client/server API only
 	// accepts its own RedisConnOpt types, not an existing *redis.Client).
 	redisOpt := asynq.RedisClientOpt{Addr: cfg.Redis.Addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB}
+	if cfg.Redis.TLS {
+		redisOpt.TLSConfig = &tls.Config{
+			InsecureSkipVerify: cfg.Redis.TLSInsecureSkipVerify,
+		}
+	}
 	jobClient := jobs.NewClient(redisOpt)
 	auditService := service.NewAuditService(db.Pool(), authzService, recorder, jobClient, eventPublisher, log)
 
@@ -254,7 +260,7 @@ func New(ctx context.Context) (*App, error) {
 		log.Info("blockchain: Hyperledger Fabric integration disabled (FABRIC_ENABLED=false)")
 	}
 
-	watermarkService := service.NewWatermarkService()
+	watermarkService := service.NewWatermarkService(cfg.JWT.SigningKey)
 	exportService := service.NewExportService(db.Pool(), authzService, recorder, objectStorage, watermarkService, log)
 	
 	blockchainAnchorSvc := service.NewBlockchainAnchorService(

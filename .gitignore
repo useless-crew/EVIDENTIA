@@ -95,3 +95,19 @@ __screenshots__/
 # System files
 .DS_Store
 Thumbs.db
+
+# ---- Terraform / AWS Infrastructure ----
+
+# State files (contain resource IDs and potentially sensitive outputs)
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Environment-specific variable files (contain real deployment values)
+infra/terraform/environments/*/terraform.tfvars
+infra/terraform/environments/*/.terraform/
+
+# Crash logs
+crash.log
+crash.*.log

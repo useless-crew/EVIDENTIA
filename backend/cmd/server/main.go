@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -105,6 +106,11 @@ func run(ctx context.Context, a *app.App) {
 	runEmbeddedWorker := os.Getenv("DISABLE_EMBEDDED_WORKER") != "true"
 
 	redisOpt := asynq.RedisClientOpt{Addr: a.Config.Redis.Addr, Password: a.Config.Redis.Password, DB: a.Config.Redis.DB}
+	if a.Config.Redis.TLS {
+		redisOpt.TLSConfig = &tls.Config{
+			InsecureSkipVerify: a.Config.Redis.TLSInsecureSkipVerify,
+		}
+	}
 
 	// Each error handler checks task.Type() before acting, so chaining them
 	// in a single asynq.ErrorHandlerFunc is safe and correct — exactly one

@@ -48,6 +48,11 @@ jobs:
       - name: go test (unit only — integration tests need live infra)
         run: go test ./...
 
+      - name: govulncheck (known Go vulnerabilities)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
   frontend:
     name: Frontend (build)
     runs-on: ubuntu-latest

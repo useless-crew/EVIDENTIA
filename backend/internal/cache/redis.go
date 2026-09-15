@@ -6,6 +6,7 @@ package cache
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 
 	"github.com/redis/go-redis/v9"
@@ -22,12 +23,22 @@ type Cache struct {
 
 // New builds a Redis client per cfg and verifies connectivity with a Ping
 // before returning, so an unreachable Redis fails startup immediately.
+// When cfg.TLS is true (required for AWS ElastiCache in-transit
+// encryption), the connection is wrapped in a TLS layer.
 func New(ctx context.Context, cfg config.RedisConfig) (*Cache, error) {
-	client := redis.NewClient(&redis.Options{
+	opts := &redis.Options{
 		Addr:     cfg.Addr,
 		Password: cfg.Password,
 		DB:       cfg.DB,
-	})
+	}
+
+	if cfg.TLS {
+		opts.TLSConfig = &tls.Config{
+			InsecureSkipVerify: cfg.TLSInsecureSkipVerify,
+		}
+	}
+
+	client := redis.NewClient(opts)
 
 	if err := client.Ping(ctx).Err(); err != nil {
 		_ = client.Close()

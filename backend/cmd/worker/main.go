@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -52,6 +53,11 @@ func main() {
 
 func run(ctx context.Context, a *app.App) {
 	redisOpt := asynq.RedisClientOpt{Addr: a.Config.Redis.Addr, Password: a.Config.Redis.Password, DB: a.Config.Redis.DB}
+	if a.Config.Redis.TLS {
+		redisOpt.TLSConfig = &tls.Config{
+			InsecureSkipVerify: a.Config.Redis.TLSInsecureSkipVerify,
+		}
+	}
 
 	// Chain both error handlers — each checks task.Type() before acting, so
 	// exactly one fires per task type, mirroring cmd/server/main.go.

@@ -122,6 +122,13 @@ type RedisConfig struct {
 	Addr     string
 	Password string
 	DB       int
+	// TLS enables TLS for the Redis connection. Required for AWS
+	// ElastiCache in-transit encryption; leave false for local dev.
+	TLS bool
+	// TLSInsecureSkipVerify skips TLS certificate verification. Only
+	// useful during initial setup/debugging against a self-signed cert;
+	// never appropriate for production.
+	TLSInsecureSkipVerify bool
 }
 
 // MinIOConfig configures the MinIO / S3-compatible object storage client.
@@ -348,9 +355,11 @@ func Load() (*Config, error) {
 			ConnMaxLifetime: getDuration(c, "DATABASE_CONN_MAX_LIFETIME", 5*time.Minute),
 		},
 		Redis: RedisConfig{
-			Addr:     getString("REDIS_ADDR", "localhost:6379"),
-			Password: getString("REDIS_PASSWORD", ""),
-			DB:       getInt(c, "REDIS_DB", 0),
+			Addr:                  getString("REDIS_ADDR", "localhost:6379"),
+			Password:              getString("REDIS_PASSWORD", ""),
+			DB:                    getInt(c, "REDIS_DB", 0),
+			TLS:                   getBool(c, "REDIS_TLS", false),
+			TLSInsecureSkipVerify: getBool(c, "REDIS_TLS_INSECURE", false),
 		},
 		MinIO: MinIOConfig{
 			Endpoint:  getString("MINIO_ENDPOINT", "localhost:9000"),

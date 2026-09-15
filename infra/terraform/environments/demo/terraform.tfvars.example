@@ -1,0 +1,28 @@
+# Evidentia Demo — Example Variable Values
+#
+# Copy to terraform.tfvars and fill in real values.
+# NEVER commit terraform.tfvars — it is gitignored.
+
+aws_region     = "ap-south-1"
+aws_account_id = "123456789012"
+environment    = "demo"
+
+# RDS master password — generate a strong random password
+db_password = "CHANGE_ME_STRONG_PASSWORD"
+
+# ElastiCache Redis AUTH token — must be 16-128 alphanumeric characters
+redis_auth_token = "CHANGE_ME_REDIS_TOKEN"
+
+# ECR image URIs — updated after building and pushing images
+api_image    = "123456789012.dkr.ecr.ap-south-1.amazonaws.com/evidentia-api:latest"
+worker_image = "123456789012.dkr.ecr.ap-south-1.amazonaws.com/evidentia-worker:latest"
+
+# Domain (optional — leave empty for CloudFront default domain)
+# domain_name = "app.evidentia.example.com"
+
+# ACM certificate ARN (required if domain_name is set)
+# acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/abc-123"
+
+# Secrets Manager ARNs (create these manually first)
+# jwt_secret_arn   = "arn:aws:secretsmanager:ap-south-1:123456789012:secret:evidentia/jwt-secret-AbCdEf"
+# minio_secret_arn = "arn:aws:secretsmanager:ap-south-1:123456789012:secret:evidentia/minio-secret-AbCdEf"

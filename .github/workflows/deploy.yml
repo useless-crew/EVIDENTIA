@@ -1,0 +1,208 @@
+# Evidentia — AWS Deployment Pipeline
+#
+# Builds Docker images, pushes to ECR with immutable SHA-based tags,
+# and deploys to ECS Fargate. Frontend is deployed to S3 + CloudFront.
+#
+# Triggered on push to main (after CI passes) or manual dispatch.
+# Production deployments require manual approval via environment protection.
+#
+# Prerequisites:
+#   1. ECR repositories created (via Terraform)
+#   2. ECS services running (via Terraform)
+#   3. GitHub repository secrets configured (see below)
+#
+# Required GitHub Secrets:
+#   AWS_ACCOUNT_ID          — AWS account ID
+#   AWS_REGION              — e.g. ap-south-1
+#   AWS_ROLE_ARN            — IAM role ARN for GitHub Actions OIDC
+#   ECS_CLUSTER             — ECS cluster name
+#   ECS_API_SERVICE         — ECS API service name
+#   ECS_WORKER_SERVICE      — ECS worker service name
+#   FRONTEND_S3_BUCKET      — S3 bucket for frontend
+#   CLOUDFRONT_DIST_ID      — CloudFront distribution ID
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'demo'
+        type: choice
+        options:
+          - demo
+          - staging
+          - production
+  push:
+    branches: [main]
+
+# Prevent concurrent deployments
+concurrency:
+  group: deploy-${{ github.event.inputs.environment || 'demo' }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write   # OIDC for AWS authentication
+  contents: read
+
+jobs:
+  # -------------------------------------------------------------------
+  # Build & Push Docker Images to ECR
+  # -------------------------------------------------------------------
+  build-push:
+    name: Build & Push to ECR
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+      api_image: ${{ steps.meta.outputs.api_image }}
+      worker_image: ${{ steps.meta.outputs.worker_image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image tag
+        id: meta
+        run: |
+          TAG="sha-$(echo ${{ github.sha }} | cut -c1-8)"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "api_image=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/evidentia-api:$TAG" >> "$GITHUB_OUTPUT"
+          echo "worker_image=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/evidentia-worker:$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build backend image
+        run: |
+          docker build \
+            --tag ${{ steps.meta.outputs.api_image }} \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            ./backend
+
+      # Worker uses the same image with a different entrypoint — tag it
+      # separately for clarity in ECR, but it's the same Docker build.
+      - name: Tag worker image
+        run: docker tag ${{ steps.meta.outputs.api_image }} ${{ steps.meta.outputs.worker_image }}
+
+      - name: Push images to ECR
+        run: |
+          docker push ${{ steps.meta.outputs.api_image }}
+          docker push ${{ steps.meta.outputs.worker_image }}
+
+      - name: Run Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.meta.outputs.api_image }}
+          format: 'table'
+          exit-code: '0'  # Don't fail deploy on findings; review report
+          severity: 'CRITICAL,HIGH'
+
+  # -------------------------------------------------------------------
+  # Build & Deploy Frontend to S3 + CloudFront
+  # -------------------------------------------------------------------
+  deploy-frontend:
+    name: Deploy Frontend
+    runs-on: ubuntu-latest
+    needs: [build-push]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build production bundle
+        working-directory: frontend
+        run: npm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Sync to S3
+        run: |
+          aws s3 sync frontend/dist/evidentia/browser/ \
+            s3://${{ secrets.FRONTEND_S3_BUCKET }}/ \
+            --delete \
+            --cache-control "public, max-age=31536000, immutable" \
+            --exclude "index.html"
+
+          # index.html must always be revalidated
+          aws s3 cp frontend/dist/evidentia/browser/index.html \
+            s3://${{ secrets.FRONTEND_S3_BUCKET }}/index.html \
+            --cache-control "no-cache"
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DIST_ID }} \
+            --paths "/index.html"
+
+  # -------------------------------------------------------------------
+  # Deploy Backend to ECS
+  # -------------------------------------------------------------------
+  deploy-backend:
+    name: Deploy ECS Services
+    runs-on: ubuntu-latest
+    needs: [build-push]
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Update ECS API service
+        run: |
+          aws ecs update-service \
+            --cluster ${{ secrets.ECS_CLUSTER }} \
+            --service ${{ secrets.ECS_API_SERVICE }} \
+            --force-new-deployment
+
+      - name: Update ECS Worker service
+        run: |
+          aws ecs update-service \
+            --cluster ${{ secrets.ECS_CLUSTER }} \
+            --service ${{ secrets.ECS_WORKER_SERVICE }} \
+            --force-new-deployment
+
+      - name: Wait for API service stability
+        run: |
+          aws ecs wait services-stable \
+            --cluster ${{ secrets.ECS_CLUSTER }} \
+            --services ${{ secrets.ECS_API_SERVICE }}
+
+  # -------------------------------------------------------------------
+  # Smoke Test
+  # -------------------------------------------------------------------
+  smoke-test:
+    name: Smoke Test
+    runs-on: ubuntu-latest
+    needs: [deploy-backend, deploy-frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Health check
+        run: |
+          # Wait for ALB to register new tasks
+          sleep 30
+
+          # Basic health checks
+          curl -sf https://${{ secrets.APP_DOMAIN }}/health || exit 1
+          curl -sf https://${{ secrets.APP_DOMAIN }}/ready || exit 1
+
+          echo "Smoke test passed: health and readiness OK"

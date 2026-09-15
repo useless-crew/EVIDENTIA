@@ -1,0 +1,40 @@
+# Evidentia Frontend — Docker Build Context Exclusions
+#
+# The Dockerfile runs `npm ci` from scratch inside the builder stage, so
+# the host's node_modules is never needed (and would be the wrong platform
+# anyway). Excluding it dramatically reduces context upload time.
+
+# Version control
+.git
+.gitignore
+
+# Dependencies (installed fresh inside the container)
+node_modules/
+
+# Build output (the Dockerfile builds from source)
+dist/
+out-tsc/
+
+# Angular cache
+.angular/
+
+# Environment / secrets
+.env
+.env.*
+
+# Test artifacts
+coverage/
+__screenshots__/
+
+# IDE / editor
+.idea/
+.vscode/
+*.sublime-workspace
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Documentation not needed at runtime
+*.md
+!README.md
