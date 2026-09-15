@@ -38,14 +38,6 @@
       </div>
 
       <div class="page-actions">
-        <button type="button" class="btn-secondary" (click)="download()" [disabled]="downloading()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="7 10 12 15 17 10"></polyline>
-            <line x1="12" y1="15" x2="12" y2="3"></line>
-          </svg>
-          {{ downloading() ? 'Downloading…' : 'Download' }}
-        </button>
 
         <button type="button" class="btn-primary" (click)="secureExport()" [disabled]="exporting()" title="Export with forensic watermark and provenance">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -81,10 +73,6 @@
       </div>
     </header>
 
-    <div class="form-alert form-alert-error" *ngIf="downloadError()">
-      <span class="alert-mark" aria-hidden="true"></span>
-      {{ downloadError() }}
-    </div>
 
     <div class="form-alert form-alert-error" *ngIf="exportError()">
       <span class="alert-mark" aria-hidden="true"></span>
@@ -245,10 +233,10 @@
             <div class="preview-filename">{{ d.filename }}</div>
             <div class="preview-type">{{ d.mime_type }}</div>
             <p class="preview-note">
-              Inline preview is not available for this binary format. Click Download below to inspect the original evidence file.
+              Inline preview is not available for this binary format. Use Secure Export to download the original evidence file with forensic watermark.
             </p>
-            <button type="button" class="btn-primary btn-sm" (click)="download()">
-              Download File
+            <button type="button" class="btn-primary btn-sm" (click)="secureExport()" [disabled]="exporting()">
+              {{ exporting() ? 'Securing…' : 'Secure Export' }}
             </button>
           </div>
         </div>

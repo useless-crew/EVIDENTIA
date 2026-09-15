@@ -58,28 +58,7 @@ type AuditLog struct {
 	Hash     []byte `json:"hash"`
 }
 
-// One row per Hyperledger Fabric blockchain anchoring attempt for an Evidentia document (System 20). Stores the document SHA-256, event type, Fabric transaction ID (once confirmed), and lifecycle status. Evidence content is NEVER stored here — only cryptographic references. This table is the outbox between PostgreSQL and the Fabric network; it does NOT replace the existing audit_log chain.
-type BlockchainAnchor struct {
-	ID              uuid.UUID `json:"id"`
-	DocumentID      uuid.UUID `json:"document_id"`
-	DocumentVersion int32     `json:"document_version"`
-	EventType       string    `json:"event_type"`
-	// SHA-256 of the document at anchor time — exactly 32 bytes, matching documents.sha256_hash. Stored redundantly here so the anchor record is self-contained and survives document record evolution.
-	DocumentHash []byte `json:"document_hash"`
-	// PENDING: anchor requested, not yet submitted. CONFIRMED: Fabric tx committed and validated. FAILED: terminal failure after retries exhausted.
-	Status string `json:"status"`
-	// The real Hyperledger Fabric transaction ID returned by the peer after the transaction is committed to the ledger. NULL until CONFIRMED. Never a fabricated/local placeholder.
-	FabricTxID       *string            `json:"fabric_tx_id"`
-	FabricChannel    *string            `json:"fabric_channel"`
-	FabricChaincode  *string            `json:"fabric_chaincode"`
-	Organization     *string            `json:"organization"`
-	LastError        *string            `json:"last_error"`
-	RetryCount       int32              `json:"retry_count"`
-	Metadata         json.RawMessage    `json:"metadata"`
-	CreatedAt        time.Time          `json:"created_at"`
-	ConfirmedAt      pgtype.Timestamptz `json:"confirmed_at"`
-	UpdatedAt        time.Time          `json:"updated_at"`
-}
+
 
 // One row per audit-chain verification run (System 11) — the durable, evidentiary record of "was the chain intact as of this check", independent of whatever transport (SSE, polling) a client used to observe it while running. Never mutates audit_log; read-only against it. id is the verification_id every System 11 API/SSE route is keyed by. requested_by_role is captured verbatim at request time, mirroring audit_log.role's own rationale (a user's roles can change after the fact, but this record should reflect what was true when requested).
 type AuditVerification struct {

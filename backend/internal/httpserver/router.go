@@ -215,6 +215,13 @@ func NewRouter(a *app.App) *gin.Engine {
 	adminGroup.GET("/jobs", authMW, middleware.RequireAdmin(), adminhandlers.Jobs(a.JobClient))
 	adminGroup.GET("/blockchain", authMW, middleware.RequireAdmin(), adminhandlers.Blockchain(a.DB.Pool(), a.BlockchainAnchorService))
 
+	// Forensic watermark verification (System 22): registered directly on
+	// the root router (not adminGroup) so the adminGroup's jsonBodyLimit
+	// middleware does NOT apply — evidence files can be up to 50 MB.
+	// RequireAdmin() still gates access; the explicit BodyLimit(50 MB)
+	// replaces the group-level limit for this route only.
+	r.POST("/api/v1/admin/exports/verify-watermark", authMW, middleware.RequireAdmin(), middleware.BodyLimit(50<<20), documenthandlers.VerifyWatermark(a.ExportService))
+
 
 	// Self-profile: any authenticated user, regardless of role, may view
 	// their own record — see handlers/user/profile.go's doc comment for

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -113,16 +112,25 @@ func (s *ExportService) RequestExport(ctx context.Context, user auth.Authenticat
 		return nil, utils.ErrServiceUnavailable("The requested document is temporarily unavailable")
 	}
 
-	// 4. Apply Watermark via pipeline
-	payload := fmt.Sprintf("Evidentia Export: %s | User: %s | Date: %s | IP: %s", exportID, user.ID.String(), time.Now().UTC().Format(time.RFC3339), clientIP)
-	wmResult, err := s.watermark.ApplyWatermark(ctx, content, doc.MimeType, payload)
+	// 4. Apply Watermark via pipeline — structured payload so every field
+	// is individually recoverable by the admin verification endpoint.
+	wmPayload := WatermarkPayload{
+		Version:     1,
+		ExportID:    exportID,
+		DocumentID:  doc.ID.String(),
+		UserID:      user.ID.String(),
+		ExportedAt:  time.Now().UTC().Format(time.RFC3339),
+		ClientIP:    clientIP,
+		Fingerprint: hex.EncodeToString(fingerprintBytes),
+	}
+	wmResult, err := s.watermark.ApplyWatermark(ctx, content, doc.MimeType, wmPayload)
 	if err != nil {
 		content.Close()
 		return nil, utils.ErrInternal(fmt.Errorf("apply watermark: %w", err))
 	}
 
 	// 5. Stream to secondary storage bucket while computing hash of the export payload
-	exportObjectKey := fmt.Sprintf("exports/%s/%s", doc.CaseID, exportUUID)
+	exportObjectKey := fmt.Sprintf("exports/%s/%s", doc.CaseID, exportID)
 	
 	hasher := hash.New()
 	teed := io.TeeReader(wmResult.Stream, hasher)
@@ -255,7 +263,7 @@ func (s *ExportService) DownloadEvidenceExport(ctx context.Context, user auth.Au
 		return nil, utils.ErrBadRequest("Export is not ready for download")
 	}
 
-	exportObjectKey := fmt.Sprintf("exports/%s/%s", doc.CaseID, export.ID)
+	exportObjectKey := fmt.Sprintf("exports/%s/%s", doc.CaseID, export.ExportID)
 	content, err := s.storage.Get(ctx, exportObjectKey)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "export object missing", slog.String("export_id", exportID))
@@ -279,5 +287,47 @@ func (s *ExportService) DownloadEvidenceExport(ctx context.Context, user auth.Au
 		Export:   export,
 		Document: doc,
 		Content:  content,
+	}, nil
+}
+
+// WatermarkVerifyResult is returned by VerifyWatermark on success.
+type WatermarkVerifyResult struct {
+	Found       bool             `json:"found"`
+	Payload     *WatermarkPayload `json:"payload,omitempty"`
+	Message     string           `json:"message"`
+}
+
+// VerifyWatermark reads fileData, extracts the embedded AES-256-GCM
+// watermark block, decrypts it, and returns the structured forensic metadata.
+// It is admin-only: any non-admin caller receives a 403 from the router
+// before this method is reached; this call records the verification attempt
+// in the audit log regardless of the extraction outcome.
+func (s *ExportService) VerifyWatermark(ctx context.Context, user auth.AuthenticatedUser, fileData []byte) (*WatermarkVerifyResult, error) {
+	payload, err := s.watermark.ExtractWatermark(fileData)
+
+	// Audit every verification attempt — found or not — so admins can see
+	// who is checking files for watermarks and when.
+	s.recorder.Record(ctx, audit.Event{
+		Action:       "WATERMARK_VERIFIED",
+		ResourceType: "evidence_export",
+		UserID:       &user.ID,
+		Role:         effectiveCaseRole(user),
+		Metadata: map[string]any{
+			"found":    err == nil,
+			"file_size": len(fileData),
+		},
+	})
+
+	if err != nil {
+		return &WatermarkVerifyResult{
+			Found:   false,
+			Message: err.Error(),
+		}, nil
+	}
+
+	return &WatermarkVerifyResult{
+		Found:   true,
+		Payload: payload,
+		Message: "Forensic watermark verified successfully.",
 	}, nil
 }

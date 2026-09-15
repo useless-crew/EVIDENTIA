@@ -368,7 +368,6 @@ export class DocumentViewerComponent implements OnInit, OnDestroy {
   /** Initiates the secure forensic export pipeline and downloads the result. */
   secureExport() {
     if (this.exporting()) return;
-    if (!confirm('Are you sure you want to securely export this evidence? The downloaded file will contain an invisible forensic watermark tracking your identity and IP address. This action will be audited and anchored to the blockchain.')) return;
 
     this.exporting.set(true);
     this.exportError.set(null);

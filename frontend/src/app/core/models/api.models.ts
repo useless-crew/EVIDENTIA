@@ -286,6 +286,24 @@ export interface EvidenceExportSummary {
   export_fingerprint: string;
 }
 
+/** Decrypted forensic metadata extracted from an invisibly-watermarked export file. */
+export interface WatermarkPayload {
+  v: number;        // watermark version
+  eid: string;      // export_id (e.g. EXP-abc123-1234567890)
+  did: string;      // document UUID
+  uid: string;      // user UUID who performed the export
+  at: string;       // ISO-8601 timestamp of export
+  ip: string;       // client IP at time of export
+  fp: string;       // SHA-256 fingerprint hex of the exported bytes
+}
+
+/** Response from POST /api/v1/admin/exports/verify-watermark */
+export interface WatermarkVerifyResult {
+  found: boolean;
+  payload?: WatermarkPayload;
+  message: string;
+}
+
 /** document_shares.permission — VIEW (read + download + certificate
  * read) or VERIFY (VIEW's grants plus document:verify). Never implies
  * redact/reshare/delete. */

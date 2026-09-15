@@ -6,6 +6,7 @@ import { AdminService } from '../../core/services/admin.service';
 import { AuthService } from '../../core/services/auth.service';
 import { ApiError } from '../../core/services/api-client.service';
 import { EventStreamService } from '../../core/services/event-stream.service';
+import { DocumentService } from '../../core/services/document.service';
 import {
   AdminBlockchainInfo,
   AdminDashboardStats,
@@ -15,6 +16,7 @@ import {
   AdminUserListResult,
   Role,
   UserStatus,
+  WatermarkVerifyResult,
 } from '../../core/models/api.models';
 import { CreateUserModalComponent } from '../../components/create-user-modal/create-user-modal.component';
 import { ResetPasswordModalComponent } from '../../components/reset-password-modal/reset-password-modal.component';
@@ -41,6 +43,7 @@ export class AdminComponent implements OnInit, OnDestroy {
   private readonly adminService = inject(AdminService);
   private readonly auth = inject(AuthService);
   private readonly eventStream = inject(EventStreamService);
+  private readonly documentService = inject(DocumentService);
   private stopEventStream: (() => void) | null = null;
 
   readonly activeTab = signal<AdminTab>('overview');
@@ -255,5 +258,37 @@ export class AdminComponent implements OnInit, OnDestroy {
 
   primaryRole(user: AdminUser): string {
     return user.roles[0] ?? '—';
+  }
+
+  // ---- Watermark Verifier (Tools Tab) ----
+  readonly wmFile = signal<File | null>(null);
+  readonly wmVerifying = signal(false);
+  readonly wmResult = signal<WatermarkVerifyResult | null>(null);
+  readonly wmError = signal<string | null>(null);
+
+  onWmFileChange(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0] ?? null;
+    this.wmFile.set(file);
+    this.wmResult.set(null);
+    this.wmError.set(null);
+  }
+
+  verifyWatermark(): void {
+    const file = this.wmFile();
+    if (!file) return;
+    this.wmVerifying.set(true);
+    this.wmResult.set(null);
+    this.wmError.set(null);
+    this.documentService.verifyWatermark(file).subscribe({
+      next: (result) => {
+        this.wmVerifying.set(false);
+        this.wmResult.set(result);
+      },
+      error: (err: ApiError) => {
+        this.wmVerifying.set(false);
+        this.wmError.set(err.message || 'Failed to verify watermark.');
+      },
+    });
   }
 }

@@ -1,6 +1,7 @@
 package document
 
 import (
+	"io"
 	"mime"
 	"net/http"
 
@@ -94,5 +95,56 @@ func DownloadExport(svc *service.ExportService) gin.HandlerFunc {
 
 		// Serve the export bytes
 		c.DataFromReader(http.StatusOK, -1, result.Document.MimeType, result.Content, nil)
+	}
+}
+
+// VerifyWatermark handles POST /api/v1/admin/exports/verify-watermark
+//
+// @Summary      Verify forensic watermark in an exported evidence file
+// @Description  Extracts and decrypts the invisible AES-256-GCM watermark embedded by Secure Export. Admin only.
+// @Tags         admin,exports
+// @Accept       multipart/form-data
+// @Produce      json
+// @Security     BearerAuth
+// @Param        file  formData  file  true  "Exported evidence file to inspect"
+// @Success      200  {object}  response.Envelope{data=service.WatermarkVerifyResult}
+// @Failure      400  {object}  response.Envelope
+// @Failure      401  {object}  response.Envelope
+// @Failure      403  {object}  response.Envelope
+// @Router       /api/v1/admin/exports/verify-watermark [post]
+func VerifyWatermark(svc *service.ExportService) gin.HandlerFunc {
+	const maxFileSize = 50 << 20 // 50 MB
+	return func(c *gin.Context) {
+		user, ok := authpkg.CurrentUser(c)
+		if !ok {
+			response.Error(c, http.StatusUnauthorized, utils.CodeUnauthorized, "Authentication required")
+			return
+		}
+
+		if err := c.Request.ParseMultipartForm(maxFileSize); err != nil {
+			response.Error(c, http.StatusBadRequest, utils.CodeBadRequest, "Could not parse multipart form")
+			return
+		}
+
+		f, _, err := c.Request.FormFile("file")
+		if err != nil {
+			response.Error(c, http.StatusBadRequest, utils.CodeBadRequest, "A file field named 'file' is required")
+			return
+		}
+		defer f.Close()
+
+		data, err := io.ReadAll(io.LimitReader(f, maxFileSize))
+		if err != nil {
+			response.Error(c, http.StatusInternalServerError, utils.CodeInternal, "An unexpected error occurred")
+			return
+		}
+
+		result, err := svc.VerifyWatermark(c.Request.Context(), user, data)
+		if err != nil {
+			writeServiceError(c, err)
+			return
+		}
+
+		response.Success(c, http.StatusOK, result)
 	}
 }

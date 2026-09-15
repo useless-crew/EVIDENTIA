@@ -10,6 +10,7 @@ import {
   RedactionSummary,
   UploadDocumentResponse,
   VerificationResult,
+  WatermarkVerifyResult,
 } from '../models/api.models';
 import { ApiClientService, UploadEvent } from './api-client.service';
 
@@ -78,6 +79,19 @@ export class DocumentService {
         filename: this.filenameFromContentDisposition(res.headers.get('Content-Disposition')) ?? `export-${exportId}`,
       }))
     );
+  }
+
+  /**
+   * POST /api/v1/admin/exports/verify-watermark — admin only.
+   * Uploads the file as multipart/form-data and returns the decrypted
+   * forensic watermark payload if one is found, or found=false with a
+   * message if none exists. The AES-256-GCM decryption is performed
+   * server-side; only the server's own signing key can verify.
+   */
+  verifyWatermark(file: File): Observable<WatermarkVerifyResult> {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    return this.api.postMultipartDirect<WatermarkVerifyResult>('/admin/exports/verify-watermark', form);
   }
 
   /** POST /documents/:id/verify — recomputes the SHA-256 of the actual
