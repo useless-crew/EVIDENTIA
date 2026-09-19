@@ -1,34 +1,21 @@
 # Evidentia — AWS Deployment Pipeline
 #
 # Builds Docker images, pushes to ECR with immutable SHA-based tags,
-# and deploys to ECS Fargate. Frontend is deployed to S3 + CloudFront.
+# runs database migrations, and deploys to ECS Fargate.
+# Frontend is built and deployed to S3 + CloudFront.
 #
-# Triggered on push to main (after CI passes) or manual dispatch.
-# Production deployments require manual approval via environment protection.
-#
-# Prerequisites:
-#   1. ECR repositories created (via Terraform)
-#   2. ECS services running (via Terraform)
-#   3. GitHub repository secrets configured (see below)
-#
-# Required GitHub Secrets:
-#   AWS_ACCOUNT_ID          — AWS account ID
-#   AWS_REGION              — e.g. ap-south-1
-#   AWS_ROLE_ARN            — IAM role ARN for GitHub Actions OIDC
-#   ECS_CLUSTER             — ECS cluster name
-#   ECS_API_SERVICE         — ECS API service name
-#   ECS_WORKER_SERVICE      — ECS worker service name
-#   FRONTEND_S3_BUCKET      — S3 bucket for frontend
-#   CLOUDFRONT_DIST_ID      — CloudFront distribution ID
+# Triggered on push to main (after CI passes) or manual workflow_dispatch.
+# Production deployments require manual approval via GitHub Environment protection rules.
+
 name: Deploy
 
 on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Target environment'
+        description: 'Target deployment environment'
         required: true
-        default: 'demo'
+        default: 'production'
         type: choice
         options:
           - demo
@@ -37,9 +24,8 @@ on:
   push:
     branches: [main]
 
-# Prevent concurrent deployments
 concurrency:
-  group: deploy-${{ github.event.inputs.environment || 'demo' }}
+  group: deploy-${{ github.event.inputs.environment || 'production' }}
   cancel-in-progress: false
 
 permissions:
@@ -48,7 +34,7 @@ permissions:
 
 jobs:
   # -------------------------------------------------------------------
-  # Build & Push Docker Images to ECR
+  # Build & Push Docker Images to Amazon ECR
   # -------------------------------------------------------------------
   build-push:
     name: Build & Push to ECR
@@ -60,7 +46,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Compute image tag
+      - name: Compute immutable image tag
         id: meta
         run: |
           TAG="sha-$(echo ${{ github.sha }} | cut -c1-8)"
@@ -74,21 +60,26 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Login to ECR
+      - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build backend image
+      - name: Build and Tag API image
         run: |
           docker build \
+            --file backend/Dockerfile.api \
             --tag ${{ steps.meta.outputs.api_image }} \
             --label "org.opencontainers.image.revision=${{ github.sha }}" \
             --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
             ./backend
 
-      # Worker uses the same image with a different entrypoint — tag it
-      # separately for clarity in ECR, but it's the same Docker build.
-      - name: Tag worker image
-        run: docker tag ${{ steps.meta.outputs.api_image }} ${{ steps.meta.outputs.worker_image }}
+      - name: Build and Tag Worker image
+        run: |
+          docker build \
+            --file backend/Dockerfile.worker \
+            --tag ${{ steps.meta.outputs.worker_image }} \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            ./backend
 
       - name: Push images to ECR
         run: |
@@ -100,7 +91,7 @@ jobs:
         with:
           image-ref: ${{ steps.meta.outputs.api_image }}
           format: 'table'
-          exit-code: '0'  # Don't fail deploy on findings; review report
+          exit-code: '0'
           severity: 'CRITICAL,HIGH'
 
   # -------------------------------------------------------------------
@@ -110,6 +101,7 @@ jobs:
     name: Deploy Frontend
     runs-on: ubuntu-latest
     needs: [build-push]
+    environment: production
     steps:
       - uses: actions/checkout@v4
 
@@ -133,7 +125,7 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Sync to S3
+      - name: Sync static files to S3
         run: |
           aws s3 sync frontend/dist/evidentia/browser/ \
             s3://${{ secrets.FRONTEND_S3_BUCKET }}/ \
@@ -141,24 +133,25 @@ jobs:
             --cache-control "public, max-age=31536000, immutable" \
             --exclude "index.html"
 
-          # index.html must always be revalidated
+          # HTML must never be cached so updates propagate immediately
           aws s3 cp frontend/dist/evidentia/browser/index.html \
             s3://${{ secrets.FRONTEND_S3_BUCKET }}/index.html \
-            --cache-control "no-cache"
+            --cache-control "no-cache, no-store, must-revalidate"
 
       - name: Invalidate CloudFront cache
         run: |
           aws cloudfront create-invalidation \
             --distribution-id ${{ secrets.CLOUDFRONT_DIST_ID }} \
-            --paths "/index.html"
+            --paths "/*"
 
   # -------------------------------------------------------------------
-  # Deploy Backend to ECS
+  # Deploy Backend to ECS Fargate
   # -------------------------------------------------------------------
   deploy-backend:
     name: Deploy ECS Services
     runs-on: ubuntu-latest
     needs: [build-push]
+    environment: production
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -187,7 +180,7 @@ jobs:
             --services ${{ secrets.ECS_API_SERVICE }}
 
   # -------------------------------------------------------------------
-  # Smoke Test
+  # Smoke Test & Verification
   # -------------------------------------------------------------------
   smoke-test:
     name: Smoke Test
@@ -196,13 +189,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Health check
+      - name: Run Smoke Tests
         run: |
-          # Wait for ALB to register new tasks
-          sleep 30
+          echo "Waiting 20 seconds for tasks to warm up..."
+          sleep 20
 
-          # Basic health checks
-          curl -sf https://${{ secrets.APP_DOMAIN }}/health || exit 1
-          curl -sf https://${{ secrets.APP_DOMAIN }}/ready || exit 1
+          curl -sf https://${{ secrets.API_DOMAIN }}/health || exit 1
+          curl -sf https://${{ secrets.API_DOMAIN }}/ready || exit 1
 
-          echo "Smoke test passed: health and readiness OK"
+          echo "Smoke test passed: /health and /ready returned HTTP 200"

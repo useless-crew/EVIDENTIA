@@ -1,0 +1,43 @@
+# Evidentia API — Production Dockerfile
+#
+# Multi-stage build: compile static API binary in Go toolchain,
+# then run in a minimal, non-root Alpine runtime image.
+
+# ---- Build stage ----
+FROM golang:1.25-alpine AS builder
+
+WORKDIR /src
+
+# Cache dependencies
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source
+COPY . .
+
+# Build static server & migrator binaries
+RUN CGO_ENABLED=0 GOOS=linux go build -tags swaggerui -trimpath -ldflags="-s -w" -o /out/evidentia ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate
+
+# ---- Runtime stage ----
+FROM alpine:3.19 AS runtime
+
+RUN apk add --no-cache ca-certificates tzdata wget && \
+    addgroup -g 10001 -S evidentia && \
+    adduser -u 10001 -S evidentia -G evidentia
+
+WORKDIR /app
+
+COPY --from=builder --chown=evidentia:evidentia /out/evidentia /app/evidentia
+COPY --from=builder --chown=evidentia:evidentia /out/migrate /app/migrate
+COPY --from=builder --chown=evidentia:evidentia /src/db/migrations /app/db/migrations
+COPY --from=builder --chown=evidentia:evidentia /src/db/seed /app/db/seed
+
+USER evidentia:evidentia
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget -qO- http://127.0.0.1:8080/health || exit 1
+
+ENTRYPOINT ["/app/evidentia"]

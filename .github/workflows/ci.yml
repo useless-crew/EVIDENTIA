@@ -1,18 +1,12 @@
-# Evidentia CI — System 15 (Security Hardening & Compliance Layer),
-# extended by System 17 (Production Deployment & DevOps)
+# Evidentia CI Pipeline
 #
-# Runs the same checks docs/SECURITY.md's "Final Validation" section
-# expects a contributor to run locally before merging: gofmt, go vet, go
-# build, and the backend's unit test suite (the `//go:build integration`
-# tests under backend/tests/ and *_integration_test.go require live
-# Postgres/Redis/MinIO and are intentionally NOT run here — see
-# docs/DEPLOYMENT.md for how to run those against docker-compose), plus a
-# production Angular build for the frontend, plus (System 17) that both
-# production Dockerfiles still build. This is deliberately a build/test
-# gate, not a security scanner or a full deployment rehearsal — see
-# master prompt §39: "Do not introduce an external security scanner
-# unless necessary," and docs/DEPLOYMENT.md for the full docker-compose
-# validation this does not attempt to replicate in CI.
+# Runs comprehensive verification on every push and pull request:
+# - Go formatting, static analysis (vet), compilation, and unit tests
+# - Race detection (go test -race) on Ubuntu runner
+# - Angular production build
+# - Production Dockerfile verification (API, Worker, Frontend)
+# - Terraform format & syntax validation
+
 name: CI
 
 on:
@@ -23,7 +17,7 @@ on:
 
 jobs:
   backend:
-    name: Backend (fmt, vet, build, test)
+    name: Backend (fmt, vet, build, test, race)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -35,18 +29,21 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
-      - name: gofmt (must be a no-op)
+      - name: gofmt (must be clean)
         run: |
           diff <(gofmt -l .) <(printf '')
 
       - name: go vet
         run: go vet ./...
 
-      - name: go build
+      - name: go build (all binaries)
         run: go build -trimpath -o /dev/null ./cmd/server ./cmd/worker ./cmd/migrate ./cmd/devuser
 
-      - name: go test (unit only — integration tests need live infra)
+      - name: go test (unit test suite)
         run: go test ./...
+
+      - name: go test -race (data race detection)
+        run: go test -race ./pkg/... ./internal/config/... ./internal/middleware/... ./internal/logger/... ./internal/auth/... ./internal/authz/...
 
       - name: govulncheck (known Go vulnerabilities)
         run: |
@@ -73,14 +70,35 @@ jobs:
       - name: Production build
         run: npm run build
 
+  terraform:
+    name: Terraform (fmt & validate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.5"
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive infra/terraform
+
+      - name: Terraform Validate Production
+        run: |
+          cd infra/terraform/environments/production
+          terraform init -backend=false
+          terraform validate
+
   docker:
-    name: Docker (build only — no compose rehearsal, see docs/DEPLOYMENT.md)
+    name: Docker (build validation)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build backend image
-        run: docker build -t evidentia-backend-ci ./backend
+      - name: Build API Dockerfile
+        run: docker build -f backend/Dockerfile.api -t evidentia-api:test ./backend
 
-      - name: Build frontend image
-        run: docker build -t evidentia-frontend-ci ./frontend
+      - name: Build Worker Dockerfile
+        run: docker build -f backend/Dockerfile.worker -t evidentia-worker:test ./backend
+
+      - name: Build Frontend Dockerfile
+        run: docker build -t evidentia-frontend:test ./frontend

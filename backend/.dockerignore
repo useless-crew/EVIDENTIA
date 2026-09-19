@@ -1,26 +1,45 @@
 # Evidentia Backend — Docker Build Context Exclusions
 #
-# Keeps secrets, test fixtures, development tools, and unnecessary files
-# out of the Docker build context — both for security (no credential/key
-# leakage into image layers) and for build speed (smaller context upload).
+# Keeps secrets, credentials, test fixtures, development tools, and unnecessary files
+# out of the Docker build context.
 
 # Version control
 .git
 .gitignore
+.github
 
-# Environment / secrets — NEVER in an image layer
+# Environment & Secrets — NEVER baked into an image layer
 .env
 .env.*
 !.env.example
 *.pem
 *.key
 *.crt
+*.pfx
+*.p12
 certs/
 secrets/
 
-# Build artifacts (the Dockerfile builds from source, not from host binaries)
-bin/
+# Local database files & storage
+*.db
+*.sqlite
+*.sqlite3
+data/
+minio_data/
+postgres_data/
+redis_data/
+
+# Logs & Temporary evidence
+logs/
+*.log
 tmp/
+temp/
+evidence/
+temporary_evidence/
+
+# Build artifacts & Dependencies
+bin/
+node_modules/
 
 # Test fixtures and test infrastructure
 testdata/
@@ -34,10 +53,11 @@ docs/
 *.md
 !README.md
 
-# IDE / editor
+# IDE & Editor artifacts
 .idea/
 .vscode/
 *.sublime-workspace
+*.swp
 
 # OS artifacts
 .DS_Store
@@ -45,3 +65,4 @@ Thumbs.db
 
 # Backups
 backups/
+*.bak

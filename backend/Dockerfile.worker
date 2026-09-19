@@ -1,0 +1,37 @@
+# Evidentia Background Worker — Production Dockerfile
+#
+# Multi-stage build: compile static worker binary in Go toolchain,
+# then run in a minimal, non-root Alpine runtime image.
+
+# ---- Build stage ----
+FROM golang:1.25-alpine AS builder
+
+WORKDIR /src
+
+# Cache dependencies
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source
+COPY . .
+
+# Build static worker binary
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/worker ./cmd/worker
+
+# ---- Runtime stage ----
+FROM alpine:3.19 AS runtime
+
+RUN apk add --no-cache ca-certificates tzdata && \
+    addgroup -g 10001 -S evidentia && \
+    adduser -u 10001 -S evidentia -G evidentia
+
+WORKDIR /app
+
+COPY --from=builder --chown=evidentia:evidentia /out/worker /app/worker
+
+USER evidentia:evidentia
+
+# The worker does not listen on any HTTP port. It only connects outbound to
+# Redis (Asynq queue & Pub/Sub), PostgreSQL, MinIO, and Fabric peer.
+
+ENTRYPOINT ["/app/worker"]

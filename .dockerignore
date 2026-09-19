@@ -1,0 +1,48 @@
+# Evidentia — Root Docker Build Context Exclusions
+
+# Version control
+.git
+.gitignore
+.github
+
+# Environment & Secrets — NEVER in an image layer
+.env
+.env.*
+!.env.example
+!.env.production.example
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+certs/
+secrets/
+
+# Node & Frontend build artifacts
+node_modules/
+dist/
+.angular/
+
+# Local database files & persistent volumes
+*.db
+*.sqlite
+*.sqlite3
+postgres_data/
+minio_data/
+redis_data/
+
+# Logs & Temporary evidence
+logs/
+*.log
+tmp/
+temp/
+temporary_evidence/
+
+# Fabric crypto material & genesis blocks
+fabric/network/crypto-config/
+*.block
+*.tx
+
+# OS artifacts
+.DS_Store
+Thumbs.db

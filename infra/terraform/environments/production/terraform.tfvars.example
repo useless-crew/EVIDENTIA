@@ -1,0 +1,47 @@
+# Evidentia — Production Terraform Variables Example
+#
+# Usage:
+#   cp terraform.tfvars.example terraform.tfvars
+#   # Edit terraform.tfvars with your AWS account-specific IDs and ARNs.
+#   # NEVER commit terraform.tfvars to version control.
+
+aws_region     = "ap-south-1"
+aws_account_id = "123456789012"
+environment    = "production"
+
+vpc_cidr           = "10.0.0.0/16"
+availability_zones = ["ap-south-1a", "ap-south-1b", "ap-south-1c"]
+
+# ---- Domains & Certificates ----
+domain_name         = "evidentia.example.com"
+frontend_subdomain  = "app"
+api_subdomain       = "api"
+
+# ACM in ap-south-1 for the Application Load Balancer
+alb_acm_certificate_arn = "arn:aws:acm:ap-south-1:123456789012:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+# ACM in us-east-1 for CloudFront CDN
+cloudfront_acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy"
+
+# ---- Container Images ----
+api_image    = "123456789012.dkr.ecr.ap-south-1.amazonaws.com/evidentia-api:sha-1a2b3c4d"
+worker_image = "123456789012.dkr.ecr.ap-south-1.amazonaws.com/evidentia-worker:sha-1a2b3c4d"
+
+# ---- Passwords (for infrastructure provisioning) ----
+db_password         = "ChangeThisToAStrongRandomDBPassword123!"
+redis_auth_token    = "ChangeThisToAStrongRandomRedisToken123!"
+minio_root_password = "ChangeThisToAStrongRandomMinIOPassword123!"
+
+# ---- AWS Secrets Manager ARNs ----
+jwt_secret_arn              = "arn:aws:secretsmanager:ap-south-1:123456789012:secret:evidentia/prod/jwt-secret-xxxxxx"
+db_app_password_arn         = "arn:aws:secretsmanager:ap-south-1:123456789012:secret:evidentia/prod/db-password-xxxxxx"
+redis_auth_token_arn        = "arn:aws:secretsmanager:ap-south-1:123456789012:secret:evidentia/prod/redis-auth-xxxxxx"
+minio_secret_key_arn        = "arn:aws:secretsmanager:ap-south-1:123456789012:secret:evidentia/prod/minio-secret-xxxxxx"
+certificate_signing_key_arn = "arn:aws:secretsmanager:ap-south-1:123456789012:secret:evidentia/prod/cert-key-xxxxxx"
+
+# ---- Sizing & Scale ----
+rds_instance_class    = "db.t3.medium"
+rds_allocated_storage = 100
+redis_node_type       = "cache.t3.medium"
+api_desired_count     = 2
+worker_desired_count  = 2
